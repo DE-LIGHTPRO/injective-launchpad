@@ -333,3 +333,59 @@ button.go.ghost:hover:not(:disabled) { border-color: var(--accent-deep); }
     scroll-behavior: auto !important;
   }
 }
+
+/* ---------------------------------------------------------------------------
+   Touch targets, WCAG 2.5.8 AA (24 x 24 CSS px)
+
+   Measured at 375px on a rendered page: the segmented buttons are 37px tall and
+   fine, but two standalone links were not.
+
+       ← launches       65 x 14
+       address link    100 x 15
+
+   Both are standalone navigation, not words inside a sentence, so the inline
+   exception does not apply to them.
+
+   Sized under `pointer: coarse` ONLY, so desktop density is untouched: a 14px
+   text link is comfortable with a mouse and the rule is about thumbs. The area
+   comes from a pseudo-element rather than from padding or font-size, so the
+   glyph does not grow and nothing reflows around it — growing the text would
+   change the layout on every phone to fix a hit area nobody can see.
+
+   `position: relative` on the anchor is what the ::after is positioned against.
+   Without it the pseudo-element would resolve against some ancestor and the
+   expanded area would land somewhere other than on the link.
+
+   NOTE FOR MEASURING THIS LATER: `getBoundingClientRect()` on the anchor still
+   reports 14px. The hit area is the pseudo-element, so a measurement that reads
+   only the element's own box will report this as still broken. That exact
+   mistake cost a round of work in a sibling project.
+   --------------------------------------------------------------------------- */
+@media (pointer: coarse) {
+  /* Standalone links: breadcrumbs, and the explorer links in a metric row. */
+  .note > a,
+  .metric-row a,
+  .v > a {
+    position: relative;
+    /* Keeps short links wide enough too: "← launches" is 65px, but a two-glyph
+       link would not be. */
+    display: inline-block;
+    min-width: 24px;
+  }
+
+  .note > a::after,
+  .metric-row a::after,
+  .v > a::after {
+    content: '';
+    position: absolute;
+    /* Centred on the text and at least 24px tall, whatever the font size. */
+    top: 50%;
+    left: 0;
+    right: 0;
+    height: 24px;
+    transform: translateY(-50%);
+    /* Invisible, and must not intercept anything else: it sits above the text
+       only within the link's own width. */
+    pointer-events: auto;
+  }
+}
