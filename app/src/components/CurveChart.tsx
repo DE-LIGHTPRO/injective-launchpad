@@ -1,13 +1,26 @@
 'use client';
 
-import { curvePoints, graduationProgress, type CurveConfig, type CurveState } from '@/lib/curve';
+import { curvePoints, chartMarker, type CurveConfig, type CurveState } from '@/lib/curve';
 
 const ONE = 1_000_000_000_000_000_000n;
 
 /**
  * Price against INJ raised, drawn straight from the curve config so the shape
- * shown is the shape the contract will actually charge. The marker is where
- * this launch currently sits.
+ * shown is the shape the contract will actually charge. The marker is where this
+ * launch currently sits.
+ *
+ * THE X AXIS RUNS TO `maxCollectable`, NOT TO THE GRADUATION TARGET, and the
+ * marker used to ignore the difference. It was positioned at
+ * `maxX * graduationProgress`, and `graduationProgress` divides by
+ * `graduationTarget` (85) while `maxX` is the curve ceiling (87.91). So the marker
+ * sat 3.4% further right than the launch actually was, at every point along the
+ * curve, and at graduation it landed on the ceiling rather than on the target it
+ * was marking: a launch drawn as past the point it had just graduated at.
+ *
+ * It is now placed from `injCollected` directly, against the same axis the line is
+ * drawn on, and its height comes from `spotPrice` for the real state rather than
+ * from indexing the sampled array. Both are the actual values instead of a
+ * proportion of something else, which is why they cannot drift apart again.
  */
 export function CurveChart({
   config,
@@ -39,30 +52,66 @@ export function CurveChart({
   const line = points.map((p, i) => `${i === 0 ? 'M' : 'L'}${x(p.injRaised).toFixed(2)},${y(p.price).toFixed(2)}`).join(' ');
   const area = `${line} L${x(maxX).toFixed(2)},${H - pad.b} L${x(0).toFixed(2)},${H - pad.b} Z`;
 
-  const progress = graduationProgress(config, state);
-  const hereX = x(maxX * progress);
+  // Both from `chartMarker`, which is where the positioning lives so that it can be
+  // tested by behaviour rather than by reading this file.
+  const { injX, price: herePrice } = chartMarker(config, state, maxX, ONE);
+  const hereX = x(injX);
+  // Graduation happens before the axis ends, so it needs its own mark: without it
+  // the chart shows a curve running past a target it never explains.
+  const targetInj = Number(config.graduationTarget) / Number(ONE);
+  const targetX = x(Math.min(targetInj, maxX));
 
   return (
     <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} role="img" aria-label="Bonding curve">
       <defs>
+        {/*
+            `stopColor` cannot take a var() through a presentation attribute, so the
+            gradient carries the accent through `style` like the strokes do.
+          */}
         <linearGradient id="fill" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#00d6a4" stopOpacity="0.28" />
-          <stop offset="100%" stopColor="#00d6a4" stopOpacity="0" />
+          <stop offset="0%" style={{ stopColor: 'var(--accent)', stopOpacity: 0.28 }} />
+          <stop offset="100%" style={{ stopColor: 'var(--accent)', stopOpacity: 0 }} />
         </linearGradient>
       </defs>
 
-      <line x1={pad.l} y1={H - pad.b} x2={W - pad.r} y2={H - pad.b} stroke="#222838" strokeWidth="1" />
+      <line
+        x1={pad.l}
+        y1={H - pad.b}
+        x2={W - pad.r}
+        y2={H - pad.b}
+        style={{ stroke: 'var(--line-strong)' }}
+        strokeWidth="1"
+      />
       <path d={area} fill="url(#fill)" />
-      <path d={line} fill="none" stroke="#00d6a4" strokeWidth="2" strokeLinejoin="round" />
+      <path d={line} fill="none" style={{ stroke: 'var(--accent)' }} strokeWidth="2" strokeLinejoin="round" />
 
-      {/* where this launch currently is */}
-      <line x1={hereX} y1={pad.t} x2={hereX} y2={H - pad.b} stroke="#f0a44a" strokeWidth="1" strokeDasharray="3 3" />
-      <circle cx={hereX} cy={y(points[Math.round(progress * (points.length - 1))]?.price ?? 0)} r="4" fill="#f0a44a" />
+      {/* Where graduation happens, which is before the axis ends. */}
+      <line
+        x1={targetX}
+        y1={pad.t}
+        x2={targetX}
+        y2={H - pad.b}
+        style={{ stroke: 'var(--line-strong)' }}
+        strokeWidth="1"
+        strokeDasharray="2 4"
+      />
 
-      <text x={pad.l} y={H - 5} fill="#7d879e" fontSize="10" fontFamily="ui-monospace, Menlo, monospace">
+      {/* Where this launch currently is. */}
+      <line
+        x1={hereX}
+        y1={pad.t}
+        x2={hereX}
+        y2={H - pad.b}
+        style={{ stroke: 'var(--warn)' }}
+        strokeWidth="1"
+        strokeDasharray="3 3"
+      />
+      <circle cx={hereX} cy={y(herePrice)} r="4" style={{ fill: 'var(--warn)' }} />
+
+      <text x={pad.l} y={H - 5} style={{ fill: 'var(--text-faint)' }} fontSize="10" fontFamily="ui-monospace, Menlo, monospace">
         0 INJ raised
       </text>
-      <text x={W - pad.r} y={H - 5} fill="#7d879e" fontSize="10" textAnchor="end" fontFamily="ui-monospace, Menlo, monospace">
+      <text x={W - pad.r} y={H - 5} style={{ fill: 'var(--text-faint)' }} fontSize="10" textAnchor="end" fontFamily="ui-monospace, Menlo, monospace">
         {maxX.toFixed(1)} INJ
       </text>
     </svg>

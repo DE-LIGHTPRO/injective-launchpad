@@ -283,6 +283,45 @@ export function sellPriceImpactBps(cfg: CurveConfig, st: CurveState, tokensIn: b
   return Number(bps);
 }
 
+/**
+ * Where the chart's "you are here" marker belongs.
+ *
+ * EXTRACTED SO IT CAN BE TESTED. This lived inside the component's render and was
+ * wrong: it placed the marker at `maxX * graduationProgress(cfg, st)`, where `maxX`
+ * is the curve's ceiling (`maxCollectable`, 87.912 on this shape) and
+ * `graduationProgress` divides by the graduation target (85). So the marker sat
+ * 3.4% further right than the launch actually was at every point, and at graduation
+ * it landed on the ceiling rather than on the target it was marking.
+ *
+ * The first guard written for the fix asserted on the component's SOURCE — that it
+ * mentioned `injCollected` and did not contain the string `maxX * progress`. A
+ * mutation rewriting the overshoot in different words passed it. Asserting on the
+ * text of a calculation is not testing the calculation, so the calculation moved
+ * here where its behaviour can be checked.
+ *
+ * `price` is the real spot price for the state rather than the nearest sampled
+ * point, which needs no interpolation and cannot drift from the line it sits on.
+ */
+export function chartMarker(
+  cfg: CurveConfig,
+  st: CurveState,
+  axisMaxInj: number,
+  oneToken: bigint = 10n ** 18n,
+): { injX: number; price: number } {
+  const raised = Number(st.injCollected) / Number(oneToken);
+  // Clamped so a state past the ceiling cannot be drawn off the end of the axis.
+  const injX = Math.min(Math.max(raised, 0), axisMaxInj);
+  let price = 0;
+  try {
+    price = Number(spotPrice(cfg, st, oneToken)) / Number(oneToken);
+  } catch {
+    // An unplottable state leaves the marker on the floor rather than throwing out
+    // the whole chart: the line is still true even when the marker cannot be placed.
+    price = 0;
+  }
+  return { injX, price };
+}
+
 /** At or above this, say so prominently. 5%. */
 export const IMPACT_WARN_BPS = 500;
 /** At or above this, the trader is losing a quarter of their money to the shape. 25%. */
