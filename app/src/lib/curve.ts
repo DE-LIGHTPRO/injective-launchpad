@@ -227,6 +227,62 @@ export function priceImpactBps(cfg: CurveConfig, st: CurveState, injIn: bigint):
   return bps > BigInt(Number.MAX_SAFE_INTEGER) ? Number.MAX_SAFE_INTEGER : Number(bps);
 }
 
+/**
+ * Price impact of a sell, in basis points BELOW the spot price before it.
+ *
+ * Mirrored from `sell_price_impact_bps`, and covered by the parity vectors like
+ * everything else: the generator emits `impactBps` on sell rows too.
+ *
+ * The exit had no disclosure while the entry's fee did, and the exit is where a
+ * holder is most exposed. Measured on this shape, from the warm state:
+ *
+ *     152,625,000 tokens  ->  24.81% below spot
+ *     610,500,000 tokens  ->  56.89% below spot
+ *
+ * A shortfall rather than a premium, because that is the direction it runs: a
+ * seller receives less than spot where a buyer pays more. One signed number would
+ * make the thresholds ambiguous about which way is bad.
+ *
+ * Below 100% for every input, as a property of the arithmetic rather than a clamp:
+ * see the note at the return. A sell cannot be worth less than nothing, and the
+ * maximum observed across extreme states is 9999 bps.
+ */
+export function sellPriceImpactBps(cfg: CurveConfig, st: CurveState, tokensIn: bigint): number {
+  validate(cfg);
+  const q = quoteSell(cfg, st, tokensIn);
+  const gross = q.injOut + q.fee;
+  if (gross <= 0n || tokensIn <= 0n) {
+    throw new CurveError('amount too small to measure price impact');
+  }
+
+  const [injRes, tokRes] = reserves(cfg, st);
+  if (tokRes <= 0n || injRes <= 0n) throw new CurveError('curve maths out of range');
+
+  // impact = 1 - (gross / tokensIn) / (injRes / tokRes)
+  //        = (tokensIn * injRes - gross * tokRes) / (tokensIn * injRes)
+  const atSpot = tokensIn * injRes;
+  const actual = gross * tokRes;
+  if (atSpot <= 0n) throw new CurveError('curve maths out of range');
+  // A sell cannot pay above spot here; where it appears to, the cause is integer
+  // flooring at a tiny size, not a bonus.
+  if (actual >= atSpot) return 0;
+
+  /*
+   * The result is below 10,000 bps structurally, not by clamping.
+   *
+   * There was a `Math.min` here and it was dead code. Above we already return 0
+   * when `actual >= atSpot`, so `0 <= actual < atSpot`, which makes
+   * `(atSpot - actual) < atSpot` and therefore `bps < BPS_DENOM` for every input.
+   * Swept across extreme states and sizes the maximum observed is 9999.
+   *
+   * Removed rather than left in: a clamp that cannot engage reads as a real bound
+   * somebody might rely on, and a test asserting it passes without exercising
+   * anything. The bound is worth knowing and it belongs in a comment, not a branch.
+   */
+  const bps = ((atSpot - actual) * BPS_DENOM) / atSpot;
+  return Number(bps);
+}
+
 /** At or above this, say so prominently. 5%. */
 export const IMPACT_WARN_BPS = 500;
 /** At or above this, the trader is losing a quarter of their money to the shape. 25%. */

@@ -461,6 +461,84 @@ pub fn price_impact_bps(
     Ok(u32::try_from(bps.to_string().parse::<u128>().unwrap_or(u128::MAX)).unwrap_or(u32::MAX))
 }
 
+/// Price impact of a **sell**, in basis points below the spot price before it.
+///
+/// The exit has the same problem as the entry and it was disclosed on neither.
+/// Measured on the demo launch: selling 90,000,000 of a 96,657,870 position pays
+/// **8.44% below spot**, against a 1% fee that the panel does show. Someone
+/// deciding whether to exit is looking at the number that is missing.
+///
+/// Expressed as a shortfall rather than a premium, because that is the direction
+/// it runs: a seller receives LESS than spot, where a buyer pays MORE. Reporting
+/// both as one signed number would make the warning thresholds ambiguous about
+/// which way is bad.
+///
+/// As with the buy, measured against spot BEFORE the trade and excluding the fee,
+/// which is disclosed on its own line. Bounded at `BPS_DENOM`: a sell cannot be
+/// worth less than nothing, so 10,000 bps is the floor of what can be received and
+/// anything computing beyond it is a rounding artefact rather than a worse trade.
+pub fn sell_price_impact_bps(
+    cfg: &CurveConfig,
+    st: &CurveState,
+    tokens_in: Uint128,
+) -> Result<u32, CurveError> {
+    cfg.validate()?;
+    let q = quote_sell(cfg, st, tokens_in)?;
+    let gross = q
+        .inj_out
+        .checked_add(q.fee)
+        .map_err(|_| CurveError::Overflow)?;
+    if gross.is_zero() || tokens_in.is_zero() {
+        return Err(CurveError::ZeroAmount);
+    }
+
+    let (inj_res, tok_res) = reserves(cfg, st)?;
+    if tok_res.is_zero() || inj_res.is_zero() {
+        return Err(CurveError::Overflow);
+    }
+
+    /*
+     * Cross-multiplied so nothing rounds before the comparison:
+     *
+     *     spot     = inj_res / tok_res
+     *     received = gross / tokens_in
+     *     impact   = 1 - received / spot
+     *              = (tokens_in * inj_res - gross * tok_res) / (tokens_in * inj_res)
+     */
+    let at_spot = Uint256::from(tokens_in)
+        .checked_mul(inj_res)
+        .map_err(|_| CurveError::Overflow)?;
+    let actual = Uint256::from(gross)
+        .checked_mul(tok_res)
+        .map_err(|_| CurveError::Overflow)?;
+    if at_spot.is_zero() {
+        return Err(CurveError::Overflow);
+    }
+    if actual >= at_spot {
+        // A sell cannot pay above spot on this curve. Where it appears to, the cause
+        // is integer flooring at a tiny size, not a bonus.
+        return Ok(0);
+    }
+
+    let bps = at_spot
+        .checked_sub(actual)
+        .map_err(|_| CurveError::Overflow)?
+        .checked_mul(Uint256::from(BPS_DENOM as u128))
+        .map_err(|_| CurveError::Overflow)?
+        / at_spot;
+
+    /*
+     * Below BPS_DENOM structurally, not by clamping. The branch above returns 0
+     * when `actual >= at_spot`, so `0 <= actual < at_spot`, which makes
+     * `(at_spot - actual) < at_spot` and therefore the quotient below 10,000 for
+     * every input; swept across extreme states the maximum observed is 9999. The
+     * `.min()` that used to be here could not engage, and a bound nobody can reach
+     * reads as a real one somebody might rely on.
+     */
+    let raw = bps.to_string().parse::<u128>().unwrap_or(BPS_DENOM as u128);
+    Ok(u32::try_from(raw).unwrap_or(u32::MAX))
+}
+
 /// Impact at or above this warrants saying so prominently. 5%.
 pub const IMPACT_WARN_BPS: u32 = 500;
 /// Impact at or above this is the trader losing a quarter of their money to the
@@ -904,5 +982,91 @@ mod tests {
         let c = cfg();
         let st = CurveState { inj_collected: inj(85), tokens_sold: inj(1), graduated: true };
         assert!(price_impact_bps(&c, &st, inj(1)).is_err());
+    }
+
+    #[test]
+    fn a_sell_reports_how_far_below_spot_it_lands() {
+        /*
+         * The exit had no disclosure at all while the entry's fee did. Measured on
+         * the demo launch: 90,000,000 of a 96,657,870 position pays about 8.4% below
+         * spot, against a 1% fee shown beside it.
+         */
+        let c = cfg();
+        let st = CurveState {
+            inj_collected: Uint128::new(2_970_000_000_000_000_000),
+            tokens_sold: inj(96_657_870),
+            graduated: false,
+        };
+        let bps = sell_price_impact_bps(&c, &st, inj(90_000_000)).unwrap();
+        assert!((800..=900).contains(&bps), "expected roughly 8.4%, got {}bps", bps);
+        assert!(bps > IMPACT_WARN_BPS, "8.4% must clear the warn threshold");
+    }
+
+    #[test]
+    fn sell_impact_grows_with_the_size_of_the_exit() {
+        // Dumping more of the same position costs more, monotonically. A seller
+        // leaving in pieces pays less than one leaving at once, and the number has
+        // to show that or it is not measuring the curve.
+        let c = cfg();
+        let st = CurveState {
+            inj_collected: Uint128::new(2_970_000_000_000_000_000),
+            tokens_sold: inj(96_657_870),
+            graduated: false,
+        };
+        let mut last = 0u32;
+        for n in [1_000_000u128, 10_000_000, 40_000_000, 90_000_000, 96_000_000] {
+            let bps = sell_price_impact_bps(&c, &st, inj(n)).unwrap();
+            assert!(bps >= last, "impact fell from {}bps to {}bps at {} tokens", last, bps, n);
+            last = bps;
+        }
+    }
+
+    #[test]
+    fn sell_impact_is_below_everything_structurally_not_by_clamping() {
+        /*
+         * Bounded at BPS_DENOM on purpose: a sell cannot be worth less than nothing,
+         * so 100% is the floor of what can be received. An unbounded figure would let
+         * a rounding artefact print an impossible "impact of 140%", which reads as a
+         * broken contract rather than a thin curve.
+         */
+        let c = cfg();
+        let st = CurveState {
+            inj_collected: Uint128::new(1_000),
+            tokens_sold: inj(1),
+            graduated: false,
+        };
+        let bps = sell_price_impact_bps(&c, &st, inj(1)).unwrap();
+        // Strictly below, which is the whole point: a clamp at exactly 10,000 would
+        // be unreachable, and this assertion used to pass without exercising it.
+        assert!(bps < BPS_DENOM as u32, "impact reached or exceeded 100%: {}bps", bps);
+        assert!(bps > 9_000, "this state should be near the limit, got {}bps", bps);
+    }
+
+    #[test]
+    fn sell_impact_excludes_the_fee_disclosed_beside_it() {
+        // Same reasoning as the buy: the fee has its own line, and counting it here
+        // would overstate what the curve's shape costs.
+        let mut no_fee = cfg();
+        no_fee.fee_bps = 0;
+        let with_fee = cfg();
+        let st = |c: &CurveConfig| CurveState {
+            inj_collected: Uint128::new(2_970_000_000_000_000_000),
+            tokens_sold: inj(96_657_870),
+            graduated: false,
+        }.clone();
+        let a = sell_price_impact_bps(&with_fee, &st(&with_fee), inj(40_000_000)).unwrap();
+        let b = sell_price_impact_bps(&no_fee, &st(&no_fee), inj(40_000_000)).unwrap();
+        assert_eq!(a, b, "the fee leaked into the sell impact");
+    }
+
+    #[test]
+    fn sell_impact_refuses_rather_than_quoting_what_cannot_be_sold() {
+        let c = cfg();
+        let st = CurveState { inj_collected: inj(10), tokens_sold: inj(1_000), graduated: false };
+        // More than has ever been bought from the curve.
+        assert!(sell_price_impact_bps(&c, &st, inj(2_000)).is_err());
+        // And a graduated curve, which is closed to both sides.
+        let done = CurveState { inj_collected: inj(85), tokens_sold: inj(1_000), graduated: true };
+        assert!(matches!(sell_price_impact_bps(&c, &done, inj(1)), Err(CurveError::Graduated)));
     }
 }

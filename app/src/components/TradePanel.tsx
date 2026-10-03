@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react';
 import {
   quoteBuy,
   priceImpactBps,
+  sellPriceImpactBps,
   IMPACT_WARN_BPS,
   IMPACT_SEVERE_BPS,
   quoteSell,
@@ -74,9 +75,15 @@ export function TradePanel({
    * rather than printing 0.00%.
    */
   const impactBps = useMemo(() => {
-    if (!quote?.ok || quote.side !== 'buy') return null;
+    if (!quote?.ok) return null;
     try {
-      return priceImpactBps(config, state, parseAmount(input || '0'));
+      const raw = parseAmount(input || '0');
+      // Both sides, because the exit is where a holder is most exposed and it had
+      // no disclosure at all: selling a quarter of a position on this shape pays
+      // about 25% below spot, against the 1% fee shown beside it.
+      return quote.side === 'buy'
+        ? priceImpactBps(config, state, raw)
+        : sellPriceImpactBps(config, state, raw);
     } catch {
       return null;
     }
@@ -148,7 +155,7 @@ export function TradePanel({
               {fmt(quote.fee, 18, 6)} {NETWORK.quoteSymbol}
             </span>
           </div>
-                    {quote.side === 'buy' && (
+                    {(
             <div className="metric-row">
               <span
                 className={
@@ -161,7 +168,7 @@ export function TradePanel({
                         : 'k'
                 }
               >
-                Price impact
+                {quote.side === 'buy' ? 'Price impact' : 'Below spot'}
               </span>
               <span
                 className={
@@ -180,9 +187,9 @@ export function TradePanel({
           )}
           {impactBps !== null && impactBps >= IMPACT_SEVERE_BPS && (
             <p className="note err-text">
-              At this size most of what you spend goes into the curve rather than into
-              tokens. The curve is steepest at the start, so a smaller buy pays a much
-              better price.
+              {quote.side === 'buy'
+                ? 'At this size most of what you spend goes into the curve rather than into tokens. The curve is steepest at the start, so a smaller buy pays a much better price.'
+                : 'At this size the curve pays well under the quoted spot price. Selling in smaller pieces recovers more, because each sale moves the price against the next one.'}
             </p>
           )}
           <div className="metric-row">

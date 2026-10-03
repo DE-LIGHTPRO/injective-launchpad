@@ -42,6 +42,7 @@ import {
   graduationProgress,
   parseAmount,
   priceImpactBps,
+  sellPriceImpactBps,
   IMPACT_SEVERE_BPS,
   fmt,
   validate,
@@ -145,10 +146,10 @@ test('the vectors describe the same curve this test configures', () => {
   assert.equal(BigInt(Number(cfgRow.feeBps)), CFG.feeBps, 'feeBps');
 });
 
-test('every buy vector carries an impact figure to compare', () => {
+test('every buy and sell vector carries an impact figure to compare', () => {
   // Added after the vectors existed, so an older file would compare nothing:
   // `Number(undefined)` is NaN and would fail, but obscurely. This says why.
-  for (const r of [...PARITY_BUYS_FRESH, ...PARITY_BUYS_WARM]) {
+  for (const r of [...PARITY_BUYS_FRESH, ...PARITY_BUYS_WARM, ...PARITY_SELLS_WARM]) {
     assert.ok(
       r.impactBps !== undefined,
       'a buy vector has no impactBps; regenerate with `npm run vectors`',
@@ -166,6 +167,28 @@ test('the impact on this curve is large enough to be worth disclosing', () => {
   const impact = priceImpactBps(CFG, fresh(), 25n * ONE);
   assert.ok(impact > IMPACT_SEVERE_BPS, `25 INJ should be severe, got ${impact}bps`);
   assert.ok(impact > 8_000 && impact < 8_500, `expected roughly 82%, got ${impact}bps`);
+});
+
+test('sell impact is below everything structurally, not by clamping', () => {
+  /*
+   * The Rust had this test and the TypeScript did not, which mutation found:
+   * removing the 100% cap here failed nothing. A guard on one side of a mirrored
+   * pair is the asymmetry these two files exist to prevent.
+   *
+   * A sell cannot be worth less than nothing, so 10,000 bps is the floor of what
+   * can be received, and the arithmetic cannot produce more. Asserting the bound
+   * STRICTLY is what makes this test mean something: `<=` would hold even if the
+   * formula were wrong in a way that saturated.
+   */
+  const thin: CurveState = { injCollected: 1_000n, tokensSold: ONE, graduated: false };
+  const bps = sellPriceImpactBps(CFG, thin, ONE);
+  // STRICTLY below, which is the point. There was a clamp at 10,000 here and
+  // mutation showed removing it failed nothing: the branch above returns 0 when
+  // actual >= atSpot, so 0 <= actual < atSpot and the quotient is under 10,000 for
+  // every input. Swept across extreme states the maximum observed is 9999, so a
+  // clamp could never engage and an assertion of `<= 10000` passed vacuously.
+  assert.ok(bps < 10_000, `impact reached or exceeded 100%: ${bps}bps`);
+  assert.ok(bps > 9_000, `this state should sit near the limit, got ${bps}bps`);
 });
 
 test('there are vectors of every kind to compare', () => {
@@ -217,6 +240,11 @@ test('sells match the Rust maths exactly', () => {
     const q = quoteSell(CFG, WARM, big(row.tokensIn));
     assert.equal(q.fee, big(row.fee), `fee for ${row.tokensIn}`);
     assert.equal(q.injOut, big(row.injOut), `injOut for ${row.tokensIn}`);
+    assert.equal(
+      sellPriceImpactBps(CFG, WARM, big(row.tokensIn)),
+      Number(row.impactBps),
+      `sell impactBps for ${row.tokensIn}`,
+    );
   }
 });
 

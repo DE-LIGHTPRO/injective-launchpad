@@ -21,7 +21,7 @@
 //! internally consistent and no longer talking about the same thing.
 
 use cosmwasm_std::Uint128;
-use launchpad_math::{price_impact_bps, quote_buy, quote_sell, CurveConfig, CurveState};
+use launchpad_math::{price_impact_bps, quote_buy, quote_sell, sell_price_impact_bps, CurveConfig, CurveState};
 
 fn one() -> Uint128 {
     Uint128::new(1_000_000_000_000_000_000)
@@ -86,9 +86,10 @@ fn main() {
     for frac in [1u128, 4, 2] {
         let tokens = warm.tokens_sold / Uint128::new(frac);
         let q = quote_sell(&cfg, &warm, tokens).unwrap();
+        let impact = sell_price_impact_bps(&cfg, &warm, tokens).unwrap();
         rows.push(format!(
-            r#"  {{"kind":"sell","from":"warm","tokensIn":"{}","fee":"{}","injOut":"{}"}}"#,
-            tokens, q.fee, q.inj_out
+            r#"  {{"kind":"sell","from":"warm","tokensIn":"{}","fee":"{}","injOut":"{}","impactBps":{}}}"#,
+            tokens, q.fee, q.inj_out, impact
         ));
     }
 
