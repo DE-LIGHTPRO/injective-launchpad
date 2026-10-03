@@ -3,6 +3,9 @@
 import { useMemo, useState } from 'react';
 import {
   quoteBuy,
+  priceImpactBps,
+  IMPACT_WARN_BPS,
+  IMPACT_SEVERE_BPS,
   quoteSell,
   parseAmount,
   fmt,
@@ -58,6 +61,26 @@ export function TradePanel({
     const gross = quote.side === 'buy' ? quote.tokensOut : quote.injOut;
     return (gross * BigInt(Math.round((100 - slippagePct) * 100))) / 10_000n;
   }, [quote, slippagePct]);
+
+  /*
+   * Price impact, on a buy only.
+   *
+   * This panel disclosed the 1% fee and said nothing about the curve. On the shape
+   * this project ships, 25 INJ into a fresh launch pays about 82% above spot, so the
+   * disclosed cost was a fortieth of the real one and read as the whole of it.
+   *
+   * `null` means "not measurable", never zero. Zero impact is a claim, and on a
+   * curve this steep it is the least likely claim to be true, so the row says so
+   * rather than printing 0.00%.
+   */
+  const impactBps = useMemo(() => {
+    if (!quote?.ok || quote.side !== 'buy') return null;
+    try {
+      return priceImpactBps(config, state, parseAmount(input || '0'));
+    } catch {
+      return null;
+    }
+  }, [quote, config, state, input]);
 
   if (tradingClosed) {
     return (
@@ -125,6 +148,43 @@ export function TradePanel({
               {fmt(quote.fee, 18, 6)} {NETWORK.quoteSymbol}
             </span>
           </div>
+                    {quote.side === 'buy' && (
+            <div className="metric-row">
+              <span
+                className={
+                  impactBps === null
+                    ? 'k'
+                    : impactBps >= IMPACT_SEVERE_BPS
+                      ? 'k err-text'
+                      : impactBps >= IMPACT_WARN_BPS
+                        ? 'k warn-text'
+                        : 'k'
+                }
+              >
+                Price impact
+              </span>
+              <span
+                className={
+                  impactBps === null
+                    ? 'v mono'
+                    : impactBps >= IMPACT_SEVERE_BPS
+                      ? 'v mono err-text'
+                      : impactBps >= IMPACT_WARN_BPS
+                        ? 'v mono warn-text'
+                        : 'v mono'
+                }
+              >
+                {impactBps === null ? 'not measurable' : `${(impactBps / 100).toFixed(2)}%`}
+              </span>
+            </div>
+          )}
+          {impactBps !== null && impactBps >= IMPACT_SEVERE_BPS && (
+            <p className="note err-text">
+              At this size most of what you spend goes into the curve rather than into
+              tokens. The curve is steepest at the start, so a smaller buy pays a much
+              better price.
+            </p>
+          )}
           <div className="metric-row">
             <span className="k">Minimum received</span>
             <span className="v mono">
@@ -165,7 +225,7 @@ export function TradePanel({
       </div>
 
       <button className="go" disabled>
-        {isDemoMode() ? 'Demo — trading disabled' : 'Connect wallet'}
+        {isDemoMode() ? 'Demo: trading disabled' : 'Connect wallet'}
       </button>
 
       <p className="note">

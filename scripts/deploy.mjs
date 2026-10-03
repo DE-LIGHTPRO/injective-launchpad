@@ -248,7 +248,7 @@ console.log(`
   factory address  ${factoryAddress}
   ${explorer}/contract/${factoryAddress}
 
-  Every variable the app reads — set all of them, not just the obvious one:
+  Every variable the app reads. Set all of them, not just the obvious one:
 
     NEXT_PUBLIC_NETWORK=${netName}
     NEXT_PUBLIC_FACTORY_ADDRESS=${factoryAddress}

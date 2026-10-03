@@ -41,6 +41,8 @@ import {
   spotPrice,
   graduationProgress,
   parseAmount,
+  priceImpactBps,
+  IMPACT_SEVERE_BPS,
   fmt,
   validate,
   CurveError,
@@ -143,6 +145,29 @@ test('the vectors describe the same curve this test configures', () => {
   assert.equal(BigInt(Number(cfgRow.feeBps)), CFG.feeBps, 'feeBps');
 });
 
+test('every buy vector carries an impact figure to compare', () => {
+  // Added after the vectors existed, so an older file would compare nothing:
+  // `Number(undefined)` is NaN and would fail, but obscurely. This says why.
+  for (const r of [...PARITY_BUYS_FRESH, ...PARITY_BUYS_WARM]) {
+    assert.ok(
+      r.impactBps !== undefined,
+      'a buy vector has no impactBps; regenerate with `npm run vectors`',
+    );
+  }
+});
+
+test('the impact on this curve is large enough to be worth disclosing', () => {
+  /*
+   * Not a tautology: this is the justification for showing it at all, pinned so a
+   * future change that flattens the curve also flags that the warning thresholds
+   * want revisiting. 25 INJ into a fresh curve pays about 82% above spot, while the
+   * fee disclosed beside it is 1%.
+   */
+  const impact = priceImpactBps(CFG, fresh(), 25n * ONE);
+  assert.ok(impact > IMPACT_SEVERE_BPS, `25 INJ should be severe, got ${impact}bps`);
+  assert.ok(impact > 8_000 && impact < 8_500, `expected roughly 82%, got ${impact}bps`);
+});
+
 test('there are vectors of every kind to compare', () => {
   // A filter that matches nothing makes a for-loop a no-op, and a no-op test is
   // green. Assert the counts rather than trusting the file's shape.
@@ -163,6 +188,11 @@ test('buys match the Rust maths exactly, from a fresh curve', () => {
     assert.equal(q.tokensOut, big(row.tokensOut), `tokensOut for ${row.injIn}`);
     assert.equal(q.refund, big(row.refund), `refund for ${row.injIn}`);
     assert.equal(q.graduates, row.graduates, `graduates for ${row.injIn}`);
+    assert.equal(
+      priceImpactBps(CFG, fresh(), big(row.injIn)),
+      Number(row.impactBps),
+      `impactBps for ${row.injIn}`,
+    );
   }
 });
 
@@ -174,6 +204,11 @@ test('buys match the Rust maths exactly, part way along the curve', () => {
     assert.equal(q.tokensOut, big(row.tokensOut), `tokensOut for ${row.injIn}`);
     assert.equal(q.refund, big(row.refund), `refund for ${row.injIn}`);
     assert.equal(q.graduates, row.graduates, `graduates for ${row.injIn}`);
+    assert.equal(
+      priceImpactBps(CFG, WARM, big(row.injIn)),
+      Number(row.impactBps),
+      `impactBps for ${row.injIn}`,
+    );
   }
 });
 

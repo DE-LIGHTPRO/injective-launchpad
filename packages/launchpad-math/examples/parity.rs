@@ -21,7 +21,7 @@
 //! internally consistent and no longer talking about the same thing.
 
 use cosmwasm_std::Uint128;
-use launchpad_math::{quote_buy, quote_sell, CurveConfig, CurveState};
+use launchpad_math::{price_impact_bps, quote_buy, quote_sell, CurveConfig, CurveState};
 
 fn one() -> Uint128 {
     Uint128::new(1_000_000_000_000_000_000)
@@ -54,9 +54,10 @@ fn main() {
     for n in [1u128, 5, 25, 84, 200] {
         let st = CurveState::default();
         let q = quote_buy(&cfg, &st, amt(n)).unwrap();
+        let impact = price_impact_bps(&cfg, &st, amt(n)).unwrap();
         rows.push(format!(
-            r#"  {{"kind":"buy","from":"fresh","injIn":"{}","fee":"{}","net":"{}","tokensOut":"{}","refund":"{}","graduates":{}}}"#,
-            amt(n), q.fee, q.inj_in_after_fee, q.tokens_out, q.refund, q.graduates
+            r#"  {{"kind":"buy","from":"fresh","injIn":"{}","fee":"{}","net":"{}","tokensOut":"{}","refund":"{}","graduates":{},"impactBps":{}}}"#,
+            amt(n), q.fee, q.inj_in_after_fee, q.tokens_out, q.refund, q.graduates, impact
         ));
     }
 
@@ -74,9 +75,10 @@ fn main() {
     ));
     for n in [1u128, 10, 60] {
         let q = quote_buy(&cfg, &warm, amt(n)).unwrap();
+        let impact = price_impact_bps(&cfg, &warm, amt(n)).unwrap();
         rows.push(format!(
-            r#"  {{"kind":"buy","from":"warm","injIn":"{}","fee":"{}","net":"{}","tokensOut":"{}","refund":"{}","graduates":{}}}"#,
-            amt(n), q.fee, q.inj_in_after_fee, q.tokens_out, q.refund, q.graduates
+            r#"  {{"kind":"buy","from":"warm","injIn":"{}","fee":"{}","net":"{}","tokensOut":"{}","refund":"{}","graduates":{},"impactBps":{}}}"#,
+            amt(n), q.fee, q.inj_in_after_fee, q.tokens_out, q.refund, q.graduates, impact
         ));
     }
 

@@ -370,6 +370,103 @@ pub fn spot_price(
     to_u128(p)
 }
 
+/// Price impact of a buy, in basis points, against the spot price before it.
+///
+/// WHY THIS IS NOT OPTIONAL. A one-sided launch puts the whole sellable supply
+/// into a single curve, so the curve is steep by construction and the early part
+/// of it is the steepest. Measured against the shape this crate's tests use, a
+/// 10 INJ buy at 2.97 INJ raised pays about **30% above spot**. The fee is 1%.
+///
+/// So a panel that shows the fee and not the impact discloses the small cost and
+/// hides the large one, which is worse than disclosing neither: it reads as a
+/// complete account of what the trade costs. Stating the price without stating
+/// the impact is true and still misleading.
+///
+/// Defined as the average fill price against spot BEFORE the trade, because that
+/// is the number the trader was looking at when they decided. Measuring against
+/// the price afterwards would flatter every trade, since the trade itself is what
+/// moved it.
+///
+/// The fee is deliberately excluded: it is disclosed separately and counting it
+/// here would double-count it. This is the cost of the curve's shape alone.
+///
+/// Errors rather than returning an "unknown", and that is a deliberate narrowing.
+///
+/// This first returned `Result<Option<u32>>`, on the reasoning that an unmeasurable
+/// impact must not be rendered as zero. Probing it showed `None` was unreachable:
+/// every case that cannot be measured already fails earlier in `quote_buy` with a
+/// reason that NAMES itself — `InsufficientCurveSupply` on a sold-out curve,
+/// `ZeroAmount` on an amount the fee consumes whole, `Graduated` once trading has
+/// closed. Those are strictly better answers than `None`, and an `Option` whose
+/// `None` no input can produce is dead shape that invites a caller to write a
+/// branch for a state that does not exist.
+///
+/// Zero is still returned, and it is a measurement rather than a fallback: a trade
+/// small enough not to move the curve genuinely has no measurable impact.
+pub fn price_impact_bps(
+    cfg: &CurveConfig,
+    st: &CurveState,
+    inj_in: Uint128,
+) -> Result<u32, CurveError> {
+    cfg.validate()?;
+    let q = quote_buy(cfg, st, inj_in)?;
+    // `quote_buy` has already refused every case that would make these zero, so
+    // these are assertions of that rather than branches with their own policy.
+    if q.tokens_out.is_zero() || q.inj_in_after_fee.is_zero() {
+        return Err(CurveError::ZeroAmount);
+    }
+
+    let (inj_res, tok_res) = reserves(cfg, st)?;
+    if tok_res.is_zero() || inj_res.is_zero() {
+        return Err(CurveError::Overflow);
+    }
+
+    /*
+     * Compared as a cross-product so nothing is divided before the comparison and
+     * no intermediate rounding decides the answer:
+     *
+     *     spot    = inj_res / tok_res                 (INJ per token)
+     *     average = inj_in_after_fee / tokens_out     (INJ per token)
+     *     impact  = average / spot - 1
+     *            = (inj_in_after_fee * tok_res) / (tokens_out * inj_res) - 1
+     *
+     * In 256-bit space, because every one of these is already up to 10^27.
+     */
+    let num = Uint256::from(q.inj_in_after_fee)
+        .checked_mul(tok_res)
+        .map_err(|_| CurveError::Overflow)?;
+    let den = Uint256::from(q.tokens_out)
+        .checked_mul(inj_res)
+        .map_err(|_| CurveError::Overflow)?;
+    if den.is_zero() {
+        return Err(CurveError::Overflow);
+    }
+    if num <= den {
+        // A buy can never fill below spot on a rising curve. If it appears to, the
+        // cause is integer flooring inside the quote at a size this small, not a
+        // discount, so it is reported as no measurable impact rather than negative.
+        return Ok(0);
+    }
+
+    let bps = num
+        .checked_sub(den)
+        .map_err(|_| CurveError::Overflow)?
+        .checked_mul(Uint256::from(BPS_DENOM as u128))
+        .map_err(|_| CurveError::Overflow)?
+        / den;
+
+    // Saturating rather than erroring: an impact above u32::MAX bps is 42,949%,
+    // which is a real answer about an absurd trade and still better reported than
+    // turned into a failure the caller has to interpret.
+    Ok(u32::try_from(bps.to_string().parse::<u128>().unwrap_or(u128::MAX)).unwrap_or(u32::MAX))
+}
+
+/// Impact at or above this warrants saying so prominently. 5%.
+pub const IMPACT_WARN_BPS: u32 = 500;
+/// Impact at or above this is the trader losing a quarter of their money to the
+/// curve's shape. 25%.
+pub const IMPACT_SEVERE_BPS: u32 = 2_500;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -713,5 +810,99 @@ mod tests {
         )
         .unwrap();
         assert!(later > early, "spot price did not rise: {early} -> {later}");
+    }
+
+    #[test]
+    fn price_impact_is_measured_against_the_price_the_trader_saw() {
+        /*
+         * The number this exists for. At 2.97 INJ raised a 10 INJ buy pays about
+         * 30% above spot, against a 1% fee. A panel disclosing only the fee
+         * accounts for a thirtieth of what the trade costs.
+         */
+        let c = cfg();
+        let st = CurveState {
+            inj_collected: Uint128::new(2_970_000_000_000_000_000),
+            tokens_sold: inj(96_657_870),
+            graduated: false,
+        };
+        let bps = price_impact_bps(&c, &st, inj(10)).unwrap();
+        assert!(
+            (2_900..=3_100).contains(&bps),
+            "expected roughly 30% on this shape, got {}bps",
+            bps
+        );
+        assert!(bps > IMPACT_SEVERE_BPS, "30% must land above the severe threshold");
+    }
+
+    #[test]
+    fn impact_rises_with_size_and_is_negligible_for_dust() {
+        // The property, rather than one measurement: a bigger bite of the same
+        // curve costs proportionally more, monotonically.
+        let c = cfg();
+        let st = CurveState::default();
+        let mut last = 0u32;
+        for n in [1u128, 5, 10, 25, 50, 80] {
+            let bps = price_impact_bps(&c, &st, inj(n)).unwrap();
+            assert!(bps >= last, "impact fell from {}bps to {}bps at {} INJ", last, bps, n);
+            last = bps;
+        }
+        // And a trade small enough not to move the curve reports almost nothing.
+        let dust = price_impact_bps(&c, &st, Uint128::new(1_000_000_000_000)).unwrap();
+        assert!(dust < 10, "dust should barely register, got {}bps", dust);
+    }
+
+    #[test]
+    fn impact_excludes_the_fee_it_is_disclosed_beside() {
+        /*
+         * Counting the fee here would double-count it: the panel shows it as its
+         * own line. A zero-fee curve and a 1% curve must report the SAME impact
+         * for the same net amount reaching the curve, because the curve's shape is
+         * all this measures.
+         */
+        let mut no_fee = cfg();
+        no_fee.fee_bps = 0;
+        let with_fee = cfg(); // 100 bps
+
+        let st = CurveState::default();
+        // 10 INJ at 1% leaves 9.9 reaching the curve; compare against 9.9 at 0%.
+        let a = price_impact_bps(&with_fee, &st, inj(10)).unwrap();
+        let b = price_impact_bps(&no_fee, &st, Uint128::new(9_900_000_000_000_000_000)).unwrap();
+        assert_eq!(a, b, "the fee leaked into the impact figure");
+    }
+
+    #[test]
+    fn an_unmeasurable_impact_names_its_reason_rather_than_returning_unknown() {
+        /*
+         * Probed rather than assumed, and the probe changed the signature. Each of
+         * these fails inside `quote_buy` with a reason of its own, which is a better
+         * answer than a featureless "unknown": the caller can say WHY there is no
+         * number instead of only that there isn't one.
+         */
+        let c = cfg();
+
+        let sold_out = CurveState {
+            inj_collected: c.graduation_target,
+            tokens_sold: c.curve_supply,
+            graduated: false,
+        };
+        assert!(matches!(
+            price_impact_bps(&c, &sold_out, inj(1)),
+            Err(CurveError::InsufficientCurveSupply { .. })
+        ));
+
+        // One wei, which the 1% fee consumes whole, so nothing reaches the curve.
+        assert!(matches!(
+            price_impact_bps(&c, &CurveState::default(), Uint128::one()),
+            Err(CurveError::ZeroAmount)
+        ));
+    }
+
+    #[test]
+    fn impact_refuses_a_graduated_curve_rather_than_quoting_one() {
+        // It goes through quote_buy, so it inherits that refusal rather than
+        // reporting a number for a trade that cannot happen.
+        let c = cfg();
+        let st = CurveState { inj_collected: inj(85), tokens_sold: inj(1), graduated: true };
+        assert!(price_impact_bps(&c, &st, inj(1)).is_err());
     }
 }

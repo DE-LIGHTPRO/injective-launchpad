@@ -170,6 +170,68 @@ export function quoteSell(cfg: CurveConfig, st: CurveState, tokensIn: bigint): S
   return { fee, injOut: gross - fee };
 }
 
+/**
+ * Price impact of a buy, in basis points, against the spot price before it.
+ *
+ * Mirrored from `price_impact_bps` in Rust, and covered by the parity vectors like
+ * everything else here: the generator emits `impactBps` on every buy row, so a
+ * divergence fails the parity test rather than showing a user a number the chain
+ * disagrees with.
+ *
+ * WHY THIS IS SHOWN AT ALL. A one-sided launch puts the whole sellable supply into
+ * one curve, so it is steep by construction and steepest at the start. Measured on
+ * the shape this project ships:
+ *
+ *      1 INJ  ->    3.30%
+ *      5 INJ  ->   16.50%
+ *     25 INJ  ->   82.50%
+ *     84 INJ  ->  277.20%
+ *
+ * The fee is 1%. A panel showing the fee and not the impact discloses a fortieth
+ * of what a 25 INJ buy actually costs, and reads as a complete account of it.
+ *
+ * Measured against spot BEFORE the trade, because that is the number the trader was
+ * looking at when they decided; against the price afterwards every trade flatters
+ * itself, since the trade is what moved it. The fee is excluded, because it is
+ * disclosed on its own line and counting it twice would overstate the curve's cost.
+ *
+ * Throws rather than returning an "unknown": every unmeasurable case already fails
+ * in `quoteBuy` with a reason that names itself, which is a better answer than a
+ * featureless null.
+ */
+export function priceImpactBps(cfg: CurveConfig, st: CurveState, injIn: bigint): number {
+  validate(cfg);
+  const q = quoteBuy(cfg, st, injIn);
+  if (q.tokensOut <= 0n || q.injInAfterFee <= 0n) {
+    throw new CurveError('amount too small to measure price impact');
+  }
+
+  const [injRes, tokRes] = reserves(cfg, st);
+  if (tokRes <= 0n || injRes <= 0n) throw new CurveError('curve maths out of range');
+
+  /*
+   * Cross-multiplied, so nothing is divided before the comparison and no
+   * intermediate rounding decides the answer:
+   *
+   *     impact = (injInAfterFee / tokensOut) / (injRes / tokRes) - 1
+   *            = (injInAfterFee * tokRes) / (tokensOut * injRes) - 1
+   */
+  const num = q.injInAfterFee * tokRes;
+  const den = q.tokensOut * injRes;
+  if (den <= 0n) throw new CurveError('curve maths out of range');
+  // A buy cannot fill below spot on a rising curve. Where it appears to, the cause
+  // is integer flooring inside the quote at a tiny size, not a discount.
+  if (num <= den) return 0;
+
+  const bps = ((num - den) * BPS_DENOM) / den;
+  return bps > BigInt(Number.MAX_SAFE_INTEGER) ? Number.MAX_SAFE_INTEGER : Number(bps);
+}
+
+/** At or above this, say so prominently. 5%. */
+export const IMPACT_WARN_BPS = 500;
+/** At or above this, the trader is losing a quarter of their money to the shape. 25%. */
+export const IMPACT_SEVERE_BPS = 2_500;
+
 /** Price of one whole token in the smallest quote unit. Display only. */
 export function spotPrice(cfg: CurveConfig, st: CurveState, oneToken: bigint): bigint {
   validate(cfg);
