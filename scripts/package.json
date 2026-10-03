@@ -1,0 +1,14 @@
+{
+  "name": "injective-launchpad-scripts",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "deploy": "node deploy.mjs"
+  },
+  "dependencies": {
+    "@injectivelabs/sdk-ts": "^1.14.0",
+    "@injectivelabs/networks": "^1.14.0",
+    "@injectivelabs/utils": "^1.14.0"
+  }
+}

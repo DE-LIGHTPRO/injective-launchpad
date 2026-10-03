@@ -1,0 +1,35 @@
+import type { Metadata } from 'next';
+import Link from 'next/link';
+import { NETWORK } from '@/lib/config';
+import { isDemoMode } from '@/lib/demo';
+import './globals.css';
+
+export const metadata: Metadata = {
+  title: 'Injective Launchpad',
+  description: 'One-sided bonding curve launches on Injective.',
+};
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <html lang="en">
+      <body>
+        <header className="top">
+          <div className="wrap inner">
+            <Link href="/" className="brand">
+              inj<em>·</em>pad
+            </Link>
+            <span className="spacer" />
+            {isDemoMode() && <span className="chip warn">demo</span>}
+            <span className="chip">{NETWORK.name}</span>
+          </div>
+        </header>
+        <main className="wrap">{children}</main>
+        <footer className="wrap" style={{ padding: 'var(--space-8) var(--space-5)' }}>
+          <p className="micro">
+            Bonding curve launches. The creator supplies tokens; buyers bring {NETWORK.quoteSymbol}.
+          </p>
+        </footer>
+      </body>
+    </html>
+  );
+}

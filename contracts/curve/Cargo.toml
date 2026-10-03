@@ -1,0 +1,24 @@
+[package]
+name = "curve"
+version = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+description = "One-sided bonding curve launch. Creator supplies tokens only; buyers bring INJ."
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+library = []
+
+[dependencies]
+cosmwasm-std    = { workspace = true, features = ["stargate"] }
+cosmwasm-schema = { workspace = true }
+cw-storage-plus = { workspace = true }
+cw-utils        = { workspace = true }
+thiserror       = { workspace = true }
+launchpad-math  = { workspace = true }
+
+[dev-dependencies]
+cw-multi-test = "2.1"
+anyhow = "1.0"

@@ -1,0 +1,15 @@
+# Rust build output. 809 MB at the time this file was written.
+/target
+
+# Node dependencies and Next.js build output.
+node_modules/
+.next/
+out/
+
+# Local configuration. `.env.example` documents the surface; see the note there
+# about NEXT_PUBLIC_*.
+.env.local
+.env*.local
+
+.DS_Store
+*.log

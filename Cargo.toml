@@ -1,0 +1,26 @@
+[workspace]
+members = ["packages/*", "contracts/*"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+
+[workspace.dependencies]
+cosmwasm-std    = "2.2"
+cosmwasm-schema = "2.2"
+cw-storage-plus = "2.0"
+cw-utils        = "2.0"
+thiserror       = "2.0"
+launchpad-math  = { path = "packages/launchpad-math" }
+
+[profile.release]
+opt-level = "z"
+debug = false
+rpath = false
+lto = true
+panic = "abort"
+overflow-checks = true
+codegen-units = 1
+incremental = false

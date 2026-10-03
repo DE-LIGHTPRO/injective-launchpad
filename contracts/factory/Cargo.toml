@@ -1,0 +1,25 @@
+[package]
+name = "factory"
+version = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+description = "Spawns one-sided bonding curve launches and keeps the registry."
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+library = []
+
+[dependencies]
+cosmwasm-std    = { workspace = true, features = ["stargate"] }
+cosmwasm-schema = { workspace = true }
+cw-storage-plus = { workspace = true }
+cw-utils        = { workspace = true }
+thiserror       = { workspace = true }
+launchpad-math  = { workspace = true }
+curve           = { path = "../curve", features = ["library"] }
+
+[dev-dependencies]
+cw-multi-test = "2.1"
+anyhow = "1.0"

@@ -1,0 +1,10 @@
+[package]
+name = "launchpad-math"
+version = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+description = "Bonding curve maths for the Injective launchpad. Pure functions, no chain access."
+
+[dependencies]
+cosmwasm-std = { workspace = true }
+thiserror    = { workspace = true }
