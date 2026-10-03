@@ -1,0 +1,232 @@
+/**
+ * The messages that create a launch.
+ *
+ * These have never been broadcast, so these tests are the only thing standing
+ * between the form and a transaction that fails after the user has filled it in,
+ * or worse, one that succeeds with a supply the curve cannot honour. They check
+ * the construction against the contract's own expectations: the factory's
+ * `CreateLaunch` arm, its exact-seed refusal, and the curve's validation.
+ *
+ * Two sibling defects are the reason this is a pure function with tests rather
+ * than code inside a signing call: a v3 quote that produced calldata its router
+ * could not answer, and a deposit address that needed a contract call rather than
+ * a transfer. Both were built where no test could reach them.
+ */
+
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {
+  planLaunch,
+  validateLaunch,
+  seedAmount,
+  denomFor,
+  describePlan,
+  LaunchInputError,
+  MSG_CREATE_DENOM,
+  MSG_MINT,
+  MSG_EXECUTE,
+  type LaunchInput,
+} from './createLaunch.ts';
+import type { CurveConfig } from './curve.ts';
+
+const ONE = 10n ** 18n;
+const amt = (n: bigint) => n * ONE;
+const CREATOR = 'inj1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqe2hm49';
+const FACTORY = 'inj1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqry8wy684';
+
+const CURVE: CurveConfig = {
+  virtualInj: amt(30n),
+  virtualTokens: amt(1_073_000_000n),
+  curveSupply: amt(800_000_000n),
+  graduationTarget: amt(85n),
+  feeBps: 100n,
+};
+
+const LP = amt(200_000_000n);
+
+const input = (over: Partial<LaunchInput> = {}): LaunchInput => ({
+  creator: CREATOR,
+  symbol: 'KAIJU',
+  curve: CURVE,
+  lpReserve: LP,
+  creatorFeeShareBps: 2_000,
+  factory: FACTORY,
+  ...over,
+});
+
+test('three messages, in the order the chain requires', () => {
+  // The denom must exist before it can be minted, and the supply must exist
+  // before it can be attached. Any other order fails at the second message.
+  const p = planLaunch(input());
+  assert.deepEqual(
+    p.messages.map((m) => m.typeUrl),
+    [MSG_CREATE_DENOM, MSG_MINT, MSG_EXECUTE],
+  );
+});
+
+test('the denom matches what the chain will derive', () => {
+  /*
+   * The chain builds `factory/<creator>/<subdenom>` itself. If this guessed a
+   * different string the mint would target a denom that does not exist, and the
+   * attach would reference one the factory has never seen.
+   */
+  const p = planLaunch(input());
+  assert.equal(p.denom, `factory/${CREATOR}/KAIJU`);
+  assert.equal(p.denom, denomFor(CREATOR, 'KAIJU'));
+  const mint = p.messages[1].value as { amount: { denom: string } };
+  const exec = p.messages[2].value as { funds: Array<{ denom: string }> };
+  assert.equal(mint.amount.denom, p.denom, 'the mint targets a different denom');
+  assert.equal(exec.funds[0].denom, p.denom, 'the attach references a different denom');
+});
+
+test('the attached amount is exactly what the factory demands', () => {
+  /*
+   * `instantiate` refuses anything but `curve_supply + lp_reserve`, over or
+   * under, because the launch is funded once and nothing mints later. A curve
+   * that accepted less would promise tokens it does not hold.
+   */
+  const p = planLaunch(input());
+  const expected = CURVE.curveSupply + LP;
+  assert.equal(p.seedAmount, expected);
+  assert.equal(seedAmount(CURVE, LP), expected);
+
+  const mint = p.messages[1].value as { amount: { amount: string } };
+  const exec = p.messages[2].value as { funds: Array<{ amount: string }> };
+  assert.equal(mint.amount.amount, expected.toString(), 'minted amount');
+  assert.equal(exec.funds[0].amount, expected.toString(), 'attached amount');
+  assert.equal(mint.amount.amount, exec.funds[0].amount, 'minting and attaching disagree');
+});
+
+test('amounts travel as decimal strings, never as numbers', () => {
+  /*
+   * 800,000,000 tokens at 18 decimals is 8e26. JSON has no integer that wide and
+   * a Number is exact only to about 9e15, so serialising these as numbers loses
+   * the amount silently and the chain receives a different figure than intended.
+   */
+  const p = planLaunch(input());
+  const json = JSON.stringify(p.messages);
+  assert.ok(json.includes('"1000000000000000000000000000"'), 'the seed is not a string in the payload');
+  assert.ok(!/"amount":\s*\d/.test(json.replace(/"amount":\s*"/g, '')), 'an amount is a bare number');
+
+  const exec = p.messages[2].value as { msg: { create_launch: { curve: Record<string, unknown> } } };
+  const curve = exec.msg.create_launch.curve;
+  for (const k of ['virtual_inj', 'virtual_tokens', 'curve_supply', 'graduation_target']) {
+    assert.equal(typeof curve[k], 'string', `${k} must be a string`);
+  }
+  // fee_bps is a u16 on the contract and so is a number, deliberately.
+  assert.equal(typeof curve.fee_bps, 'number');
+  assert.equal(curve.fee_bps, 100);
+});
+
+test('the execute message names the keys the contract deserialises', () => {
+  // snake_case, and the exact field names on `CreateLaunch`. A camelCase key
+  // deserialises as a missing field and the contract refuses the whole message.
+  const exec = planLaunch(input()).messages[2].value as {
+    contract: string;
+    sender: string;
+    msg: { create_launch: Record<string, unknown> };
+  };
+  assert.equal(exec.contract, FACTORY);
+  assert.equal(exec.sender, CREATOR);
+  assert.deepEqual(
+    Object.keys(exec.msg.create_launch).sort(),
+    ['creator_fee_share_bps', 'curve', 'denom', 'lp_reserve'],
+  );
+});
+
+test('a ticker the chain would refuse is refused here instead', () => {
+  /*
+   * Tokenfactory subdenoms allow letters, digits, dot, dash and underscore. A
+   * ticker with a space reaches MsgCreateDenom and fails there, after the user
+   * has filled in the whole form and signed.
+   */
+  for (const bad of ['', 'A', 'has space', 'emoji🙂', '-leading', 'way'.repeat(20)]) {
+    assert.throws(
+      () => validateLaunch(input({ symbol: bad })),
+      (e: unknown) => e instanceof LaunchInputError && e.field === 'symbol',
+      `"${bad}" was accepted`,
+    );
+  }
+  for (const ok of ['KA', 'KAIJU', 'kaiju_2', 'a.b-c']) {
+    assert.doesNotThrow(() => validateLaunch(input({ symbol: ok })), `"${ok}" was refused`);
+  }
+});
+
+test('a target the curve can never reach is refused, by the curve validator', () => {
+  /*
+   * Above `maxCollectable` the launch sells out, refuses further buys, and sits
+   * there unable to graduate.
+   *
+   * I had written a second check for this in `validateLaunch` and a comment
+   * saying the curve validator missed it. Both were wrong: `validate` tests the
+   * identical condition and throws first, with a better sentence. This test now
+   * asserts the behaviour that actually exists, which is what caught the dead
+   * branch in the first place.
+   */
+  assert.throws(
+    () => validateLaunch(input({ curve: { ...CURVE, graduationTarget: amt(10_000n) } })),
+    (e: unknown) =>
+      e instanceof LaunchInputError &&
+      e.field === 'curve' &&
+      /can never be reached/.test((e as Error).message),
+  );
+});
+
+test('a zero liquidity reserve is refused even though the contract allows it', () => {
+  /*
+   * With no reserve a sold-out curve graduates holding quote and no token side,
+   * so the migrated pool has nothing to pair. The contract tolerates it because
+   * an operator might have a reason; a form should not produce it silently.
+   */
+  assert.throws(
+    () => validateLaunch(input({ lpReserve: 0n })),
+    (e: unknown) => e instanceof LaunchInputError && e.field === 'lpReserve',
+  );
+});
+
+test('an unconnected wallet and a missing factory each say which is missing', () => {
+  // Two different fixes. One sentence for both would send half the users to the
+  // wrong one.
+  assert.throws(
+    () => validateLaunch(input({ creator: 'cosmos1whatever' })),
+    (e: unknown) => e instanceof LaunchInputError && e.field === 'creator',
+  );
+  assert.throws(
+    () => validateLaunch(input({ factory: '' })),
+    (e: unknown) => e instanceof LaunchInputError && e.field === 'factory',
+  );
+});
+
+test('a fee share outside the basis-point range is refused', () => {
+  for (const bps of [-1, 10_001, 1.5]) {
+    assert.throws(
+      () => validateLaunch(input({ creatorFeeShareBps: bps })),
+      (e: unknown) => e instanceof LaunchInputError && e.field === 'creatorFeeShareBps',
+      `${bps} was accepted`,
+    );
+  }
+  for (const bps of [0, 1, 2_000, 10_000]) {
+    assert.doesNotThrow(() => validateLaunch(input({ creatorFeeShareBps: bps })));
+  }
+});
+
+test('planning refuses rather than returning a plan that cannot execute', () => {
+  // The plan is the thing that gets signed, so it must never exist in an invalid
+  // state. Validation runs inside `planLaunch`, not only beside it.
+  assert.throws(() => planLaunch(input({ symbol: 'no good' })), LaunchInputError);
+});
+
+test('the summary states the irreversible parts in the user\'s own terms', () => {
+  /*
+   * This is what someone reads before signing away an entire token supply, so it
+   * has to name the three facts they cannot undo: the denom, that nothing can
+   * mint more, and that all of it leaves their wallet.
+   */
+  const p = planLaunch(input());
+  const lines = describePlan(p, CURVE, LP).join(' ');
+  assert.match(lines, /factory\/inj1/, 'the denom is not named');
+  assert.match(lines, /nothing can mint more/i, 'the fixed supply is not stated');
+  assert.match(lines, /1,000,000,000/, 'the amount leaving the wallet is not stated');
+  assert.match(lines, /800,000,000/, 'the curve share is not stated');
+  assert.match(lines, /200,000,000/, 'the held-back share is not stated');
+});

@@ -73,9 +73,73 @@ market price.
 
 Testnet is the default everywhere. Mainnet is never a fallback.
 
+## Pages
+
+- `/` the launch index, with search over ticker, denom and creator, three sorts
+  and a graduated filter. The sort logic is in `lib/launchList.ts` rather than in
+  the component, because the four demo launches cannot distinguish the three
+  orders and driving the page therefore cannot test them.
+- `/launch/[id]` the launch: curve, numbers, buy and sell with price impact on
+  both sides, and the trade feed.
+- `/create` the create form. It derives the curve from four plain numbers,
+  draws it from the real maths as you type, and shows the exact three messages
+  before anything is signed.
+
+## Wallet
+
+Keplr and Leap, over their own injected API. No SDK: both expose `enable` and
+`getKey`, which is all that connecting and reading an address needs, and the
+balance comes from the LCD this app already talks to.
+
+Extensions are detected by polling briefly after mount rather than reading once.
+They inject themselves during page load, so a single read is a coin flip on a
+cold load and resolves to "no wallet" on a machine that has one.
+
+## Creating a launch
+
+Three messages in one transaction, and the order matters:
+
+1. `MsgCreateDenom` makes `factory/<creator>/<subdenom>`
+2. `MsgMint` mints `curve_supply + lp_reserve` to the creator
+3. `MsgExecuteContract` `CreateLaunch`, with that whole amount attached
+
+The factory refuses anything but the exact amount and nothing mints later, so a
+launch that gets this wrong either fails outright or succeeds with a supply the
+curve cannot honour. The construction is a pure function in `lib/createLaunch.ts`
+with its own tests, mutation-verified nine ways, because it is the part most
+likely to be wrong and the part a form cannot check.
+
+**Broadcasting is not wired up.** The messages are built and tested against the
+contract's own expectations but have never been signed against a chain. Signing
+needs Injective's protobuf types and a wallet to exercise them, and this
+repository already records twice what an unexercised transaction builder costs.
+The form says so on the button rather than failing at the end of a filled-in
+form, and prints the messages for use with `injectived tx`.
+
+## Holders: not possible from a public endpoint
+
+Every launchpad shows a holder list and it is the one panel that is a safety
+signal rather than a convenience. It cannot be built here. Measured on Injective
+testnet:
+
+```
+/cosmos/bank/v1beta1/denom_owners/inj                     200, real holders
+/cosmos/bank/v1beta1/denom_owners/factory%2F…%2Fsubtoken  501 Not Implemented
+```
+
+501 for real tokenfactory denoms, which is exactly the set a launchpad needs, and
+the explorer's `api/explorer/v1` paths serve the HTML app rather than JSON. A
+panel on that endpoint would render "no holders" for every launched token, which
+reads as a token nobody owns. It needs a self-hosted indexer over bank transfer
+events. The measurement is a comment in `lib/chain.ts` so nobody repeats it.
+
 ## Not done yet
 
 - **Nothing is deployed.** `scripts/deploy.mjs` needs a funded key and has not
   been run against Injective testnet.
+- **Broadcasting**, as above.
+- **Holders**, which needs an indexer.
+- A price chart over time, which needs trade history to aggregate and therefore
+  needs launches that have traded.
 - The contracts have not been audited, and `contracts/curve` holds the reserve
   that backs every outstanding token.

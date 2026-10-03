@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { NETWORK } from '@/lib/config';
 import { isDemoMode } from '@/lib/demo';
+import { ConnectWallet } from '@/components/ConnectWallet';
 import './globals.css';
 
 export const metadata: Metadata = {
@@ -18,9 +19,19 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <Link href="/" className="brand">
               inj<em>·</em>pad
             </Link>
+            <Link href="/create" className="nav-create">
+              Create
+            </Link>
             <span className="spacer" />
             {isDemoMode() && <span className="chip warn">demo</span>}
             <span className="chip">{NETWORK.name}</span>
+            {/*
+                The wallet sits in the header because it is page-independent: a
+                connection made on a launch page is the same connection on the
+                create form, and asking for it twice is how people end up with two
+                accounts connected and no idea which one is about to sign.
+              */}
+            <ConnectWallet />
           </div>
         </header>
         <main className="wrap">{children}</main>

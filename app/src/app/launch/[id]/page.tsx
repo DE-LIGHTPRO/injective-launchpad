@@ -6,6 +6,7 @@ import { isDemoMode } from '@/lib/demo';
 import { CurveChart } from '@/components/CurveChart';
 import { DemoBanner } from '@/components/DemoBanner';
 import { TradePanel } from '@/components/TradePanel';
+import { Trades } from '@/components/Trades';
 
 export const dynamic = 'force-dynamic';
 
@@ -148,6 +149,8 @@ export default async function LaunchPage({ params }: { params: Promise<{ id: str
           symbol={symbol}
           tradingClosed={detail.state.graduated}
         />
+
+      <Trades curve={launch.curve} denom={launch.denom} />
       </div>
     </>
   );
