@@ -4,6 +4,7 @@ import { graduationProgress, fmt } from '@/lib/curve';
 import { isDeployed, isDevBuild, NETWORK } from '@/lib/config';
 import { isDemoMode } from '@/lib/demo';
 import { DemoBanner } from '@/components/DemoBanner';
+import { LaunchList, type LaunchRow } from '@/components/LaunchList';
 
 export const dynamic = 'force-dynamic';
 
@@ -35,6 +36,26 @@ async function loadRows(): Promise<{ rows: Row[]; error?: string; errorDetail?: 
     const err = e as Error & { detail?: string };
     return { rows: [], error: err.message, errorDetail: err.detail };
   }
+}
+
+/**
+ * Base units cross the server boundary as decimal strings.
+ *
+ * These are bigints on the server and bigints again in the list, but a bigint is
+ * not serialisable as a server-component prop: passing one throws at render, and
+ * passing it as a Number would silently lose precision at 18 decimals, which is
+ * the quieter failure and the worse one.
+ */
+function toRow(r: Row): LaunchRow {
+  return {
+    id: r.launch.id,
+    denom: r.launch.denom,
+    creator: r.launch.creator,
+    raised: r.raised.toString(),
+    target: r.target.toString(),
+    progress: r.progress,
+    graduated: r.graduated,
+  };
 }
 
 export default async function Home() {
@@ -87,41 +108,8 @@ export default async function Home() {
       )}
 
       {rows.length > 0 && (
-        <div className="grid" style={{ marginTop: 'var(--space-5)' }}>
-          {rows.map(({ launch, raised, target, progress, graduated }) => (
-            <Link key={launch.id} href={`/launch/${launch.id}`} className="card">
-              <div className="card-head">
-                <div>
-                  <div className="sym">{symbolOf(launch.denom)}</div>
-                  <div className="denom mono">{launch.denom}</div>
-                </div>
-                <span className={`chip ${graduated ? 'warn' : 'accent'}`}>
-                  {graduated ? 'graduated' : 'live'}
-                </span>
-              </div>
-
-              <div className="bar">
-                <i style={{ width: `${Math.min(100, progress * 100).toFixed(1)}%` }} />
-              </div>
-
-              <div style={{ marginTop: 'var(--space-4)' }}>
-                <div className="metric-row">
-                  <span className="k">Raised</span>
-                  <span className="v mono">
-                    {fmt(raised, 18, 2)} / {fmt(target, 18, 0)} {NETWORK.quoteSymbol}
-                  </span>
-                </div>
-                <div className="metric-row">
-                  <span className="k">Progress</span>
-                  <span className="v mono">{(progress * 100).toFixed(1)}%</span>
-                </div>
-                <div className="metric-row">
-                  <span className="k">Creator</span>
-                  <span className="v mono">{short(launch.creator)}</span>
-                </div>
-              </div>
-            </Link>
-          ))}
+        <div style={{ marginTop: 'var(--space-5)' }}>
+          <LaunchList rows={rows.map(toRow)} />
         </div>
       )}
     </>

@@ -12,8 +12,8 @@
  * live market or a real price. It exercises the interface with arithmetic.
  */
 
-import { quoteBuy, type CurveConfig, type CurveState } from './curve';
-import type { Launch, LaunchDetail } from './chain';
+import { quoteBuy, type CurveConfig, type CurveState } from './curve.ts';
+import type { Launch, LaunchDetail } from './chain.ts';
 
 const ONE = 1_000_000_000_000_000_000n;
 const amt = (n: bigint) => n * ONE;
