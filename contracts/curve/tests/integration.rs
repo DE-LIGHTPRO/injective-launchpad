@@ -8,7 +8,7 @@ use cosmwasm_std::{coin, coins, Addr, Empty, Uint128};
 use cw_multi_test::{App, AppBuilder, Contract, ContractWrapper, Executor};
 
 use curve::msg::{ExecuteMsg, InstantiateMsg, QueryMsg, SimulateBuyResponse};
-use curve::state::{Config, CurveConfigStored, State};
+use curve::state::{CurveConfigStored, State};
 
 const QUOTE: &str = "inj";
 const TOKEN: &str = "factory/inj1launch/TEST";
