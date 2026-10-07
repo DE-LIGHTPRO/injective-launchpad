@@ -7,7 +7,9 @@
     "build": "next build",
     "start": "next start",
     "test": "node --test src/lib/*.test.ts",
-    "vectors": "cargo run -q --manifest-path ../Cargo.toml -p launchpad-math --example parity > src/lib/curve-vectors.json"
+    "vectors": "cargo run -q --manifest-path ../Cargo.toml -p launchpad-math --example parity > src/lib/curve-vectors.json",
+    "prebuild": "node scripts-guard.mjs",
+    "build:force": "next build"
   },
   "dependencies": {
     "next": "^15.0.0",

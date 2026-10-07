@@ -2,6 +2,7 @@ import { listTrades, short, symbolOf, type Trade } from '@/lib/chain';
 import { fmt } from '@/lib/curve';
 import { NETWORK } from '@/lib/config';
 import { isDemoMode } from '@/lib/demo';
+import { buildSeries, changeBps, pathFor } from '@/lib/priceSeries';
 
 /**
  * Recent trades, read from transaction events.
@@ -43,10 +44,50 @@ export async function Trades({ curve, denom }: { curve: string; denom: string })
   }
 
   const sym = symbolOf(denom);
+  const series = buildSeries(trades, NETWORK.quoteDecimals);
+  const change = changeBps(series);
+  const path = pathFor(series, 560, 60, 3);
 
   return (
     <div className="card">
       <h2>Trades</h2>
+
+      {/*
+          The history, which is a different question from the curve above it. The
+          curve is what the contract WILL charge; this is what people actually
+          paid, fee and their own price impact included. Labelled as fills for
+          that reason: on a steep curve a large buy fills well above spot, and a
+          chart drawn from spot would hide exactly that.
+        */}
+      {path && (
+        <div className="spark">
+          <div className="spark-head">
+            <span className="note">Fill prices, oldest to newest</span>
+            {change !== null && (
+              <span className={`mono spark-change ${change >= 0 ? 'up' : 'down'}`}>
+                {change >= 0 ? '+' : ''}
+                {(change / 100).toFixed(2)}%
+              </span>
+            )}
+          </div>
+          <svg viewBox="0 0 560 60" width="100%" height="60" role="img"
+               aria-label={`Fill prices across ${series.points.length} trades`}>
+            <path d={path} fill="none" style={{ stroke: 'var(--accent)' }} strokeWidth="1.5"
+                  strokeLinejoin="round" />
+          </svg>
+          <div className="spark-foot mono">
+            <span>{series.low.toPrecision(3)}</span>
+            <span>{series.high.toPrecision(3)} {NETWORK.quoteSymbol} per {sym}</span>
+          </div>
+        </div>
+      )}
+
+      {series.unpriceable > 0 && (
+        <p className="note">
+          {series.unpriceable} of these carried amounts that could not be priced, so they are not
+          on the line above.
+        </p>
+      )}
       {trades.length === 0 && (
         <p className="note">
           Nothing yet. The first buy will appear here within a block.

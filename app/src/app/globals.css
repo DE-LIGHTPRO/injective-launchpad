@@ -467,3 +467,11 @@ button.ghost { background: transparent; border: 1px solid var(--line); color: va
   border-radius: var(--radius-sm);
 }
 .nav-create:hover { color: var(--text); border-color: var(--line-strong); }
+
+/* Fill-price sparkline. */
+.spark { margin-bottom: var(--space-4); }
+.spark-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-3); }
+.spark-change { font-size: var(--text-sm); }
+.spark-change.up { color: var(--accent); }
+.spark-change.down { color: var(--danger); }
+.spark-foot { display: flex; justify-content: space-between; font-size: var(--text-micro); color: var(--text-faint); }

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import {
   available,
   connect,
@@ -38,8 +38,45 @@ export function ConnectWallet({
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<WalletName | null>(null);
+  const menuId = useId();
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
 
   useDismissOnEscape(open, () => setOpen(false));
+
+  /*
+   * Focus follows the menu, and comes back when it closes.
+   *
+   * This carried `role="dialog"` with a label, and focus never entered it: the
+   * active element stayed on the body, with no trap and no restore. That is worse
+   * than a plain dropdown, because assistive technology announces a dialog while
+   * the user's focus is still out on the page with no obvious way in. It is a
+   * lightweight popover, so it is no longer called a dialog, and focus moves to
+   * the first thing in it on open and returns to the trigger on close, which is
+   * what a keyboard user expects of a menu either way.
+   */
+  useEffect(() => {
+    if (open) {
+      const first = menuRef.current?.querySelector<HTMLElement>('button, a');
+      first?.focus();
+      return;
+    }
+    /*
+     * Restored when focus was LOST, which is the only signal available here.
+     *
+     * The first version asked whether the active element was still inside the
+     * menu. That can never be true: by the time this effect runs the menu has
+     * unmounted, `menuRef.current` is null, and the check is unreachable. Focus
+     * restore simply never happened, and Escape left the user on the body.
+     *
+     * Removing a focused node drops focus to the body, so a body or null active
+     * element after a close means the thing the user was on has just gone. That
+     * is the case to restore. Anything else means they have moved on themselves,
+     * and pulling focus back from there would be its own bug.
+     */
+    const a = document.activeElement;
+    if (!a || a === document.body) triggerRef.current?.focus();
+  }, [open]);
 
   useEffect(() => {
     /*
@@ -114,12 +151,18 @@ export function ConnectWallet({
 
   return (
     <div className="wallet">
-      <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
+      <button
+        ref={triggerRef}
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        aria-controls={menuId}
+      >
         Connect wallet
       </button>
 
       {open && (
-        <div className="wallet-menu" role="dialog" aria-label="Choose a wallet">
+        <div ref={menuRef} id={menuId} className="wallet-menu" aria-label="Choose a wallet">
           {installed === null && <p className="note">Looking for a wallet…</p>}
 
           {installed !== null && installed.length === 0 && (
