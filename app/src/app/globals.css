@@ -7,8 +7,22 @@
  */
 
 :root {
+  /*
+   * Native controls are not ours to style, and this is the one line that tells
+   * the platform how to draw them.
+   *
+   * Without it the checkbox on the launch list rendered as a white square on a
+   * dark glass surface, because the user agent assumes a light page and paints
+   * its own light control. The same omission gives a light scrollbar, a light
+   * `select` popup, light autofill, and a light date picker, none of which any
+   * amount of CSS on our side reaches. `accent-color` then puts the brand colour
+   * in the checked state instead of the OS blue.
+   */
+  color-scheme: dark;
+  accent-color: var(--accent);
+
   /* Surfaces, darkest to lightest */
-  --bg: #06070b;
+  --bg: #070910;
   --surface-1: #0b0d14;
   --surface-2: #11141d;
   --surface-3: #171b26;
@@ -18,7 +32,14 @@
   /* Text */
   --text: #eef1f7;
   --text-dim: #9aa3b8;
-  --text-faint: #68718a;
+  /*
+   * Measured, not chosen. #68718a was 3.99:1 on the old opaque surface and
+   * 2.95:1 once glass let the ambient through, against a 4.5:1 floor for text
+   * this size. It was failing before the glass pass and nobody had measured it.
+   * This value is the lightest point of the sampled backdrop solved for 4.5:1,
+   * then re-measured on the rendered pixels rather than trusted.
+   */
+  --text-faint: #8c95ac;
 
   /* Accent */
   --accent: #14e2ad;
@@ -52,6 +73,85 @@
   --radius-lg: 14px;
   --radius-pill: 999px;
 
+  /*
+   * Glass.
+   *
+   * Glassmorphism is four things together, and leaving any one out is what makes
+   * most attempts read as "translucent grey box" rather than as glass:
+   *
+   *   1. something BEHIND it worth blurring  (the ambient orbs on body::before)
+   *   2. a translucent fill, not a solid one (--glass-fill)
+   *   3. a blur that also saturates, because real glass concentrates the colour
+   *      it passes rather than just smearing it (--glass-blur)
+   *   4. an edge that catches light: a hairline border plus a brighter inset on
+   *      the top edge only, which is where light lands (--glass-border/-highlight)
+   *
+   * The fill is white at low alpha over a dark ground, so it RAISES local
+   * luminance and therefore raises contrast with light text. That is why glass is
+   * safe here and would need re-measuring in a light theme, where the same fill
+   * would lower it.
+   */
+  /*
+   * A FLAT fill reads as a tinted box; a directional one reads as glass.
+   *
+   * The first pass used a single white alpha and the panes came out looking like
+   * the dark cards they replaced, with the border doing all the work. Real glass
+   * is brighter where the light meets it and falls off across the pane, so the
+   * fill is a gradient from the top left and the alpha is carried by it.
+   */
+  /*
+   * The dark base under the gradient is an ACCESSIBILITY control, not a tint.
+   *
+   * Pure white-alpha glass passes the whole ambient through, so the colour a
+   * glyph sits on becomes whatever happens to be behind that card: measured
+   * across one screen the backdrop under identical text ranged from rgb(24,44,52)
+   * to rgb(44,36,76), and the same token passed in one card and failed in the
+   * next. That variance is glassmorphism's real failure mode and it is invisible
+   * in a screenshot of the card that happens to pass.
+   *
+   * A dark floor at 38% damps the range without hiding the refraction: the pane
+   * still takes the hue behind it, which is the whole effect, but it no longer
+   * takes the full luminance. Apple's dark materials are a dark tint plus blur
+   * for the same reason, not white alpha.
+   */
+  --glass-fill: linear-gradient(
+      135deg,
+      rgba(255, 255, 255, 0.1) 0%,
+      rgba(255, 255, 255, 0.04) 42%,
+      rgba(255, 255, 255, 0.022) 100%
+    ),
+    linear-gradient(rgba(7, 9, 16, 0.38), rgba(7, 9, 16, 0.38));
+  --glass-fill-strong: linear-gradient(
+      135deg,
+      rgba(255, 255, 255, 0.15) 0%,
+      rgba(255, 255, 255, 0.06) 42%,
+      rgba(255, 255, 255, 0.032) 100%
+    ),
+    linear-gradient(rgba(7, 9, 16, 0.3), rgba(7, 9, 16, 0.3));
+  --glass-border: rgba(255, 255, 255, 0.11);
+  --glass-border-lit: rgba(255, 255, 255, 0.2);
+  --glass-highlight: rgba(255, 255, 255, 0.14);
+  --glass-blur: blur(20px) saturate(150%);
+  --glass-blur-heavy: blur(32px) saturate(170%);
+  /*
+   * A control set INTO the glass rather than floating on it.
+   *
+   * A solid near-black fill would read as a hole punched through the pane. This
+   * is dark at alpha, so the ambient light still reaches it faintly, plus an
+   * inset shadow at the top edge, which is the same lighting logic as the card's
+   * highlight run in reverse: light lands on a raised edge and is occluded by a
+   * recessed one. That pairing is what makes the two read as one object.
+   */
+  --glass-well: rgba(3, 4, 7, 0.55);
+  --glass-well-inset:
+    0 1px 2px 0 rgba(0, 0, 0, 0.5) inset,
+    0 -1px 0 0 rgba(255, 255, 255, 0.04) inset;
+
+  --glass-shadow:
+    0 1px 0 0 var(--glass-highlight) inset,
+    0 16px 40px -20px rgba(0, 0, 0, 0.8),
+    0 2px 8px -4px rgba(0, 0, 0, 0.5);
+
   --ring: 0 0 0 3px rgba(20, 226, 173, 0.22);
   --shadow: 0 12px 32px -18px rgba(0, 0, 0, 0.9);
   --ease: cubic-bezier(0.2, 0.7, 0.3, 1);
@@ -62,15 +162,59 @@
 html { scroll-behavior: smooth; }
 
 body {
-  background:
-    radial-gradient(900px 500px at 50% -15%, rgba(20, 226, 173, 0.05), transparent 70%),
-    var(--bg);
+  background: var(--bg);
   color: var(--text);
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   font-size: var(--text-base);
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
   min-height: 100vh;
+}
+
+/*
+ * The light the glass has to bend.
+ *
+ * Fixed rather than scrolled, so panels pass over the light instead of carrying
+ * it, which is what makes the blur change as you scroll and is the entire reason
+ * the effect reads as depth. On `body::before` at z-index -1 rather than on a
+ * wrapper, because a blurring descendant of a blurring ancestor stacks two
+ * filters and costs a second full-viewport composite for no visual gain.
+ *
+ * `pointer-events: none` is not decoration here: a fixed full-viewport layer
+ * swallows every click on the page without it.
+ */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(880px 600px at 6% -6%, rgba(20, 226, 173, 0.38), transparent 58%),
+    radial-gradient(820px 560px at 96% 6%, rgba(96, 126, 255, 0.32), transparent 56%),
+    radial-gradient(760px 620px at 78% 58%, rgba(168, 92, 255, 0.20), transparent 58%),
+    radial-gradient(820px 640px at 4% 72%, rgba(20, 226, 173, 0.17), transparent 58%),
+    radial-gradient(1200px 800px at 48% 112%, rgba(96, 126, 255, 0.16), transparent 60%);
+}
+
+/*
+ * Fine grain over the ambient.
+ *
+ * Gradients this large step visibly on an 8-bit display: a 900px wash across a
+ * few units of luminance quantises into bands, and banding is the clearest tell
+ * of a cheap backdrop. Noise at 3% dithers the steps below the threshold where
+ * the eye joins them into bands. Inline SVG rather than an image so it costs no
+ * request and cannot 404, and `fixed` so it does not swim against the ambient
+ * while scrolling.
+ */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  opacity: 0.032;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
 }
 
 a { color: inherit; text-decoration: none; }
@@ -95,8 +239,17 @@ header.top {
   border-bottom: 1px solid var(--line);
   padding: var(--space-4) 0;
   margin-bottom: var(--space-7);
-  background: rgba(6, 7, 11, 0.8);
-  backdrop-filter: blur(12px);
+  /*
+   * Heavier blur than a card, and a tinted fill rather than a white one. The
+   * header sits over whatever scrolls beneath it, so text crossing under it has
+   * to stop being legible as text; a card only ever has the ambient wash behind
+   * it. The tint is the background colour at alpha, which keeps the nav reading
+   * as chrome rather than as another panel.
+   */
+  background: rgba(6, 7, 11, 0.62);
+  backdrop-filter: var(--glass-blur-heavy);
+  -webkit-backdrop-filter: var(--glass-blur-heavy);
+  box-shadow: 0 1px 0 0 rgba(255, 255, 255, 0.05) inset;
   position: sticky;
   top: 0;
   z-index: 10;
@@ -153,18 +306,85 @@ h3 { font-size: var(--text-base); font-weight: 600; }
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: var(--space-4); }
 
 .card {
-  background: linear-gradient(180deg, var(--surface-2), var(--surface-1));
-  border: 1px solid var(--line);
+  position: relative;
+  background: var(--glass-fill);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius-lg);
   padding: var(--space-5);
-  box-shadow: var(--shadow);
+  box-shadow: var(--glass-shadow);
+}
+
+/*
+ * NOTHING INSIDE A CARD MAY BE `position: fixed`.
+ *
+ * `backdrop-filter` makes an element a containing block for fixed descendants,
+ * so a fixed child positions against the card rather than the viewport. On
+ * Sealed this clipped a modal's full-screen backdrop to the panel that opened
+ * it, and the rule there is that every dialog is portalled out. Same rule here:
+ * dialogs go through a portal, and `.wallet-menu` is absolute against its own
+ * relative parent, which is unaffected.
+ */
+
+/*
+ * The fallback is not cosmetic.
+ *
+ * Without `backdrop-filter` the fill is white at 4.5% alpha and nothing blurs
+ * behind it, so the card is effectively transparent and body text sits directly
+ * on the ambient gradient. Firefox shipped this in 103 and Safari needs the
+ * prefix, but it is also disabled outright by some privacy settings and by
+ * low-power modes, where the unprefixed query is the only thing that catches it.
+ */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .card,
+  header.top,
+  .wallet-menu {
+    background: var(--surface-2);
+    border-color: var(--line);
+  }
+}
+
+/*
+ * Transparency is an accessibility setting, not a taste.
+ *
+ * Someone who has asked their OS to reduce transparency has usually done it
+ * because layered translucency is hard to parse, and overriding that is the
+ * same category of mistake as ignoring reduced-motion. The layout does not
+ * change: only the fill goes solid and the blur stops.
+ */
+@media (prefers-reduced-transparency: reduce) {
+  .card,
+  header.top,
+  .wallet-menu {
+    background: var(--surface-2);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    border-color: var(--line);
+  }
+  body::before { opacity: 0.4; }
 }
 
 a.card {
   display: block;
   transition: border-color 0.2s var(--ease), transform 0.2s var(--ease);
 }
-a.card:hover { border-color: var(--line-strong); transform: translateY(-2px); }
+a.card {
+  transition:
+    border-color 0.25s var(--ease),
+    transform 0.25s var(--ease),
+    box-shadow 0.25s var(--ease);
+}
+/* Lit edge and a slightly denser pane, which is what a card catching light does. */
+a.card:hover {
+  border-color: var(--glass-border-lit);
+  background: var(--glass-fill-strong);
+  transform: translateY(-2px);
+  box-shadow:
+    0 1px 0 0 rgba(255, 255, 255, 0.2) inset,
+    0 22px 48px -22px rgba(0, 0, 0, 0.9),
+    0 0 0 1px rgba(20, 226, 173, 0.08);
+}
 a.card:focus-visible { border-color: var(--accent-deep); }
 
 .card-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
@@ -210,7 +430,7 @@ a.card:focus-visible { border-color: var(--accent-deep); }
 
 /* ----------------------------------------------------------------- forms -- */
 
-.segmented { display: flex; gap: var(--space-1); background: var(--surface-3); padding: var(--space-1); border-radius: var(--radius-md); }
+.segmented { display: flex; gap: var(--space-1); background: var(--glass-well); box-shadow: var(--glass-well-inset); padding: var(--space-1); border-radius: var(--radius-md); }
 .segmented button {
   flex: 1;
   background: transparent;
@@ -241,8 +461,9 @@ a.card:focus-visible { border-color: var(--accent-deep); }
 .input-wrap { position: relative; display: flex; align-items: center; }
 input.amount {
   width: 100%;
-  background: var(--bg);
-  border: 1px solid var(--line);
+  background: var(--glass-well);
+  box-shadow: var(--glass-well-inset);
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius-md);
   color: var(--text);
   padding: var(--space-3) var(--space-4);
@@ -275,6 +496,7 @@ button.go {
   cursor: pointer;
   transition: filter 0.18s var(--ease);
 }
+button.go { box-shadow: 0 1px 0 0 rgba(255, 255, 255, 0.22) inset, 0 8px 20px -10px rgba(20, 226, 173, 0.5); }
 button.go:hover:not(:disabled) { filter: brightness(1.08); }
 button.go:disabled { background: var(--surface-3); color: var(--text-faint); cursor: not-allowed; }
 button.go.ghost {
@@ -294,7 +516,32 @@ button.go.ghost:hover:not(:disabled) { border-color: var(--accent-deep); }
 .quote-box .metric-row + .metric-row { border-top: none; }
 
 .note { font-size: var(--text-xs); color: var(--text-faint); margin-top: var(--space-3); line-height: 1.55; }
-.warn-text { color: var(--warn); }
+/*
+ * The compound selectors are load-bearing, and leaving them off half-fixed this.
+ *
+ * `.metric-row .k` is specificity 0,2,0 and a bare `.err-text` is 0,1,0, so a
+ * severe row coloured its VALUE red and left its LABEL muted grey: measured on
+ * the running page at a 180.16% impact, value rgb(240,106,118) and label
+ * rgb(154,163,184). Defining the class was necessary and covered two of its
+ * three uses, which is the failure mode of fixing an instance instead of a
+ * class. Written out rather than left to source order, because a tie resolved by
+ * position breaks the next time these rules are reordered.
+ */
+.warn-text,
+.metric-row .k.warn-text,
+.metric-row .v.warn-text { color: var(--warn); }
+/*
+ * `.err-text` was applied in three places and defined in none, so the SEVERE
+ * price-impact tier rendered exactly like an ordinary row. The branch was there,
+ * the class was there, and the only thing missing was the half that a user can
+ * see: a 25%-and-worse impact got the same treatment as a 1% one. Aliased rather
+ * than merged into `.danger-text` because the two names mean different things at
+ * the call site, and renaming across components to save a line is how the next
+ * one goes missing.
+ */
+.err-text,
+.metric-row .k.err-text,
+.metric-row .v.err-text { color: var(--danger); }
 .danger-text { color: var(--danger); }
 
 /* ----------------------------------------------------------------- empty -- */
@@ -432,14 +679,105 @@ button.go.ghost:hover:not(:disabled) { border-color: var(--accent-deep); }
 .wallet-menu {
   position: absolute; top: calc(100% + var(--space-2)); right: 0; z-index: 20;
   min-width: 15rem; max-width: min(22rem, calc(100vw - 2rem));
-  background: var(--surface-2); border: 1px solid var(--line);
+  /*
+   * A popover opens over content rather than over the ambient wash, so its fill
+   * is darker than a card's: a white-alpha fill here would let the text behind
+   * it show through the menu text.
+   */
+  background: rgba(17, 20, 29, 0.78);
+  backdrop-filter: var(--glass-blur-heavy);
+  -webkit-backdrop-filter: var(--glass-blur-heavy);
+  border: 1px solid var(--glass-border-lit);
   border-radius: var(--radius-md); padding: var(--space-3);
-  box-shadow: 0 10px 30px rgb(0 0 0 / 0.35);
+  box-shadow: 0 1px 0 0 var(--glass-highlight) inset, 0 20px 48px -16px rgb(0 0 0 / 0.7);
 }
 .wallet-list { list-style: none; margin: var(--space-2) 0; padding: 0; display: grid; gap: var(--space-2); }
 .wallet-list button, .wallet-list a { width: 100%; text-align: left; }
 .wallet-list a { display: block; padding: var(--space-2) var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--accent); }
 button.ghost { background: transparent; border: 1px solid var(--line); color: var(--text-dim); }
+
+/*
+ * The create form, which had no styling at all.
+ *
+ * `.field .lbl` existed and nothing used it; the JSX writes `<label>` with a
+ * `.hint` span. So every label and input on /create rendered at browser default:
+ * white boxes, black borders, label and input on one line. It shipped that way
+ * because I wrote the page and never opened it, which is the whole argument for
+ * auditing the screen rather than the tree.
+ */
+.field label {
+  display: block;
+  font-size: var(--text-sm);
+  font-weight: 540;
+  color: var(--text-dim);
+  margin-bottom: var(--space-2);
+}
+.field .hint {
+  font-weight: 400;
+  color: var(--text-faint);
+  font-size: var(--text-xs);
+  margin-left: var(--space-2);
+}
+.field input,
+.field select,
+.field textarea {
+  width: 100%;
+  background: var(--glass-well);
+  box-shadow: var(--glass-well-inset);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  color: var(--text);
+  padding: var(--space-3) var(--space-4);
+  font-family: inherit;
+  /*
+   * 16px on a coarse pointer, never below. iOS zooms the viewport for a focused
+   * input under 16px, which throws the whole layout sideways on a phone and
+   * cannot be undone by the user. Accessibility beats scale purity.
+   */
+  font-size: var(--text-base);
+  transition: border-color 0.18s var(--ease), box-shadow 0.18s var(--ease);
+}
+@media (pointer: coarse) {
+  .field input, .field select, .field textarea { font-size: 16px; }
+}
+.field input::placeholder { color: var(--text-faint); }
+.field input:hover { border-color: var(--glass-border-lit); }
+.field input:focus-visible {
+  outline: none;
+  border-color: var(--accent-deep);
+  box-shadow: var(--glass-well-inset), var(--ring);
+}
+
+/*
+ * A checkbox and its label are one target.
+ *
+ * `<label class="toggle">` wraps the input, so clicking the text toggles it and
+ * the hit area is the whole row rather than a 24px square. The gap keeps the box
+ * off the text, and `align-items: start` stops a two-line label centring its
+ * checkbox against the middle of the paragraph.
+ */
+.toggle {
+  display: flex;
+  align-items: start;
+  gap: var(--space-3);
+  cursor: pointer;
+  font-size: var(--text-sm);
+  color: var(--text-dim);
+  line-height: 1.5;
+}
+.toggle input[type='checkbox'] {
+  /*
+   * 24px square, which is the WCAG 2.5.8 AA floor, and it is set here rather
+   * than through a utility class because a native control carries no class of
+   * ours. Every control that measured under the floor on a sibling project had
+   * an empty className for exactly this reason.
+   */
+  width: 24px;
+  height: 24px;
+  flex: none;
+  margin-top: 1px;
+  cursor: pointer;
+}
 
 .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); }
 @media (max-width: 560px) { .field-row { grid-template-columns: 1fr; } }

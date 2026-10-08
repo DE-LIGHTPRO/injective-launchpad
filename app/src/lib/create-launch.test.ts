@@ -24,10 +24,29 @@ import {
   LaunchInputError,
   MSG_CREATE_DENOM,
   MSG_MINT,
+  MSG_SET_METADATA,
+  TOKEN_DECIMALS,
   MSG_EXECUTE,
   type LaunchInput,
 } from './createLaunch.ts';
 import type { CurveConfig } from './curve.ts';
+import type { LaunchPlan } from './createLaunch.ts';
+
+/*
+ * Messages are found by type, never by index, and that is a lesson this suite
+ * learned the hard way. Four tests here read `messages[2]` for the execute
+ * message; adding `MsgSetDenomMetadata` ahead of it shifted every one of them and
+ * they failed reading `undefined`. A positional anchor asserts the order as a side
+ * effect of asserting something else, so inserting a message breaks tests that
+ * have no opinion about ordering, while the one test that DOES assert the order
+ * still does so explicitly above.
+ */
+const byType = (p: LaunchPlan, typeUrl: string): Record<string, unknown> => {
+  const m = p.messages.find((x) => x.typeUrl === typeUrl);
+  assert.ok(m, `no ${typeUrl} in the plan`);
+  return m.value;
+};
+
 
 const ONE = 10n ** 18n;
 const amt = (n: bigint) => n * ONE;
@@ -54,13 +73,13 @@ const input = (over: Partial<LaunchInput> = {}): LaunchInput => ({
   ...over,
 });
 
-test('three messages, in the order the chain requires', () => {
+test('four messages, in the order the chain requires', () => {
   // The denom must exist before it can be minted, and the supply must exist
   // before it can be attached. Any other order fails at the second message.
   const p = planLaunch(input());
   assert.deepEqual(
     p.messages.map((m) => m.typeUrl),
-    [MSG_CREATE_DENOM, MSG_MINT, MSG_EXECUTE],
+    [MSG_CREATE_DENOM, MSG_MINT, MSG_SET_METADATA, MSG_EXECUTE],
   );
 });
 
@@ -74,7 +93,7 @@ test('the denom matches what the chain will derive', () => {
   assert.equal(p.denom, `factory/${CREATOR}/KAIJU`);
   assert.equal(p.denom, denomFor(CREATOR, 'KAIJU'));
   const mint = p.messages[1].value as { amount: { denom: string } };
-  const exec = p.messages[2].value as { funds: Array<{ denom: string }> };
+  const exec = byType(p, MSG_EXECUTE) as { funds: Array<{ denom: string }> };
   assert.equal(mint.amount.denom, p.denom, 'the mint targets a different denom');
   assert.equal(exec.funds[0].denom, p.denom, 'the attach references a different denom');
 });
@@ -91,7 +110,7 @@ test('the attached amount is exactly what the factory demands', () => {
   assert.equal(seedAmount(CURVE, LP), expected);
 
   const mint = p.messages[1].value as { amount: { amount: string } };
-  const exec = p.messages[2].value as { funds: Array<{ amount: string }> };
+  const exec = byType(p, MSG_EXECUTE) as { funds: Array<{ amount: string }> };
   assert.equal(mint.amount.amount, expected.toString(), 'minted amount');
   assert.equal(exec.funds[0].amount, expected.toString(), 'attached amount');
   assert.equal(mint.amount.amount, exec.funds[0].amount, 'minting and attaching disagree');
@@ -108,7 +127,7 @@ test('amounts travel as decimal strings, never as numbers', () => {
   assert.ok(json.includes('"1000000000000000000000000000"'), 'the seed is not a string in the payload');
   assert.ok(!/"amount":\s*\d/.test(json.replace(/"amount":\s*"/g, '')), 'an amount is a bare number');
 
-  const exec = p.messages[2].value as { msg: { create_launch: { curve: Record<string, unknown> } } };
+  const exec = byType(p, MSG_EXECUTE) as { msg: { create_launch: { curve: Record<string, unknown> } } };
   const curve = exec.msg.create_launch.curve;
   for (const k of ['virtual_inj', 'virtual_tokens', 'curve_supply', 'graduation_target']) {
     assert.equal(typeof curve[k], 'string', `${k} must be a string`);
@@ -121,7 +140,7 @@ test('amounts travel as decimal strings, never as numbers', () => {
 test('the execute message names the keys the contract deserialises', () => {
   // snake_case, and the exact field names on `CreateLaunch`. A camelCase key
   // deserialises as a missing field and the contract refuses the whole message.
-  const exec = planLaunch(input()).messages[2].value as {
+  const exec = byType(planLaunch(input()), MSG_EXECUTE) as unknown as {
     contract: string;
     sender: string;
     msg: { create_launch: Record<string, unknown> };
@@ -229,4 +248,70 @@ test('the summary states the irreversible parts in the user\'s own terms', () =>
   assert.match(lines, /1,000,000,000/, 'the amount leaving the wallet is not stated');
   assert.match(lines, /800,000,000/, 'the curve share is not stated');
   assert.match(lines, /200,000,000/, 'the held-back share is not stated');
+});
+
+test('the metadata declares a display unit at 18, which is the part everyone gets wrong', () => {
+  /*
+   * Measured on Injective testnet before writing this: of the factory denoms that
+   * set a name at all, the ones sampled carry `display: ""` and a single denom unit
+   * at exponent 0. That tells every wallet the base unit is the display unit, so a
+   * holder of a thousand tokens is shown 1000000000000000000000.
+   *
+   * The two units and a `display` naming the second one are what make a wallet
+   * divide. This asserts the pair rather than the message merely being present,
+   * because a metadata message with one unit is worse than none: it looks set.
+   */
+  const p = planLaunch(input());
+  const meta = byType(p, MSG_SET_METADATA) as unknown as {
+    metadata: {
+      base: string;
+      display: string;
+      name: string;
+      symbol: string;
+      description: string;
+      denom_units: Array<{ denom: string; exponent: number }>;
+    };
+  };
+  const m = meta.metadata;
+
+  assert.equal(m.base, p.denom, 'base must be the factory denom the chain moves');
+  assert.equal(m.denom_units.length, 2, 'one unit means wallets show raw base units');
+
+  const base = m.denom_units.find((u) => u.exponent === 0);
+  const display = m.denom_units.find((u) => u.exponent === TOKEN_DECIMALS);
+  assert.equal(base?.denom, p.denom);
+  assert.equal(display?.denom, 'KAIJU');
+  assert.equal(TOKEN_DECIMALS, 18);
+
+  // `display` must name one of the units above or the wallet falls back to base.
+  assert.ok(
+    m.denom_units.some((u) => u.denom === m.display),
+    `display ${m.display} names no declared unit`,
+  );
+  assert.notEqual(m.display, m.base, 'displaying the base unit is the defect itself');
+});
+
+test('an empty name falls back to the ticker, never to an empty string', () => {
+  // A blank `name` is what the sampled denoms carry, and an explorer with nothing
+  // to print falls back to the raw denom. The ticker is always available.
+  const m = (byType(planLaunch(input()), MSG_SET_METADATA) as unknown as { metadata: { name: string; description: string } }).metadata;
+  assert.equal(m.name, 'KAIJU');
+  assert.equal(m.description, '', 'an absent description is empty, not invented');
+
+  const named = (
+    byType(
+      planLaunch({ ...input(), name: '  Kaiju Token  ', description: '  A test.  ' }),
+      MSG_SET_METADATA,
+    ) as unknown as { metadata: { name: string; description: string } }
+  ).metadata;
+  assert.equal(named.name, 'Kaiju Token', 'surrounding whitespace survived into the chain');
+  assert.equal(named.description, 'A test.');
+});
+
+test('the metadata sender is the creator, who is the only denom admin', () => {
+  // MsgSetDenomMetadata is admin-only. Any other sender fails the whole
+  // transaction, taking the denom and the mint with it.
+  const i = input();
+  const m = byType(planLaunch(i), MSG_SET_METADATA) as unknown as { sender: string };
+  assert.equal(m.sender, i.creator);
 });

@@ -4,11 +4,12 @@ import { NETWORK } from './config.ts';
 /**
  * The messages that create a launch, built as data so they can be tested.
  *
- * Creating a launch is three messages in one transaction, and the order matters:
+ * Creating a launch is four messages in one transaction, and the order matters:
  *
- *   1. `MsgCreateDenom`   makes `factory/<creator>/<subdenom>`
- *   2. `MsgMint`          mints `curve_supply + lp_reserve` to the creator
- *   3. `MsgExecuteContract` CreateLaunch, with that whole amount attached
+ *   1. `MsgCreateDenom`      makes `factory/<creator>/<subdenom>`
+ *   2. `MsgMint`             mints `curve_supply + lp_reserve` to the creator
+ *   3. `MsgSetDenomMetadata` names it, and declares the 18-decimal display unit
+ *   4. `MsgExecuteContract`  CreateLaunch, with that whole amount attached
  *
  * The factory refuses anything but the exact amount, and nothing mints later, so
  * a launch that gets this wrong either fails outright or, worse, succeeds with a
@@ -27,7 +28,24 @@ import { NETWORK } from './config.ts';
 
 export const MSG_CREATE_DENOM = '/injective.tokenfactory.v1beta1.MsgCreateDenom';
 export const MSG_MINT = '/injective.tokenfactory.v1beta1.MsgMint';
+export const MSG_SET_METADATA = '/injective.tokenfactory.v1beta1.MsgSetDenomMetadata';
 export const MSG_EXECUTE = '/cosmwasm.wasm.v1.MsgExecuteContract';
+
+/**
+ * Tokens are 18 decimals here, and the metadata has to say so.
+ *
+ * This is the detail almost every tokenfactory launch gets wrong. Of the 737
+ * factory denoms on Injective testnet that bother to set a name, the ones sampled
+ * carry `display: ""` and a single denom unit at exponent 0, which tells every
+ * wallet and explorer that the base unit IS the display unit. The holder then sees
+ * `1000000000000000000000` where they hold a thousand tokens.
+ *
+ * Correct metadata declares two units: the base at exponent 0, which is what the
+ * chain moves, and a display unit at 18, which is what a person reads. Wallets
+ * divide by the display exponent, so getting this wrong is not cosmetic, it is
+ * every balance in the ecosystem being wrong by eighteen orders of magnitude.
+ */
+export const TOKEN_DECIMALS = 18;
 
 export interface LaunchPlan {
   /** `factory/<creator>/<subdenom>`, which the chain derives and we must match. */
@@ -41,6 +59,10 @@ export interface LaunchInput {
   creator: string;
   /** The ticker, which becomes the subdenom. */
   symbol: string;
+  /** Human name for wallets and explorers. Defaults to the ticker when empty. */
+  name?: string;
+  /** One line a holder reads in their wallet. Optional, and empty is honest. */
+  description?: string;
   curve: CurveConfig;
   lpReserve: bigint;
   creatorFeeShareBps: number;
@@ -178,6 +200,35 @@ export function planLaunch(input: LaunchInput): LaunchPlan {
         value: { sender: input.creator, amount: { denom, amount: seed.toString() } },
       },
       {
+        /*
+         * Set before the supply leaves the creator's wallet, because they are the
+         * denom admin and `CreateLaunch` is what hands that supply away. Setting
+         * it afterwards still works today, but ordering it here keeps the whole
+         * launch in one transaction that either lands complete or not at all.
+         */
+        typeUrl: MSG_SET_METADATA,
+        value: {
+          sender: input.creator,
+          metadata: {
+            description: (input.description ?? '').trim(),
+            denom_units: [
+              // What the chain moves.
+              { denom, exponent: 0, aliases: [] },
+              // What a person reads. Wallets divide by this.
+              { denom: input.symbol, exponent: TOKEN_DECIMALS, aliases: [] },
+            ],
+            base: denom,
+            // `display` must name one of the units above or wallets fall back to
+            // the base and show raw integers.
+            display: input.symbol,
+            name: (input.name ?? '').trim() || input.symbol,
+            symbol: input.symbol,
+            uri: '',
+            uri_hash: '',
+          },
+        },
+      },
+      {
         typeUrl: MSG_EXECUTE,
         value: {
           sender: input.creator,
@@ -204,6 +255,7 @@ export function describePlan(plan: LaunchPlan, curve: CurveConfig, lpReserve: bi
   const whole = (v: bigint) => (v / 10n ** 18n).toLocaleString('en-US');
   return [
     `Create the denom ${plan.denom}`,
+    `Name it, with a display unit at ${TOKEN_DECIMALS} decimals so wallets show whole tokens`,
     `Mint ${whole(plan.seedAmount)} tokens to you, and nothing can mint more afterwards`,
     `Send all ${whole(plan.seedAmount)} to the launchpad: ${whole(curve.curveSupply)} onto the curve and ${whole(lpReserve)} held back to pair at graduation`,
     `Buyers pay ${NETWORK.quoteSymbol} and the curve prices every trade until it reaches the target`,

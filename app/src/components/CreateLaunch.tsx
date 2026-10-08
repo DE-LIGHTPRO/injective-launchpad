@@ -37,6 +37,8 @@ const ONE = 10n ** 18n;
 
 const DEFAULTS = {
   symbol: '',
+  name: '',
+  description: '',
   totalSupply: '1000000000',
   curveShare: '80',
   target: '85',
@@ -52,7 +54,10 @@ export function CreateLaunch() {
   const set = (k: keyof typeof DEFAULTS) => (v: string) => setF((p) => ({ ...p, [k]: v }));
 
   /*
-   * The curve is derived from four plain numbers rather than asked for in base
+   * The name and description go on chain as denom metadata, which is the only
+ * reason they are asked for: see `TOKEN_DECIMALS` in createLaunch.ts.
+ *
+ * The curve is derived from four plain numbers rather than asked for in base
    * units. "Total supply" and "share on the curve" are what a creator thinks in;
    * `virtual_tokens` is not, and asking for it directly is how a launch gets a
    * shape nobody intended.
@@ -103,6 +108,8 @@ export function CreateLaunch() {
         plan: planLaunch({
           creator: account.address,
           symbol: f.symbol.trim(),
+          name: f.name,
+          description: f.description,
           curve: built.curve,
           lpReserve: built.lpReserve,
           creatorFeeShareBps: Math.round(Number(f.creatorFeeShareBps) || 0),
@@ -113,7 +120,7 @@ export function CreateLaunch() {
       const err = e as LaunchInputError;
       return { error: err.message, field: err.field as string };
     }
-  }, [account, built, f.symbol, f.creatorFeeShareBps]);
+  }, [account, built, f.symbol, f.name, f.description, f.creatorFeeShareBps]);
 
   const fresh: CurveState = { injCollected: 0n, tokensSold: 0n, graduated: false };
   const ok = plan !== null && 'plan' in plan;
@@ -141,6 +148,32 @@ export function CreateLaunch() {
             placeholder="KAIJU"
             autoComplete="off"
             spellCheck={false}
+          />
+        </div>
+
+        <div className="field">
+          <label htmlFor="cl-name">
+            Name <span className="hint">what wallets show, defaults to the ticker</span>
+          </label>
+          <input
+            id="cl-name"
+            value={f.name}
+            onChange={(e) => set('name')(e.target.value)}
+            placeholder={f.symbol || 'Kaiju Token'}
+            autoComplete="off"
+          />
+        </div>
+
+        <div className="field">
+          <label htmlFor="cl-desc">
+            Description <span className="hint">optional, one line</span>
+          </label>
+          <input
+            id="cl-desc"
+            value={f.description}
+            onChange={(e) => set('description')(e.target.value)}
+            placeholder="What this token is for"
+            autoComplete="off"
           />
         </div>
 
@@ -238,7 +271,7 @@ export function CreateLaunch() {
             </ul>
 
             <details className="raw">
-              <summary>The three messages, exactly as they would be sent</summary>
+              <summary>The four messages, exactly as they would be sent</summary>
               <pre>{JSON.stringify(plan.plan.messages, null, 2)}</pre>
             </details>
 
