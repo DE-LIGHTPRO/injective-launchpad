@@ -813,3 +813,72 @@ button.ghost { background: transparent; border: 1px solid var(--line); color: va
 .spark-change.up { color: var(--accent); }
 .spark-change.down { color: var(--danger); }
 .spark-foot { display: flex; justify-content: space-between; font-size: var(--text-micro); color: var(--text-faint); }
+
+/* ------------------------------------------------------------ token identity -- */
+
+/*
+ * A token's logo, which is a stranger's image loaded into our page.
+ *
+ * Fixed box with `object-fit: cover`, because the source is whatever URL a creator
+ * typed: a 4000px banner, a 16px favicon or a 1:20 strip all have to sit in a row
+ * without moving anything around them. Without the fixed box the first tall image
+ * reflows the whole list as it loads.
+ */
+.token-logo {
+  flex: none;
+  border-radius: var(--radius-md);
+  object-fit: cover;
+  background: var(--glass-well);
+  border: 1px solid var(--glass-border);
+}
+
+/* The fallback when there is no image, or the image failed. A monogram rather than an
+   empty square: a token with no visible identity in a list is worse than a plain one. */
+.token-logo-fallback {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  color: var(--text-dim);
+  box-shadow: var(--glass-well-inset);
+}
+
+.sym-row { display: flex; align-items: center; gap: var(--space-3); min-width: 0; }
+
+/* The create form's preview. It exists because an ipfs:// address that resolves to
+   nothing renders as a blank box forever and nothing on chain will ever say so. */
+.logo-preview {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+}
+.logo-preview img {
+  width: 56px;
+  height: 56px;
+  border-radius: var(--radius-md);
+  object-fit: cover;
+  border: 1px solid var(--glass-border);
+  background: var(--glass-well);
+}
+.logo-preview .note { margin: 0; }
+
+/* A token's own links. Low emphasis on purpose: they are the creator's claims about
+   themselves, not anything this product has verified. */
+.token-links { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-3); }
+.token-links a {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--text-xs);
+  color: var(--text-dim);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-pill);
+  padding: var(--space-1) var(--space-3);
+  background: var(--glass-well);
+}
+.token-links a:hover { color: var(--text); border-color: var(--glass-border-lit); }
+@media (pointer: coarse) {
+  .token-links a { min-height: 24px; }
+}

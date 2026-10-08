@@ -51,6 +51,11 @@ pub enum FactoryError {
     #[error("creator fee share is {got} bps, maximum is 10000")]
     BadFeeShare { got: u16 },
 
+    /// Names the field, because a form with four URL inputs and one rejection that
+    /// says only "invalid" leaves the creator guessing which one.
+    #[error("token profile field `{field}` is invalid: {reason}")]
+    BadProfile { field: String, reason: String },
+
     #[error("no launch is pending; reply arrived unexpectedly")]
     NoPendingLaunch,
 
@@ -74,12 +79,110 @@ pub struct Config {
     pub quote_denom: String,
 }
 
+/// Who a token says it is, stored where it can actually be read back.
+///
+/// The obvious home for this is bank denom metadata, and it does not work: measured
+/// against Injective, `/cosmos/bank/v1beta1/denoms_metadata/{denom}` returns 501 Not
+/// Implemented for a factory denom, and the list endpoint answers with 2000+ entries
+/// across pages. So metadata can be SET there and never read back per token. A
+/// launchpad that cannot show a token's own image is not a launchpad, so identity
+/// lives in contract state, which is queryable, and bank metadata is still set at
+/// creation for wallets and explorers that read it their own way.
+///
+/// IMMUTABLE, like everything else about a launch. Mutable metadata means the token
+/// somebody bought can change its identity afterwards, which is a rename-to-impersonate
+/// vector rather than a convenience. The cost is that a dead link stays dead, and that
+/// is the better side to err on.
+#[cw_serde]
+#[derive(Default)]
+pub struct TokenProfile {
+    pub image: Option<String>,
+    pub website: Option<String>,
+    pub x: Option<String>,
+    pub telegram: Option<String>,
+}
+
+/// Longest any one field may be. Storage is paid for, and an unbounded string is a
+/// griefing vector that bloats every query that returns a launch.
+pub const MAX_URI_LEN: usize = 256;
+
+impl TokenProfile {
+    /// Every field is a URL, and a URL from an untrusted creator is an injection
+    /// surface the moment a frontend renders it as `href` or `src`.
+    ///
+    /// `javascript:` is script execution, and `data:text/html` is the same thing
+    /// wearing a different hat, so the scheme is allowlisted rather than denylisted:
+    /// a denylist has to guess every future scheme, and the browser only has to find
+    /// one that was missed. `https` and `ipfs` are what a token actually needs.
+    ///
+    /// This is the chain-side half. The frontend validates again at render, because
+    /// contract state is attacker-controlled data and a chain that was correct when
+    /// this shipped is not a guarantee about the chain the UI is pointed at.
+    pub fn validate(&self) -> Result<(), FactoryError> {
+        for (field, value) in [
+            ("image", &self.image),
+            ("website", &self.website),
+            ("x", &self.x),
+            ("telegram", &self.telegram),
+        ] {
+            let Some(raw) = value else { continue };
+            /*
+             * NO SEPARATE EMPTY-STRING BRANCH, and the absence is deliberate.
+             *
+             * I wrote one: `raw.trim().is_empty()` with its own "empty" reason. Mutation
+             * testing showed disabling it changed nothing, and the reason is that the
+             * scheme check below already refuses every input it would have caught: "",
+             * "   " and "  https://x.org " all fail `starts_with("https://")`, with a
+             * message that actually tells the creator what to type.
+             *
+             * Fifth unreachable defensive branch on this project. The pattern each time
+             * was adding a check without first testing whether anything reaches it, so
+             * the rule stands: write the test that reaches the branch before the branch.
+             */
+            if raw.len() > MAX_URI_LEN {
+                return Err(FactoryError::BadProfile {
+                    field: field.into(),
+                    reason: "too long".into(),
+                });
+            }
+            /*
+             * Compared lowercased because scheme matching is case-insensitive in every
+             * URL parser and in every browser: `JavaScript:alert(1)` is script, and a
+             * check that only knows `javascript:` waves it through. The allowlist makes
+             * that safe by construction rather than by remembering.
+             */
+            let lower = raw.to_ascii_lowercase();
+            if !(lower.starts_with("https://") || lower.starts_with("ipfs://")) {
+                return Err(FactoryError::BadProfile {
+                    field: field.into(),
+                    reason: "must start with https:// or ipfs://".into(),
+                });
+            }
+            /*
+             * Control characters and whitespace inside a URL. A newline is what lets a
+             * value smuggle a second header or break out of an attribute in whatever
+             * consumes it downstream, and nothing legitimate needs one.
+             */
+            if raw.chars().any(|c| c.is_control() || c == '"' || c == '\'' || c == '<' || c == '>') {
+                return Err(FactoryError::BadProfile {
+                    field: field.into(),
+                    reason: "contains a control character or quote".into(),
+                });
+            }
+        }
+        Ok(())
+    }
+}
+
 #[cw_serde]
 pub struct Launch {
     pub id: u64,
     pub denom: String,
     pub creator: Addr,
     pub curve: Addr,
+    /// Defaulted so a launch stored before this field existed still deserialises.
+    #[serde(default)]
+    pub profile: TokenProfile,
 }
 
 /// Parameters parked while the curve instantiate is in flight.
@@ -88,6 +191,10 @@ struct Pending {
     id: u64,
     denom: String,
     creator: Addr,
+    /// Carried across the reply because `Launch` is not written until the curve
+    /// instantiate comes back, and the submessage reply cannot see the original
+    /// `info`. Validated before this is parked, so what lands here is already clean.
+    profile: TokenProfile,
 }
 
 pub const CONFIG: Item<Config> = Item::new("config");
@@ -115,6 +222,10 @@ pub enum ExecuteMsg {
         lp_reserve: Uint128,
         creator_fee_share_bps: u16,
         curve: CurveConfigStored,
+        /// Optional, and absent is a perfectly good answer: a token with no links is
+        /// honest, where a token with a broken one is not.
+        #[serde(default)]
+        profile: TokenProfile,
     },
     /// Point the factory at a new curve code id. Only affects future launches;
     /// existing ones are immutable by construction.
@@ -177,7 +288,17 @@ pub fn execute(
             lp_reserve,
             creator_fee_share_bps,
             curve,
-        } => create_launch(deps, env, info, denom, lp_reserve, creator_fee_share_bps, curve),
+            profile,
+        } => create_launch(
+            deps,
+            env,
+            info,
+            denom,
+            lp_reserve,
+            creator_fee_share_bps,
+            curve,
+            profile,
+        ),
         ExecuteMsg::SetCurveCodeId { code_id } => {
             let mut cfg = CONFIG.load(deps.storage)?;
             if info.sender != cfg.admin {
@@ -210,8 +331,13 @@ fn create_launch(
     lp_reserve: Uint128,
     creator_fee_share_bps: u16,
     curve: CurveConfigStored,
+    profile: TokenProfile,
 ) -> Result<Response, FactoryError> {
     let cfg = CONFIG.load(deps.storage)?;
+
+    // Before anything is written or any id is consumed. A launch that fails on its
+    // last step still burns a reply slot and leaves the creator resubmitting.
+    profile.validate()?;
 
     if BY_DENOM.has(deps.storage, &denom) {
         return Err(FactoryError::DenomTaken { denom });
@@ -245,6 +371,7 @@ fn create_launch(
             id,
             denom: denom.clone(),
             creator: info.sender.clone(),
+            profile,
         },
     )?;
 
@@ -301,6 +428,7 @@ pub fn reply(deps: DepsMut, _env: Env, msg: Reply) -> Result<Response, FactoryEr
         denom: pending.denom.clone(),
         creator: pending.creator,
         curve: curve.clone(),
+        profile: pending.profile,
     };
     LAUNCHES.save(deps.storage, pending.id, &launch)?;
     BY_DENOM.save(deps.storage, &pending.denom, &pending.id)?;

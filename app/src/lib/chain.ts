@@ -8,6 +8,7 @@
  * Signing is a different matter and lives in `wallet.ts`.
  */
 
+import { parseProfile, type TokenProfile } from './tokenProfile.ts';
 import { NETWORK, getLcdUrl, getFactoryAddress } from './config.ts';
 import { isDemoMode, demoLaunches, demoDetail, demoDetailByCurve } from './demo.ts';
 import type { CurveConfig, CurveState } from './curve.ts';
@@ -18,6 +19,13 @@ export interface Launch {
   denom: string;
   creator: string;
   curve: string;
+  /*
+   * Always present after `parseProfile`, even for a launch created before the contract
+   * carried the field, so nothing downstream has to test for its absence. The values
+   * inside it are still untrusted: they came from whoever created the launch, and every
+   * render site passes them through `safeExternalUrl` first.
+   */
+  profile: TokenProfile;
 }
 
 /** Raw curve config as the contract stores it, all amounts as strings. */
@@ -112,8 +120,17 @@ export async function listLaunches(limit = 50): Promise<Launch[]> {
   if (isDemoMode()) return demoLaunches().slice(0, limit);
   const factory = getFactoryAddress();
   if (!factory) return [];
-  const res = await smartQuery<{ launches: Launch[] }>(factory, { launches: { limit } });
-  return res.launches;
+  const res = await smartQuery<{ launches: Array<Omit<Launch, 'profile'> & { profile?: unknown }> }>(
+    factory,
+    { launches: { limit } },
+  );
+  /*
+   * Normalised at the boundary, once. A launch created before the contract carried a
+   * profile has no field at all, and a launch from a differently-configured factory may
+   * carry anything; `parseProfile` turns both into nulls rather than letting one
+   * malformed token throw and blank the whole list.
+   */
+  return res.launches.map((l) => ({ ...l, profile: parseProfile(l.profile) }));
 }
 
 export async function getLaunch(id: number): Promise<Launch> {
@@ -124,7 +141,13 @@ export async function getLaunch(id: number): Promise<Launch> {
   }
   const factory = getFactoryAddress();
   if (!factory) throw new ChainError('This launchpad is not available yet.');
-  return smartQuery<Launch>(factory, { launch: { id } });
+  const raw = await smartQuery<Omit<Launch, 'profile'> & { profile?: unknown }>(factory, {
+    launch: { id },
+  });
+  // Normalised here too. The list path and the single path are two doors into the same
+  // data, and a field cleaned at one of them is the shape of defect this project keeps
+  // finding: both sides locally correct, inconsistent together.
+  return { ...raw, profile: parseProfile(raw.profile) };
 }
 
 function toCurveConfig(raw: RawCurveConfig): CurveConfig {

@@ -1,3 +1,4 @@
+import type { TokenProfile } from './tokenProfile.ts';
 import { symbolOf } from './chain.ts';
 
 /**
@@ -25,6 +26,8 @@ export interface LaunchRow {
   target: string;
   progress: number;
   graduated: boolean;
+  /** Already normalised by `parseProfile`; the values inside are still untrusted. */
+  profile: TokenProfile;
 }
 
 export interface Selection {

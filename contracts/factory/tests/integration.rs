@@ -116,6 +116,11 @@ fn setup() -> Fx {
 
 impl Fx {
     fn create(&mut self, denom: &str) -> anyhow::Result<()> {
+        // Absent links are a valid profile, and the default path deserves the coverage.
+        self.create_with(denom, Default::default())
+    }
+
+    fn create_with(&mut self, denom: &str, profile: TokenProfile) -> anyhow::Result<()> {
         self.app
             .execute_contract(
                 self.creator.clone(),
@@ -125,6 +130,7 @@ impl Fx {
                     lp_reserve: lp_reserve(),
                     creator_fee_share_bps: 5_000,
                     curve: curve_cfg(),
+                    profile,
                 },
                 &coins(seed_total().u128(), denom),
             )
@@ -215,6 +221,7 @@ fn wrong_seed_amount_is_refused() {
         creator,
         f.factory.clone(),
         &ExecuteMsg::CreateLaunch {
+            profile: Default::default(),
             denom: TOKEN.into(),
             lp_reserve: lp_reserve(),
             creator_fee_share_bps: 0,
@@ -237,6 +244,7 @@ fn an_unreachable_graduation_target_is_refused_at_creation() {
         creator,
         f.factory.clone(),
         &ExecuteMsg::CreateLaunch {
+            profile: Default::default(),
             denom: TOKEN.into(),
             lp_reserve: lp_reserve(),
             creator_fee_share_bps: 0,
@@ -310,4 +318,204 @@ fn only_admin_can_repoint_the_curve_code() {
         .query_wasm_smart(f.factory.clone(), &QueryMsg::Config {})
         .unwrap();
     assert_eq!(cfg.curve_code_id, 999);
+}
+
+// ---------------------------------------------------------------- token profile --
+
+use factory::{TokenProfile, MAX_URI_LEN};
+
+fn profile_with(field: &str, value: &str) -> TokenProfile {
+    let v = Some(value.to_string());
+    match field {
+        "image" => TokenProfile { image: v, ..Default::default() },
+        "website" => TokenProfile { website: v, ..Default::default() },
+        "x" => TokenProfile { x: v, ..Default::default() },
+        "telegram" => TokenProfile { telegram: v, ..Default::default() },
+        other => panic!("no such field {other}"),
+    }
+}
+
+#[test]
+fn a_profile_with_no_links_is_valid() {
+    // Absent is the honest answer for a token with nothing to link to, and it is the
+    // default, so the common path must not need a single character of input.
+    assert!(TokenProfile::default().validate().is_ok());
+}
+
+#[test]
+fn https_and_ipfs_are_accepted_on_every_field() {
+    for field in ["image", "website", "x", "telegram"] {
+        assert!(
+            profile_with(field, "https://example.org/a.png").validate().is_ok(),
+            "{field} refused https"
+        );
+        assert!(
+            profile_with(field, "ipfs://bafyexampleexampleexample").validate().is_ok(),
+            "{field} refused ipfs"
+        );
+    }
+}
+
+#[test]
+fn a_script_url_is_refused_on_every_field() {
+    /*
+     * The reason this validation exists at all. These fields become `href` and `src`
+     * in a frontend, and a `javascript:` URL there is script execution in the context
+     * of the launchpad, triggered by any visitor who clicks a token's own website
+     * link. `data:text/html` is the same thing wearing a different hat.
+     *
+     * Checked per field rather than once, because the loop that validates them is
+     * exactly the kind of thing that gets written for one field and copied for three.
+     */
+    for field in ["image", "website", "x", "telegram"] {
+        for bad in [
+            "javascript:alert(1)",
+            "data:text/html;base64,PHNjcmlwdD4=",
+            "http://example.org/a.png",
+            "vbscript:msgbox(1)",
+            "file:///etc/passwd",
+            "//example.org/a.png",
+            "example.org",
+        ] {
+            assert!(
+                profile_with(field, bad).validate().is_err(),
+                "{field} accepted {bad}"
+            );
+        }
+    }
+}
+
+#[test]
+fn the_scheme_check_is_case_insensitive() {
+    /*
+     * `JavaScript:` is script in every browser, and a check that compares against the
+     * lowercase literal waves it through. This is the single mutation most likely to
+     * pass review, because the string it is compared against looks right.
+     */
+    for bad in ["JavaScript:alert(1)", "JAVASCRIPT:alert(1)", "jAvAsCrIpT:alert(1)"] {
+        assert!(
+            profile_with("website", bad).validate().is_err(),
+            "accepted {bad}"
+        );
+    }
+    // And the allowlist still matches whatever case a creator types.
+    assert!(profile_with("website", "HTTPS://example.org").validate().is_ok());
+}
+
+#[test]
+fn an_empty_string_is_not_a_url() {
+    /*
+     * Left as `Some("")` a field renders as a link to the current page: it looks like a
+     * working link, goes nowhere, and no error ever said so. `None` is how a missing
+     * link is spelled.
+     *
+     * Kept after the branch that was written for it turned out to be unreachable: the
+     * scheme check refuses all of these already. The behaviour is what matters and the
+     * behaviour is still asserted, so if someone ever loosens the scheme check into
+     * something that lets a blank through, this still fails.
+     */
+    for blank in ["", "   ", "\t"] {
+        assert!(profile_with("website", blank).validate().is_err(), "accepted {blank:?}");
+    }
+}
+
+#[test]
+fn a_url_carrying_a_control_character_or_quote_is_refused() {
+    // A newline is what lets a value break out of whatever renders it. Nothing
+    // legitimate needs one, so the cheapest correct answer is to refuse them.
+    for bad in [
+        "https://example.org/a\npng",
+        "https://example.org/\"onerror=alert(1)",
+        "https://example.org/'><script>",
+        "https://example.org/a\u{0}b",
+    ] {
+        assert!(profile_with("image", bad).validate().is_err(), "accepted {bad:?}");
+    }
+}
+
+#[test]
+fn an_overlong_url_is_refused() {
+    // Storage is paid for and every query that returns a launch carries this.
+    let long = format!("https://example.org/{}", "a".repeat(MAX_URI_LEN));
+    assert!(long.len() > MAX_URI_LEN);
+    assert!(profile_with("image", &long).validate().is_err());
+
+    let ok = format!("https://e.org/{}", "a".repeat(MAX_URI_LEN - 20));
+    assert!(ok.len() <= MAX_URI_LEN);
+    assert!(profile_with("image", &ok).validate().is_ok());
+}
+
+#[test]
+fn the_error_names_which_field_was_wrong() {
+    // A form with four URL inputs and one rejection reading "invalid" leaves the
+    // creator guessing which of the four to fix.
+    let err = profile_with("telegram", "javascript:alert(1)").validate().unwrap_err();
+    assert!(
+        format!("{err}").contains("telegram"),
+        "error does not name the field: {err}"
+    );
+}
+
+#[test]
+fn a_launch_carrying_a_script_url_is_refused_by_execute() {
+    /*
+     * The test that was missing, and its absence is the defect this suite is built to
+     * catch in other people's code.
+     *
+     * `TokenProfile::validate` had eight tests and every one of them called it
+     * directly. Deleting the `profile.validate()?` line from `create_launch` left all
+     * eight passing: the validation was correct, thoroughly covered, and not reached.
+     * Mutation testing found it; no amount of reading would have, because the call site
+     * is one line in the middle of a function that does six other things.
+     *
+     * So this one goes through `execute_contract`, which is the path a creator's wallet
+     * actually takes, and asserts the launch does not exist afterwards.
+     */
+    let mut f = setup();
+    /*
+     * Uses a FUNDED denom on purpose. With an unfunded one the execute fails for
+     * insufficient funds and the test passes without the validation ever running,
+     * which is the same false-pass this test exists to rule out. The assertion on the
+     * field name is the second guard against that.
+     */
+    let res = f.create_with(
+        TOKEN,
+        TokenProfile {
+            website: Some("javascript:alert(document.cookie)".into()),
+            ..Default::default()
+        },
+    );
+    assert!(res.is_err(), "a javascript: URL was accepted by execute");
+    let err = res.unwrap_err().to_string();
+    assert!(err.contains("website"), "the rejection does not name the field: {err}");
+
+    // And nothing was written: no id consumed, no denom claimed, no half-made launch.
+    assert!(
+        f.app
+            .wrap()
+            .query_wasm_smart::<Launch>(f.factory.clone(), &QueryMsg::Launch { id: 1 })
+            .is_err(),
+        "a refused launch still created a record"
+    );
+}
+
+#[test]
+fn a_valid_profile_survives_the_round_trip_into_storage() {
+    /*
+     * The other half: a profile that passes must come back out of a query intact.
+     * It crosses a submessage reply to get there, parked on `Pending`, which is the
+     * kind of hop where a field quietly stops being carried and nothing complains.
+     */
+    let mut f = setup();
+    let profile = TokenProfile {
+        image: Some("ipfs://bafyexampleexampleexample".into()),
+        website: Some("https://example.org".into()),
+        x: Some("https://x.com/example".into()),
+        telegram: None,
+    };
+    f.create_with(TOKEN, profile.clone()).unwrap();
+
+    let stored = f.launch(1).profile;
+    assert_eq!(stored, profile, "the profile did not survive the reply");
+    assert_eq!(stored.telegram, None, "an absent link came back as something else");
 }

@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { symbolOf, short } from '@/lib/chain';
+import { TokenLogo } from './TokenLogo';
 import { fmt } from '@/lib/curve';
 import { NETWORK } from '@/lib/config';
 import { selectLaunches, type LaunchRow, type SortKey } from '@/lib/launchList';
@@ -111,9 +112,12 @@ export function LaunchList({ rows }: { rows: LaunchRow[] }) {
           {shown.map((r) => (
             <Link key={r.id} href={`/launch/${r.id}`} className="card">
               <div className="card-head">
-                <div style={{ minWidth: 0 }}>
-                  <div className="sym">{symbolOf(r.denom)}</div>
-                  <div className="denom mono">{r.denom}</div>
+                <div className="sym-row">
+                  <TokenLogo profile={r.profile} symbol={symbolOf(r.denom)} size={40} />
+                  <div style={{ minWidth: 0 }}>
+                    <div className="sym">{symbolOf(r.denom)}</div>
+                    <div className="denom mono">{r.denom}</div>
+                  </div>
                 </div>
                 <span className={`chip ${r.graduated ? 'warn' : 'accent'}`}>
                   {r.graduated ? 'graduated' : 'live'}

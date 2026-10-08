@@ -51,6 +51,10 @@ function toRow(r: Row): LaunchRow {
     id: r.launch.id,
     denom: r.launch.denom,
     creator: r.launch.creator,
+    // Already normalised by `parseProfile` at the chain boundary. Plain strings and
+    // nulls, so it crosses the server-component boundary without the bigint problem
+    // described above.
+    profile: r.launch.profile,
     raised: r.raised.toString(),
     target: r.target.toString(),
     progress: r.progress,

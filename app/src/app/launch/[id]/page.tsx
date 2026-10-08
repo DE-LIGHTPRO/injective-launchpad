@@ -1,5 +1,7 @@
 import Link from 'next/link';
 import { getLaunch, getLaunchDetail, symbolOf, short } from '@/lib/chain';
+import { TokenLogo } from '@/components/TokenLogo';
+import { visibleLinks } from '@/lib/tokenProfile';
 import { graduationProgress, fmt, spotPrice, maxCollectable } from '@/lib/curve';
 import { NETWORK, isDeployed, isDevBuild } from '@/lib/config';
 import { isDemoMode } from '@/lib/demo';
@@ -48,6 +50,9 @@ export default async function LaunchPage({ params }: { params: Promise<{ id: str
   }
 
   const symbol = symbolOf(detail.denom);
+  // Only the links that survive the scheme allowlist, so nothing hostile reaches an
+  // href even if the chain the UI is pointed at never checked them.
+  const links = visibleLinks(launch.profile);
   const progress = graduationProgress(detail.config, detail.state);
   const price = spotPrice(detail.config, detail.state, ONE);
   const ceiling = maxCollectable(detail.config);
@@ -61,7 +66,10 @@ export default async function LaunchPage({ params }: { params: Promise<{ id: str
       </p>
 
       <div className="metric-row" style={{ alignItems: 'center' }}>
-        <h1>{symbol}</h1>
+        <div className="sym-row">
+          <TokenLogo profile={launch.profile} symbol={symbol} size={48} />
+          <h1>{symbol}</h1>
+        </div>
         <span className={`chip ${detail.state.graduated ? 'warn' : 'accent'}`}>
           {detail.state.graduated ? (detail.migrated ? 'migrated' : 'graduated') : 'live'}
         </span>
@@ -69,6 +77,41 @@ export default async function LaunchPage({ params }: { params: Promise<{ id: str
       <p className="sub mono" style={{ fontSize: 'var(--text-xs)', wordBreak: 'break-all' }}>
         {detail.denom}
       </p>
+
+      {links.length > 0 && (
+        <>
+          <div className="token-links">
+            {links.map((l) => (
+              /*
+               * `rel="noopener noreferrer nofollow ugc"` on every one of these, and each
+               * token earns its place:
+               *   noopener  - the opened page cannot reach back through window.opener
+               *   noreferrer- it does not learn which launch page sent the visitor
+               *   nofollow  - a launchpad is an open submission form, so outbound links
+               *               are not endorsements and must not pass ranking
+               *   ugc       - what these actually are: user-generated content
+               * The href is already through `safeExternalUrl`; this covers what happens
+               * after a safe link is followed.
+               */
+              <a
+                key={l.kind}
+                href={l.href}
+                target="_blank"
+                rel="noopener noreferrer nofollow ugc"
+              >
+                {l.label}
+              </a>
+            ))}
+          </div>
+          {/*
+              Said plainly once, under the links. Anyone can create a launch here, so
+              these are the creator's claims about themselves and nothing has checked
+              them. A launchpad that renders them without saying so is lending its own
+              credibility to a stranger's URL.
+            */}
+          <p className="note">Links are supplied by the creator and are not verified.</p>
+        </>
+      )}
 
       <div className="cols" style={{ marginTop: 'var(--space-5)' }}>
         <div>

@@ -1,3 +1,4 @@
+import { EMPTY_PROFILE } from './tokenProfile.ts';
 /**
  * Search, sort and filter for the launch index.
  *
@@ -27,6 +28,8 @@ const row = (
   id,
   denom: `factory/inj1pad/${sym}`,
   creator,
+  // Selection has no opinion about identity, so the fixture carries none.
+  profile: EMPTY_PROFILE,
   raised: (raisedInj * ONE).toString(),
   target: (100n * ONE).toString(),
   progress,

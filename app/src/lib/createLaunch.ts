@@ -1,5 +1,6 @@
 import { validate, type CurveConfig } from './curve.ts';
 import { NETWORK } from './config.ts';
+import { profileFieldError } from './tokenProfile.ts';
 
 /**
  * The messages that create a launch, built as data so they can be tested.
@@ -63,6 +64,18 @@ export interface LaunchInput {
   name?: string;
   /** One line a holder reads in their wallet. Optional, and empty is honest. */
   description?: string;
+  /**
+   * Image and links, stored in the FACTORY rather than in bank metadata.
+   *
+   * Bank metadata is where this belongs and it cannot be read back: measured against
+   * Injective, a per-denom `denoms_metadata` read returns 501 and the list is 2000+
+   * entries across pages. The contract is queryable, so identity lives there and bank
+   * metadata is still set for wallets that read it their own way.
+   *
+   * Validated by `profileFieldError` before the plan is built and again by the contract,
+   * because these end up as `href` and `src` in a browser.
+   */
+  profile?: Record<string, string>;
   curve: CurveConfig;
   lpReserve: bigint;
   creatorFeeShareBps: number;
@@ -70,7 +83,7 @@ export interface LaunchInput {
 }
 
 export class LaunchInputError extends Error {
-  readonly field: keyof LaunchInput | 'symbol' | 'lpReserve' | 'creatorFeeShareBps' | 'curve';
+  readonly field: keyof LaunchInput | 'symbol' | 'lpReserve' | 'creatorFeeShareBps' | 'curve' | 'profile';
   constructor(field: LaunchInputError['field'], message: string) {
     super(message);
     this.name = 'LaunchInputError';
@@ -113,6 +126,10 @@ export function validateLaunch(input: LaunchInput): void {
   // The chain's own limit. A denom over it is rejected at MsgCreateDenom.
   if (new TextEncoder().encode(denom).length > 128) {
     throw new LaunchInputError('symbol', 'That ticker makes the denom longer than the chain allows.');
+  }
+  for (const [field, value] of Object.entries(input.profile ?? {})) {
+    const problem = profileFieldError(value);
+    if (problem) throw new LaunchInputError('profile', `${field}: ${problem}`);
   }
   if (!/^inj1[0-9a-z]{38,}$/.test(input.factory)) {
     throw new LaunchInputError('factory', 'This launchpad has no factory configured.');
@@ -236,6 +253,13 @@ export function planLaunch(input: LaunchInput): LaunchPlan {
           msg: {
             create_launch: {
               denom,
+              // Omitted entirely when there is nothing to say, which the contract
+              // deserialises as the default. An empty string would be stored and would
+              // render as a link to the current page, permanently: profiles are
+              // immutable, like everything else about a launch.
+              ...(input.profile && Object.keys(input.profile).length > 0
+                ? { profile: input.profile }
+                : {}),
               lp_reserve: input.lpReserve.toString(),
               creator_fee_share_bps: input.creatorFeeShareBps,
               curve: curveMsg,

@@ -12,6 +12,7 @@ import {
 import { parseAmount, fmt, maxCollectable, type CurveConfig, type CurveState } from '@/lib/curve';
 import { NETWORK, getFactoryAddress } from '@/lib/config';
 import type { WalletAccount } from '@/lib/wallet';
+import { profileForChain, profileFieldError, imageSrc } from '@/lib/tokenProfile';
 
 /**
  * Create a launch.
@@ -39,6 +40,10 @@ const DEFAULTS = {
   symbol: '',
   name: '',
   description: '',
+  image: '',
+  website: '',
+  x: '',
+  telegram: '',
   totalSupply: '1000000000',
   curveShare: '80',
   target: '85',
@@ -110,6 +115,12 @@ export function CreateLaunch() {
           symbol: f.symbol.trim(),
           name: f.name,
           description: f.description,
+          profile: profileForChain({
+            image: f.image,
+            website: f.website,
+            x: f.x,
+            telegram: f.telegram,
+          }),
           curve: built.curve,
           lpReserve: built.lpReserve,
           creatorFeeShareBps: Math.round(Number(f.creatorFeeShareBps) || 0),
@@ -120,7 +131,11 @@ export function CreateLaunch() {
       const err = e as LaunchInputError;
       return { error: err.message, field: err.field as string };
     }
-  }, [account, built, f.symbol, f.name, f.description, f.creatorFeeShareBps]);
+  }, [account, built, f]);
+
+  // Null until the address is both safe and complete, so a half-typed URL does not
+  // fire a request on every keystroke.
+  const logoPreview = useMemo(() => imageSrc(f.image), [f.image]);
 
   const fresh: CurveState = { injCollected: 0n, tokensSold: 0n, graduated: false };
   const ok = plan !== null && 'plan' in plan;
@@ -175,6 +190,91 @@ export function CreateLaunch() {
             placeholder="What this token is for"
             autoComplete="off"
           />
+        </div>
+
+        <div className="field">
+          <label htmlFor="cl-image">
+            Logo <span className="hint">https:// or ipfs:// address of an image</span>
+          </label>
+          <input
+            id="cl-image"
+            value={f.image}
+            onChange={(e) => set('image')(e.target.value)}
+            placeholder="https://… or ipfs://…"
+            autoComplete="off"
+            spellCheck={false}
+            aria-invalid={profileFieldError(f.image) !== null}
+          />
+          {/*
+              The reason is shown per field rather than once at the end. A form with
+              four URL inputs and a single "invalid" at the bottom makes the creator
+              guess which one, and these are permanent: a profile is immutable.
+            */}
+          {profileFieldError(f.image) && <p className="note err-text">{profileFieldError(f.image)}</p>}
+          {logoPreview && (
+            <div className="logo-preview">
+              {/*
+                  A preview, because an ipfs:// address that resolves to nothing renders
+                  as an empty square forever and nothing on chain will ever say so. The
+                  src is the gateway URL, never the raw value.
+                */}
+              <img src={logoPreview} alt="" onError={(e) => { e.currentTarget.style.display = 'none'; }} />
+              <span className="note">If this stays blank the address does not resolve to an image.</span>
+            </div>
+          )}
+        </div>
+
+        <div className="field-row">
+          <div className="field">
+            <label htmlFor="cl-website">
+              Website <span className="hint">optional</span>
+            </label>
+            <input
+              id="cl-website"
+              value={f.website}
+              onChange={(e) => set('website')(e.target.value)}
+              placeholder="https://"
+              autoComplete="off"
+              spellCheck={false}
+              aria-invalid={profileFieldError(f.website) !== null}
+            />
+            {profileFieldError(f.website) && (
+              <p className="note err-text">{profileFieldError(f.website)}</p>
+            )}
+          </div>
+          <div className="field">
+            <label htmlFor="cl-x">
+              X <span className="hint">optional</span>
+            </label>
+            <input
+              id="cl-x"
+              value={f.x}
+              onChange={(e) => set('x')(e.target.value)}
+              placeholder="https://x.com/"
+              autoComplete="off"
+              spellCheck={false}
+              aria-invalid={profileFieldError(f.x) !== null}
+            />
+            {profileFieldError(f.x) && <p className="note err-text">{profileFieldError(f.x)}</p>}
+          </div>
+        </div>
+
+        <div className="field">
+          <label htmlFor="cl-tg">
+            Telegram <span className="hint">optional</span>
+          </label>
+          <input
+            id="cl-tg"
+            value={f.telegram}
+            onChange={(e) => set('telegram')(e.target.value)}
+            placeholder="https://t.me/"
+            autoComplete="off"
+            spellCheck={false}
+            aria-invalid={profileFieldError(f.telegram) !== null}
+          />
+          {profileFieldError(f.telegram) && (
+            <p className="note err-text">{profileFieldError(f.telegram)}</p>
+          )}
         </div>
 
         <div className="field-row">

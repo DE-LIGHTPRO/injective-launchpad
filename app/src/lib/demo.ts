@@ -12,6 +12,7 @@
  * live market or a real price. It exercises the interface with arithmetic.
  */
 
+import { EMPTY_PROFILE } from './tokenProfile.ts';
 import { quoteBuy, type CurveConfig, type CurveState } from './curve.ts';
 import type { Launch, LaunchDetail } from './chain.ts';
 
@@ -77,6 +78,13 @@ export function demoLaunches(): Launch[] {
     denom: denomFor(s.symbol),
     creator: s.creator,
     curve: `inj1demo0curve${String(s.id).padStart(2, '0')}0000000000000000000000x`,
+    /*
+     * No links on a demo launch, and no placeholder image either. A fabricated logo
+     * would make the demo look more finished than the product is, and the demo banner
+     * already says these are not real launches: inventing artwork for them would be the
+     * same category of thing as a seed price rendered as a live feed.
+     */
+    profile: EMPTY_PROFILE,
   }));
 }
 
