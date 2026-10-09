@@ -9,12 +9,12 @@
 use cosmwasm_schema::{cw_serde, QueryResponses};
 use cosmwasm_std::{
     entry_point, to_json_binary, Addr, Binary, Coin, Deps, DepsMut, Env, MessageInfo, Order, Reply,
-    Response, StdResult, SubMsg, Uint128, WasmMsg,
-};
+    Response, StdResult, SubMsg, Uint128, WasmMsg, coins};
 use cw_storage_plus::{Item, Map};
 use launchpad_math::CurveConfig;
 use thiserror::Error;
 
+use curve::msg::ExecuteMsg as CurveExecuteMsg;
 use curve::msg::InstantiateMsg as CurveInstantiateMsg;
 use curve::state::{CurveConfigStored, LaunchRules};
 
@@ -60,6 +60,15 @@ pub enum FactoryError {
     /// says only "invalid" leaves the creator guessing which one.
     #[error("token profile field `{field}` is invalid: {reason}")]
     BadProfile { field: String, reason: String },
+
+    #[error("unexpected funds attached: {denom}")]
+    UnexpectedFunds { denom: String },
+
+    #[error("initial buy is {expected} but {got} was attached")]
+    BadInitialBuy {
+        expected: cosmwasm_std::Uint128,
+        got: cosmwasm_std::Uint128,
+    },
 
     #[error("no launch is pending; reply arrived unexpectedly")]
     NoPendingLaunch,
@@ -196,6 +205,13 @@ struct Pending {
     id: u64,
     denom: String,
     creator: Addr,
+    /// The creator's opening buy, spent in the reply once the curve exists.
+    #[serde(default)]
+    initial_buy: Option<Uint128>,
+    /// What the creator pays with, carried so the reply does not have to reload the
+    /// config to learn one string.
+    #[serde(default)]
+    quote_denom: String,
     /// Carried across the reply because `Launch` is not written until the curve
     /// instantiate comes back, and the submessage reply cannot see the original
     /// `info`. Validated before this is parked, so what lands here is already clean.
@@ -235,6 +251,18 @@ pub enum ExecuteMsg {
         /// launch, which is what every launch before this field existed was.
         #[serde(default)]
         rules: LaunchRules,
+        /// Quote the creator spends on their own launch, in the same transaction.
+        ///
+        /// What every launchpad calls a dev buy, and what creators expect: without it
+        /// the only way to take a position in your own launch is a second transaction
+        /// that a bot watching the mempool can land first, which is the whole problem.
+        ///
+        /// This amount must be ATTACHED as quote alongside the token seed, so the
+        /// factory never has to be funded and never holds anything between
+        /// transactions. It is spent inside the reply, on the curve that was just
+        /// created, with the tokens sent to the creator rather than to the factory.
+        #[serde(default)]
+        initial_buy: Option<Uint128>,
     },
     /// Point the factory at a new curve code id. Only affects future launches;
     /// existing ones are immutable by construction.
@@ -299,6 +327,7 @@ pub fn execute(
             curve,
             profile,
             rules,
+            initial_buy,
         } => create_launch(
             deps,
             env,
@@ -309,6 +338,7 @@ pub fn execute(
             curve,
             profile,
             rules,
+            initial_buy,
         ),
         ExecuteMsg::SetCurveCodeId { code_id } => {
             let mut cfg = CONFIG.load(deps.storage)?;
@@ -344,6 +374,7 @@ fn create_launch(
     curve: CurveConfigStored,
     profile: TokenProfile,
     rules: LaunchRules,
+    initial_buy: Option<Uint128>,
 ) -> Result<Response, FactoryError> {
     let cfg = CONFIG.load(deps.storage)?;
 
@@ -366,12 +397,56 @@ fn create_launch(
     parsed.validate()?;
 
     let required = curve.curve_supply.checked_add(lp_reserve)?;
-    let sent = cw_utils::must_pay(&info, &denom)?;
-    if sent != required {
+
+    /*
+     * TWO denoms may arrive now, and `must_pay` accepts exactly one.
+     *
+     * It was `cw_utils::must_pay(&info, &denom)`, which refuses anything but a single
+     * coin, so attaching quote for an opening buy failed with `MultipleDenoms` and the
+     * feature could not work at all. Replacing it means writing the check by hand,
+     * which is the part worth being careful about: this is the only thing standing
+     * between a launch and a seed that does not match what the curve was told.
+     *
+     * Three conditions, and all three matter:
+     *   - exactly `required` of the launch token, as before
+     *   - exactly the declared `initial_buy` of quote, so the amount the creator
+     *     approved on screen is the amount that gets spent
+     *   - NOTHING ELSE attached, because a third denom is funds the factory would be
+     *     left holding with no path out, and a contract that silently keeps dust is
+     *     how a fund-holding factory starts
+     */
+    let want_quote = initial_buy.unwrap_or_default();
+    let mut got_seed = Uint128::zero();
+    let mut got_quote = Uint128::zero();
+    for coin in &info.funds {
+        if coin.denom == denom {
+            got_seed = got_seed.checked_add(coin.amount)?;
+        } else if coin.denom == cfg.quote_denom {
+            got_quote = got_quote.checked_add(coin.amount)?;
+        } else {
+            return Err(FactoryError::UnexpectedFunds {
+                denom: coin.denom.clone(),
+            });
+        }
+    }
+
+    if got_seed != required {
         return Err(FactoryError::BadSeed {
             denom,
             expected: required,
-            got: sent,
+            got: got_seed,
+        });
+    }
+    if got_quote != want_quote {
+        /*
+         * Both directions are refused. Too little and the buy fails mid-reply, taking
+         * the whole launch with it after the creator has signed; too much and the
+         * surplus has nowhere to go, because the reply spends exactly what was
+         * declared.
+         */
+        return Err(FactoryError::BadInitialBuy {
+            expected: want_quote,
+            got: got_quote,
         });
     }
 
@@ -384,6 +459,8 @@ fn create_launch(
             denom: denom.clone(),
             creator: info.sender.clone(),
             profile,
+            initial_buy,
+            quote_denom: cfg.quote_denom.clone(),
         },
     )?;
 
@@ -453,10 +530,40 @@ pub fn reply(deps: DepsMut, _env: Env, msg: Reply) -> Result<Response, FactoryEr
     LAUNCHES.save(deps.storage, pending.id, &launch)?;
     BY_DENOM.save(deps.storage, &pending.denom, &pending.id)?;
 
-    Ok(Response::new()
+    let mut res = Response::new()
         .add_attribute("action", "launch_created")
         .add_attribute("id", pending.id.to_string())
-        .add_attribute("curve", curve.as_str()))
+        .add_attribute("curve", curve.as_str());
+
+    /*
+     * The creator's opening buy, spent on the curve that was just created.
+     *
+     * `recipient` is the creator, not this contract. A curve pays whoever sent the
+     * message, so without it the factory would be the buyer of record and would be
+     * left holding the tokens, which is both wrong and a fund-holding factory.
+     *
+     * `min_tokens_out` is zero deliberately. This buy is the FIRST trade on a curve
+     * that was created in the same transaction, so there is no one to be front-run by
+     * and nothing for a slippage bound to protect against: the price is determined
+     * entirely by parameters the creator just chose. A non-zero bound here could only
+     * fail the launch.
+     */
+    if let Some(amount) = pending.initial_buy {
+        if !amount.is_zero() {
+            res = res
+                .add_message(WasmMsg::Execute {
+                    contract_addr: curve.to_string(),
+                    msg: to_json_binary(&CurveExecuteMsg::Buy {
+                        min_tokens_out: Uint128::zero(),
+                        recipient: Some(launch.creator.to_string()),
+                    })?,
+                    funds: coins(amount.u128(), &pending.quote_denom),
+                })
+                .add_attribute("initial_buy", amount);
+        }
+    }
+
+    Ok(res)
 }
 
 /// Dig the new contract address out of the instantiate reply. Reading the

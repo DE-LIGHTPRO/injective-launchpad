@@ -29,7 +29,21 @@ pub struct InstantiateMsg {
 pub enum ExecuteMsg {
     /// Buy tokens with the attached quote denom. Any amount beyond what the
     /// curve can still absorb is refunded in the same transaction.
-    Buy { min_tokens_out: Uint128 },
+    Buy {
+        min_tokens_out: Uint128,
+        /// Who receives the tokens. Defaults to the sender.
+        ///
+        /// Exists for ONE caller: the factory, buying on a creator's behalf in the
+        /// transaction that creates the launch. Without it the factory would be the
+        /// buyer of record and would hold the tokens, because a curve pays whoever
+        /// sent the message.
+        ///
+        /// It does not weaken anything. The funds still come from the sender, so
+        /// naming someone else is a gift rather than a theft, and the wallet cap is
+        /// charged to the RECIPIENT, since they are the address that ends up holding.
+        #[serde(default)]
+        recipient: Option<String>,
+    },
     /// Sell tokens back to the curve by attaching them to the message.
     Sell { min_inj_out: Uint128 },
     /// Close the curve and move the reserve and leftover tokens to the

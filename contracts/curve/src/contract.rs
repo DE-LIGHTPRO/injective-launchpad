@@ -82,7 +82,9 @@ pub fn execute(
     msg: ExecuteMsg,
 ) -> Result<Response, ContractError> {
     match msg {
-        ExecuteMsg::Buy { min_tokens_out } => exec_buy(deps, env, info, min_tokens_out),
+        ExecuteMsg::Buy { min_tokens_out, recipient } => {
+            exec_buy(deps, env, info, min_tokens_out, recipient)
+        }
         ExecuteMsg::Sell { min_inj_out } => exec_sell(deps, info, min_inj_out),
         ExecuteMsg::Graduate {} => exec_graduate(deps, env),
         ExecuteMsg::ClaimFees {} => exec_claim_fees(deps),
@@ -118,7 +120,18 @@ fn exec_buy(
     env: Env,
     info: MessageInfo,
     min_tokens_out: Uint128,
+    recipient: Option<String>,
 ) -> Result<Response, ContractError> {
+    /*
+     * Validated, not trusted. An unvalidated string here would send a launch's whole
+     * opening buy to an address that does not exist, and a bank send to a malformed
+     * address fails the transaction rather than burning the funds, but only because
+     * the bank module checks. Checking here names the problem instead.
+     */
+    let buyer = match &recipient {
+        Some(r) => deps.api.addr_validate(r)?,
+        None => info.sender.clone(),
+    };
     let cfg = CONFIG.load(deps.storage)?;
     let mut state = STATE.load(deps.storage)?;
     if state.graduated {
@@ -213,9 +226,13 @@ fn exec_buy(
      * where the rule is supposed to bite.
      */
     if let Some(cap) = cfg.rules.max_per_wallet {
-        let held = PURCHASED
-            .may_load(deps.storage, &info.sender)?
-            .unwrap_or_default();
+        /*
+         * Charged to the recipient, because they are the address that ends up holding.
+         * Keyed on the payer instead, a cap could be walked around by paying from a
+         * fresh address every time and directing every purchase to one wallet, which
+         * is the exact thing the rule exists to stop.
+         */
+        let held = PURCHASED.may_load(deps.storage, &buyer)?.unwrap_or_default();
         let after = held.checked_add(q.tokens_out)?;
         if cfg.rules.would_exceed_cap(held, q.tokens_out) {
             return Err(ContractError::WalletCapExceeded {
@@ -224,7 +241,7 @@ fn exec_buy(
                 adding: q.tokens_out,
             });
         }
-        PURCHASED.save(deps.storage, &info.sender, &after)?;
+        PURCHASED.save(deps.storage, &buyer, &after)?;
     }
 
     // Effects before interactions: state is written before any funds move.
@@ -241,10 +258,11 @@ fn exec_buy(
 
     let mut res = Response::new()
         .add_message(BankMsg::Send {
-            to_address: info.sender.to_string(),
+            to_address: buyer.to_string(),
             amount: coins(q.tokens_out.u128(), &cfg.denom),
         })
         .add_attribute("action", "buy")
+        .add_attribute("buyer", buyer.as_str())
         .add_attribute("buyer", info.sender.as_str())
         .add_attribute("inj_in", inj_in)
         .add_attribute("tokens_out", q.tokens_out)
@@ -599,7 +617,7 @@ mod tests {
         let info = message_info(&who, &[coin(ONE, TOKEN)]);
         let err = execute(
             deps.as_mut(), mock_env(), info,
-            ExecuteMsg::Buy { min_tokens_out: Uint128::zero() },
+            ExecuteMsg::Buy { min_tokens_out: Uint128::zero(), recipient: None },
         ).unwrap_err();
         assert!(matches!(err, ContractError::Payment(_)), "buy paid in the launch token: {err:?}");
 
@@ -614,7 +632,7 @@ mod tests {
         let info = message_info(&who, &[]);
         let err = execute(
             deps.as_mut(), mock_env(), info,
-            ExecuteMsg::Buy { min_tokens_out: Uint128::zero() },
+            ExecuteMsg::Buy { min_tokens_out: Uint128::zero(), recipient: None },
         ).unwrap_err();
         assert!(matches!(err, ContractError::Payment(_)), "buy with no funds: {err:?}");
     }
@@ -638,7 +656,7 @@ mod tests {
         ).unwrap();
 
         let info = message_info(&who, &[coin(7 * ONE, QUOTE)]);
-        execute(deps.as_mut(), mock_env(), info, ExecuteMsg::Buy { min_tokens_out: Uint128::zero() })
+        execute(deps.as_mut(), mock_env(), info, ExecuteMsg::Buy { min_tokens_out: Uint128::zero(), recipient: None })
             .expect("buy");
 
         let st = STATE.load(deps.as_ref().storage).unwrap();
@@ -653,7 +671,7 @@ mod tests {
         // decide whether to exit.
         let (mut deps, who) = setup();
         let info = message_info(&who, &[coin(20 * ONE, QUOTE)]);
-        execute(deps.as_mut(), mock_env(), info, ExecuteMsg::Buy { min_tokens_out: Uint128::zero() })
+        execute(deps.as_mut(), mock_env(), info, ExecuteMsg::Buy { min_tokens_out: Uint128::zero(), recipient: None })
             .expect("buy");
 
         let before = STATE.load(deps.as_ref().storage).unwrap();
@@ -697,7 +715,7 @@ mod tests {
         assert!(!fresh.price.is_zero(), "a fresh curve must still quote a price");
 
         let info = message_info(&who, &[coin(40 * ONE, QUOTE)]);
-        execute(deps.as_mut(), mock_env(), info, ExecuteMsg::Buy { min_tokens_out: Uint128::zero() })
+        execute(deps.as_mut(), mock_env(), info, ExecuteMsg::Buy { min_tokens_out: Uint128::zero(), recipient: None })
             .expect("buy");
 
         let after: SpotPriceResponse = from_json(

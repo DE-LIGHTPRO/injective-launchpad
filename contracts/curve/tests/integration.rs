@@ -129,7 +129,7 @@ impl Fixture {
             .execute_contract(
                 who.clone(),
                 self.addr.clone(),
-                &ExecuteMsg::Buy { min_tokens_out: Uint128::zero() },
+                &ExecuteMsg::Buy { min_tokens_out: Uint128::zero(), recipient: None },
                 &coins(inj.u128(), QUOTE),
             )
             .map(|_| ())
@@ -279,7 +279,7 @@ fn slippage_guard_rejects_a_worse_fill() {
     let err = f.app.execute_contract(
         alice,
         f.addr.clone(),
-        &ExecuteMsg::Buy { min_tokens_out: sim.tokens_out + Uint128::one() },
+        &ExecuteMsg::Buy { min_tokens_out: sim.tokens_out + Uint128::one(), recipient: None },
         &coins(amt(10).u128(), QUOTE),
     );
     /*
@@ -314,7 +314,7 @@ fn front_running_a_buy_triggers_the_victims_slippage_guard() {
     let err = f.app.execute_contract(
         alice,
         f.addr.clone(),
-        &ExecuteMsg::Buy { min_tokens_out: sim.tokens_out },
+        &ExecuteMsg::Buy { min_tokens_out: sim.tokens_out, recipient: None },
         &coins(amt(10).u128(), QUOTE),
     );
     let msg = format!("{:#}", err.unwrap_err());
@@ -898,4 +898,88 @@ fn a_buy_that_fills_the_curve_during_the_opening_window_refunds_in_full() {
         "the contract holds {held} but accounts for {accounted}: the difference was not refunded"
     );
     f.assert_solvent();
+}
+
+#[test]
+fn the_wallet_cap_follows_the_recipient_not_the_payer() {
+    /*
+     * The way a cap gets walked around, and the reason `recipient` needed thinking
+     * about rather than just adding.
+     *
+     * A curve pays whoever is named, so if the cap were keyed on the PAYER then
+     * someone could buy from a fresh address every time and direct every purchase to
+     * one wallet. Each payer would look untouched, the cap would never bind, and the
+     * destination would accumulate without limit: the exact outcome the rule exists
+     * to prevent, achieved without doing anything the contract calls unusual.
+     *
+     * Mutation testing found this uncovered. Nothing here had ever bought on behalf of
+     * anyone, so keying the cap on `info.sender` passed every test.
+     */
+    let one_buy = quoted_tokens(&setup(), amt(1));
+    let cap = one_buy + one_buy / Uint128::new(2);
+    let mut f = setup_with(LaunchRules {
+        max_per_wallet: Some(cap),
+        trade_start: None,
+        early_fee: None,
+    });
+    let alice = f.alice.clone();
+    let bob = f.bob.clone();
+
+    // Alice pays, Bob receives. Bob's allowance is what gets used.
+    f.app
+        .execute_contract(
+            alice.clone(),
+            f.addr.clone(),
+            &ExecuteMsg::Buy {
+                min_tokens_out: Uint128::zero(),
+                recipient: Some(bob.to_string()),
+            },
+            &coins(amt(1).u128(), QUOTE),
+        )
+        .unwrap();
+    assert!(f.balance(&bob, TOKEN) > Uint128::zero(), "the recipient got nothing");
+    assert_eq!(f.balance(&alice, TOKEN), Uint128::zero(), "the payer was given the tokens");
+
+    // A second buy to Bob, paid by Alice again, must now be refused: Bob holds.
+    let err = f
+        .app
+        .execute_contract(
+            alice.clone(),
+            f.addr.clone(),
+            &ExecuteMsg::Buy {
+                min_tokens_out: Uint128::zero(),
+                recipient: Some(bob.to_string()),
+            },
+            &coins(amt(1).u128(), QUOTE),
+        )
+        .unwrap_err();
+    assert!(
+        format!("{err:#}").contains("caps a wallet"),
+        "a fresh payer walked around the cap: {err:#}"
+    );
+
+    // And Alice's own allowance is untouched, because she never received anything.
+    f.buy(&alice, amt(1)).expect("the payer's own allowance was consumed");
+    f.assert_solvent();
+}
+
+#[test]
+fn a_malformed_recipient_is_refused_by_name() {
+    // An unvalidated string would reach the bank module, which fails the transaction
+    // with its own error about an address rather than saying which field was wrong.
+    let mut f = setup();
+    let alice = f.alice.clone();
+    let err = f
+        .app
+        .execute_contract(
+            alice,
+            f.addr.clone(),
+            &ExecuteMsg::Buy {
+                min_tokens_out: Uint128::zero(),
+                recipient: Some("not-an-address".into()),
+            },
+            &coins(amt(1).u128(), QUOTE),
+        )
+        .unwrap_err();
+    assert!(format!("{err:#}").to_lowercase().contains("address"), "{err:#}");
 }

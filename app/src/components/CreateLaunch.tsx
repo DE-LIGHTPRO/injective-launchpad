@@ -9,7 +9,7 @@ import {
   LaunchInputError,
   type LaunchPlan,
 } from '@/lib/createLaunch';
-import { parseAmount, fmt, maxCollectable, type CurveConfig, type CurveState } from '@/lib/curve';
+import { parseAmount, fmt, maxCollectable, quoteBuy, type CurveConfig, type CurveState } from '@/lib/curve';
 import { NETWORK, getFactoryAddress, isDeployed } from '@/lib/config';
 import type { WalletAccount } from '@/lib/wallet';
 import { profileForChain, profileFieldError, imageSrc } from '@/lib/tokenProfile';
@@ -57,6 +57,7 @@ const DEFAULTS = {
   tradeStart: '',
   openingFeePct: '',
   openingFeeMins: '10',
+  initialBuy: '',
   totalSupply: '1000000000',
   curveShare: '80',
   target: '85',
@@ -133,6 +134,7 @@ export function CreateLaunch() {
           name: f.name,
           description: f.description,
           rules: { ...rulesForChain(builtRules), ...earlyFeeForChain(builtRules.earlyFee) },
+          initialBuy: devBuy,
           profile: profileForChain({
             image: f.image,
             website: f.website,
@@ -240,6 +242,39 @@ export function CreateLaunch() {
       setBusy(false);
     }
   }, [account, busy, plan]);
+
+  /*
+   * The creator's own opening buy, parsed from whole quote units.
+   *
+   * Zero when blank, which is the honest default: a launch where the creator takes
+   * nothing first is a different product from one where they take a position, and the
+   * form should not pre-fill a number that changes which one it is.
+   */
+  const devBuy = useMemo(() => {
+    if (f.initialBuy.trim().length === 0) return 0n;
+    try {
+      const v = parseAmount(f.initialBuy);
+      return v > 0n ? v : 0n;
+    } catch {
+      return 0n;
+    }
+  }, [f.initialBuy]);
+
+  /*
+   * What that buy actually gets, quoted from the same maths the contract runs. A
+   * creator typing "5 INJ" has no idea whether that is 1% of the supply or 40%, and
+   * 40% is the number that decides whether anyone else buys at all.
+   */
+  const devBuyPreview = useMemo(() => {
+    if (devBuy <= 0n || 'error' in built) return null;
+    try {
+      const q = quoteBuy(built.curve, { injCollected: 0n, tokensSold: 0n, graduated: false }, devBuy);
+      const total = built.curve.curveSupply + built.lpReserve;
+      return { tokens: q.tokensOut, share: Number(q.tokensOut) / Number(total) };
+    } catch {
+      return null;
+    }
+  }, [devBuy, built]);
 
   const fresh: CurveState = { injCollected: 0n, tokensSold: 0n, graduated: false };
   // A rule problem blocks the plan as firmly as a bad curve does. Both are permanent
@@ -520,6 +555,36 @@ export function CreateLaunch() {
           </div>
         </div>
 
+        <div className="field">
+          <label htmlFor="cl-devbuy">
+            Your opening buy <span className="hint">{NETWORK.quoteSymbol}, blank for none</span>
+          </label>
+          <input
+            id="cl-devbuy"
+            value={f.initialBuy}
+            onChange={(e) => set('initialBuy')(e.target.value)}
+            placeholder="none"
+            inputMode="decimal"
+          />
+          {devBuyPreview && (
+            /*
+                The SHARE, not just the token count. A creator typing "5 INJ" cannot
+                tell whether that is 1% of the supply or 40%, and 40% is the figure
+                that decides whether anyone else buys. It is also the number the
+                launch page will show every visitor, so showing it here is showing
+                them what everyone else will see.
+              */
+            <p className={`note ${devBuyPreview.share >= 0.2 ? 'err-text' : ''}`}>
+              That buys about {fmt(devBuyPreview.tokens, 18, 0)}{' '}
+              {f.symbol.trim() || 'tokens'}, roughly{' '}
+              <strong>{(devBuyPreview.share * 100).toFixed(1)}% of the supply</strong>, in
+              the same transaction and before anyone else can buy.
+              {devBuyPreview.share >= 0.2 &&
+                ' A position this size is shown on the launch page and will put buyers off.'}
+            </p>
+          )}
+        </div>
+
         {hasAnyRule(builtRules) && ruleProblems.length === 0 && (
           <div style={{ marginTop: 'var(--space-4)' }}>
             <ul className="plan">
@@ -591,7 +656,7 @@ export function CreateLaunch() {
           <>
             <ul className="plan">
               {!('error' in built) &&
-                describePlan(plan.plan, built.curve, built.lpReserve).map((l) => (
+                describePlan(plan.plan, built.curve, built.lpReserve, devBuy).map((l) => (
                   <li key={l}>{l}</li>
                 ))}
             </ul>

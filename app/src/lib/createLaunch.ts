@@ -85,6 +85,13 @@ export interface LaunchInput {
   // `unknown` because `early_fee` is a nested object while the others are strings;
   // narrowing to `string` here was what made the rules field quietly reject it.
   rules?: Record<string, unknown>;
+  /**
+   * Quote the creator spends on their own launch, in the same transaction.
+   *
+   * Base units. Attached alongside the token seed, so the factory is never funded
+   * separately and never holds anything between transactions.
+   */
+  initialBuy?: bigint;
   curve: CurveConfig;
   lpReserve: bigint;
   creatorFeeShareBps: number;
@@ -279,14 +286,29 @@ export function planLaunch(input: LaunchInput): LaunchPlan {
               // Same treatment: omitted when empty, so a launch with no rules sends
               // nothing rather than a zero cap the contract would refuse.
               ...(input.rules && Object.keys(input.rules).length > 0 ? { rules: input.rules } : {}),
+              ...(input.initialBuy && input.initialBuy > 0n
+                ? { initial_buy: input.initialBuy.toString() }
+                : {}),
               lp_reserve: input.lpReserve.toString(),
               creator_fee_share_bps: input.creatorFeeShareBps,
               curve: curveMsg,
             },
           },
-          // The whole supply, in the denom just minted. The factory refuses any
-          // other amount, so this is not a default to adjust.
-          funds: [{ denom, amount: seed.toString() }],
+          /*
+           * The whole supply, plus the opening buy when there is one. The factory
+           * refuses any other amount of either, and refuses a third denom outright,
+           * so neither of these is a default to adjust.
+           *
+           * Order matters to nothing on chain but matters here: the seed is first so
+           * the panel renders the launch before the purchase, which is the order the
+           * two things happen in.
+           */
+          funds: [
+            { denom, amount: seed.toString() },
+            ...(input.initialBuy && input.initialBuy > 0n
+              ? [{ denom: NETWORK.quoteDenom, amount: input.initialBuy.toString() }]
+              : []),
+          ],
         },
       },
     ],
@@ -294,13 +316,32 @@ export function planLaunch(input: LaunchInput): LaunchPlan {
 }
 
 /** A human summary of what signing would do, shown before it is signed. */
-export function describePlan(plan: LaunchPlan, curve: CurveConfig, lpReserve: bigint): string[] {
+export function describePlan(
+  plan: LaunchPlan,
+  curve: CurveConfig,
+  lpReserve: bigint,
+  initialBuy = 0n,
+): string[] {
   const whole = (v: bigint) => (v / 10n ** 18n).toLocaleString('en-US');
-  return [
+  const lines = [
     `Create the denom ${plan.denom}`,
     `Name it, with a display unit at ${TOKEN_DECIMALS} decimals so wallets show whole tokens`,
     `Mint ${whole(plan.seedAmount)} tokens to you, and nothing can mint more afterwards`,
     `Send all ${whole(plan.seedAmount)} to the launchpad: ${whole(curve.curveSupply)} onto the curve and ${whole(lpReserve)} held back to pair at graduation`,
     `Buyers pay ${NETWORK.quoteSymbol} and the curve prices every trade until it reaches the target`,
   ];
+
+  /*
+   * The opening buy is listed LAST and in the creator's own terms, because it is the
+   * step that takes supply before anyone else can see the launch. Every launchpad
+   * offers this and most of them describe it as a feature; what it is, from a buyer's
+   * side, is the creator at the front of the queue. A plan that lists it blandly
+   * between two mechanical steps is the plan not saying so.
+   */
+  if (initialBuy > 0n) {
+    lines.push(
+      `Immediately spend ${whole(initialBuy)} ${NETWORK.quoteSymbol} of your own on the curve, at the opening price, before anyone else can buy`,
+    );
+  }
+  return lines;
 }

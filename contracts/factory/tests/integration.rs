@@ -82,6 +82,11 @@ fn setup() -> Fx {
                     coin(seed_total().u128(), TOKEN),
                     coin(seed_total().u128(), "factory/inj1launch/AAA"),
                     coin(seed_total().u128(), "factory/inj1launch/BBB"),
+                    // Quote as well as tokens: a creator making an opening buy pays
+                    // with it in the same transaction, and the fixture funded only
+                    // the seed, so the bank refused the subtraction with "Cannot Sub"
+                    // rather than anything naming a balance.
+                    coin(amt(100).u128(), QUOTE),
                 ],
             )
             .unwrap();
@@ -142,6 +147,7 @@ impl Fx {
                     curve: curve_cfg(),
                     profile,
                     rules,
+                    initial_buy: None,
                 },
                 &coins(seed_total().u128(), denom),
             )
@@ -209,7 +215,7 @@ fn a_launch_created_through_the_factory_actually_trades() {
         .execute_contract(
             buyer.clone(),
             l.curve.clone(),
-            &CurveExec::Buy { min_tokens_out: Uint128::zero() },
+            &CurveExec::Buy { min_tokens_out: Uint128::zero(), recipient: None },
             &coins(amt(10).u128(), QUOTE),
         )
         .unwrap();
@@ -234,6 +240,7 @@ fn wrong_seed_amount_is_refused() {
         &ExecuteMsg::CreateLaunch {
             profile: Default::default(),
             rules: Default::default(),
+            initial_buy: None,
             denom: TOKEN.into(),
             lp_reserve: lp_reserve(),
             creator_fee_share_bps: 0,
@@ -258,6 +265,7 @@ fn an_unreachable_graduation_target_is_refused_at_creation() {
         &ExecuteMsg::CreateLaunch {
             profile: Default::default(),
             rules: Default::default(),
+            initial_buy: None,
             denom: TOKEN.into(),
             lp_reserve: lp_reserve(),
             creator_fee_share_bps: 0,
@@ -532,4 +540,182 @@ fn a_valid_profile_survives_the_round_trip_into_storage() {
     let stored = f.launch(1).profile;
     assert_eq!(stored, profile, "the profile did not survive the reply");
     assert_eq!(stored.telegram, None, "an absent link came back as something else");
+}
+
+// ------------------------------------------------------------- initial buy --
+
+#[test]
+fn an_initial_buy_sends_the_tokens_to_the_creator_not_the_factory() {
+    /*
+     * The property the whole feature turns on.
+     *
+     * A curve pays whoever sent the message, and the sender here is the FACTORY: it
+     * spends the creator's attached quote in the reply, after the curve exists. Without
+     * a recipient the factory would be the buyer of record and would sit holding the
+     * tokens, which is both the wrong outcome and a fund-holding factory, the one thing
+     * this contract's own tests assert it never becomes.
+     *
+     * Asserted on balances rather than on an attribute: an attribute can report a
+     * transfer that was never sent.
+     */
+    let mut f = setup();
+    let creator = f.creator.clone();
+    let spend = amt(5);
+
+    f.app
+        .execute_contract(
+            creator.clone(),
+            f.factory.clone(),
+            &ExecuteMsg::CreateLaunch {
+                denom: TOKEN.into(),
+                lp_reserve: lp_reserve(),
+                creator_fee_share_bps: 5_000,
+                curve: curve_cfg(),
+                profile: Default::default(),
+                rules: Default::default(),
+                initial_buy: Some(spend),
+            },
+            &[
+                coin(seed_total().u128(), TOKEN),
+                coin(spend.u128(), QUOTE),
+            ],
+        )
+        .unwrap();
+
+    let launch = f.launch(1);
+    assert!(
+        f.balance(&creator, TOKEN) > Uint128::zero(),
+        "the creator received no tokens from their own opening buy"
+    );
+    assert_eq!(
+        f.balance(&f.factory, TOKEN),
+        Uint128::zero(),
+        "the factory is holding launch tokens"
+    );
+    assert_eq!(
+        f.balance(&f.factory, QUOTE),
+        Uint128::zero(),
+        "the factory is holding quote"
+    );
+    // And the quote reached the curve, which is what backs the tokens handed out.
+    assert!(f.balance(&launch.curve, QUOTE) > Uint128::zero());
+}
+
+#[test]
+fn the_attached_quote_must_match_the_declared_initial_buy() {
+    /*
+     * Both directions refused, and both for a concrete reason. Too little and the buy
+     * fails inside the reply, taking the whole launch down after the creator has
+     * already signed. Too much and the surplus has nowhere to go, because the reply
+     * spends exactly what was declared, so the factory would keep it.
+     */
+    for attached in [amt(4), amt(6), amt(0)] {
+        let mut f = setup();
+        let creator = f.creator.clone();
+        let mut funds = vec![coin(seed_total().u128(), TOKEN)];
+        if !attached.is_zero() {
+            funds.push(coin(attached.u128(), QUOTE));
+        }
+        let res = f.app.execute_contract(
+            creator,
+            f.factory.clone(),
+            &ExecuteMsg::CreateLaunch {
+                denom: TOKEN.into(),
+                lp_reserve: lp_reserve(),
+                creator_fee_share_bps: 5_000,
+                curve: curve_cfg(),
+                profile: Default::default(),
+                rules: Default::default(),
+                initial_buy: Some(amt(5)),
+            },
+            &funds,
+        );
+        assert!(res.is_err(), "{attached} was accepted against a declared 5");
+    }
+}
+
+#[test]
+fn a_launch_with_no_initial_buy_still_takes_exactly_the_seed() {
+    // The default path, which must not have been loosened by making room for a second
+    // denom. Attaching quote without declaring a buy is refused.
+    let mut f = setup();
+    let creator = f.creator.clone();
+    let res = f.app.execute_contract(
+        creator,
+        f.factory.clone(),
+        &ExecuteMsg::CreateLaunch {
+            denom: TOKEN.into(),
+            lp_reserve: lp_reserve(),
+            creator_fee_share_bps: 5_000,
+            curve: curve_cfg(),
+            profile: Default::default(),
+            rules: Default::default(),
+            initial_buy: None,
+        },
+        &[coin(seed_total().u128(), TOKEN), coin(amt(1).u128(), QUOTE)],
+    );
+    assert!(res.is_err(), "undeclared quote was accepted");
+}
+
+#[test]
+fn a_third_denom_is_refused_rather_than_kept() {
+    /*
+     * Funds the factory would be left holding with no path out. A contract that
+     * silently keeps dust is how a fund-holding factory starts, and the seed check
+     * used to catch this for free by accepting exactly one coin.
+     */
+    let mut f = setup();
+    let creator = f.creator.clone();
+    let res = f.app.execute_contract(
+        creator,
+        f.factory.clone(),
+        &ExecuteMsg::CreateLaunch {
+            denom: TOKEN.into(),
+            lp_reserve: lp_reserve(),
+            creator_fee_share_bps: 5_000,
+            curve: curve_cfg(),
+            profile: Default::default(),
+            rules: Default::default(),
+            initial_buy: None,
+        },
+        &[
+            coin(seed_total().u128(), TOKEN),
+            coin(1, "factory/inj1launch/AAA"),
+        ],
+    );
+    assert!(res.is_err(), "an unrelated denom was accepted and kept");
+}
+
+#[test]
+fn the_factory_refuses_a_bad_seed_itself_rather_than_leaving_it_to_the_curve() {
+    /*
+     * Mutation testing showed the factory's seed check could be deleted entirely and
+     * every test still passed, because the CURVE checks the seed too and the
+     * transaction failed either way. Defence in depth is right; a check nothing can
+     * tell is working is not, because the next person removes it as redundant.
+     *
+     * Asserted on the factory's own error text. Failing early also matters in itself:
+     * it means a bad launch never consumes an id or a reply slot.
+     */
+    let mut f = setup();
+    let creator = f.creator.clone();
+    let res = f.app.execute_contract(
+        creator,
+        f.factory.clone(),
+        &ExecuteMsg::CreateLaunch {
+            denom: TOKEN.into(),
+            lp_reserve: lp_reserve(),
+            creator_fee_share_bps: 5_000,
+            curve: curve_cfg(),
+            profile: Default::default(),
+            rules: Default::default(),
+            initial_buy: None,
+        },
+        &[coin(seed_total().u128() - 1, TOKEN)],
+    );
+    let err = format!("{:#}", res.unwrap_err());
+    assert!(
+        err.contains("seed") || err.contains("expected"),
+        "the refusal does not name the seed: {err}"
+    );
 }
