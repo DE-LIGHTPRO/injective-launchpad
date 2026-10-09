@@ -219,6 +219,21 @@ export function ConnectWallet({
           {error && (
             <>
               <p className="note danger-text">{error.message}</p>
+              {/*
+                  Actionable, and only when it is. With five wallets offered, trying a
+                  different one is the fastest way past the common cause: several
+                  extensions offer to become the default Cosmos wallet and overwrite
+                  `window.keplr`, so the button says one name and another extension
+                  answers. Ninji is Injective's own, so it is the one most likely to
+                  already know this chain.
+                */}
+              {error.expand && installed && installed.length > 1 && (
+                <p className="note">
+                  Another wallet in this list may work: extensions can take over each
+                  other&rsquo;s connection point, so the name on the button is not always
+                  the one that answers.
+                </p>
+              )}
               {error.detail && (
                 /*
                  * Behind a disclosure, not in the sentence. An extension's error text

@@ -279,14 +279,41 @@ export async function connect(name: WalletName): Promise<WalletAccount> {
      * The fallback carries the detail. Without it this sentence was the only thing
      * anyone saw, including me, and a real failure became undiagnosable.
      */
+    /*
+     * The detail names WHICH extension answered, not just what it said. With several
+     * wallets installed, one of them may have taken over this global, and "Keplr
+     * failed" is then the wrong sentence about the wrong extension.
+     */
     throw new WalletError(
       'failed',
       'The wallet did not open. Unlock it and try again.',
-      msg,
+      `${msg}\n\nresponding extension at window.${SUPPORTED.find((w) => w.name === name)?.globalKey}: ${identify(ext)}`,
     );
   }
 
   return finishConnect(name, ext);
+}
+
+/**
+ * Which extension actually answered at a given global.
+ *
+ * `window.keplr` is not reserved. Several wallets offer a "set as default Cosmos
+ * wallet" option that overwrites it, so clicking Keplr can reach Leap, OWallet or
+ * something else entirely, and a failure then looks like Keplr failing. On a browser
+ * with a dozen wallet extensions that is not an edge case.
+ *
+ * This cannot be resolved automatically, because the impostor implements the same
+ * interface on purpose. What it can do is SAY SO, so a failure names the extension
+ * that produced it rather than the one on the button.
+ */
+function identify(ext: InjectedWallet): string {
+  const o = ext as unknown as Record<string, unknown>;
+  const flags = ['isLeap', 'isKeplr', 'isCosmostation', 'isOWallet', 'isNinji'].filter(
+    (f) => o[f] === true,
+  );
+  const version = typeof o.version === 'string' ? ` v${o.version}` : '';
+  const mode = typeof o.mode === 'string' ? ` (${o.mode})` : '';
+  return `${flags.join(', ') || 'unidentified'}${version}${mode}`;
 }
 
 /**
