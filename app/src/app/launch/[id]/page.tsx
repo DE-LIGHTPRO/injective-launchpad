@@ -6,6 +6,7 @@ import { TokenLogo } from '@/components/TokenLogo';
 import { visibleLinks } from '@/lib/tokenProfile';
 import { describeRules, hasAnyRule } from '@/lib/launchRules';
 import { StatusChip } from '@/components/StatusChip';
+import { CreatorPosition } from '@/components/CreatorPosition';
 import { graduationProgress, fmt, spotPrice, maxCollectable } from '@/lib/curve';
 import { NETWORK, isDeployed, isDevBuild } from '@/lib/config';
 import { isDemoMode } from '@/lib/demo';
@@ -209,6 +210,12 @@ export default async function LaunchPage({ params }: { params: Promise<{ id: str
           <p className="note">{ruleCopy.scope}</p>
         </div>
       )}
+
+      <CreatorPosition
+        creator={detail.creator}
+        denom={detail.denom}
+        totalSupply={(detail.config.curveSupply + detail.lpReserve).toString()}
+      />
 
       <div className="cols" style={{ marginTop: 'var(--space-5)' }}>
         <div>

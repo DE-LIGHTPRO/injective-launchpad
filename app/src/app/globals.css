@@ -926,6 +926,49 @@ button.ghost { background: transparent; border: 1px solid var(--line); color: va
 .spark-change.down { color: var(--danger); }
 .spark-foot { display: flex; justify-content: space-between; font-size: var(--text-micro); color: var(--text-faint); }
 
+/* ------------------------------------------------------------ board metrics -- */
+
+.card-by { font-size: var(--text-xs); color: var(--text-faint); margin-top: 2px; }
+.card-badges { display: inline-flex; align-items: center; gap: var(--space-2); flex: none; }
+.chip-sm { font-size: 9px; letter-spacing: 0.08em; padding: 2px var(--space-2); }
+
+/* Market cap, given the weight a board is read by. */
+.card-mc { display: flex; align-items: baseline; gap: var(--space-2); margin-top: var(--space-4); }
+.mc-label {
+  font-size: var(--text-micro);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+.mc-value { font-size: var(--text-lg); font-weight: 650; letter-spacing: -0.01em; }
+
+/* The totals strip above the board. */
+.totals {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(10rem, 100%), 1fr));
+  gap: 1px;
+  background: var(--glass-border);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  margin-top: var(--space-5);
+}
+.totals > div {
+  background: var(--glass-fill);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  padding: var(--space-4) var(--space-5);
+}
+.totals .v { font-size: var(--text-xl); font-weight: 620; letter-spacing: -0.02em; display: block; }
+.totals .k {
+  font-size: var(--text-micro);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  margin-top: 2px;
+  display: block;
+}
+
 /* ---------------------------------------------------------------- the curve -- */
 
 /*

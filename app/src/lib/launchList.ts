@@ -46,6 +46,12 @@ export interface LaunchRow {
     feeBps: string;
   };
   tokensSold: string;
+  /** Spot price times total supply, base units as a string. The board's headline. */
+  marketCap: string;
+  /** Unix seconds the curve opened, or null when the contract predates the field. */
+  openedAt: number | null;
+  /** Fees accrued to creator and platform, base units. Feeds the totals bar. */
+  feesAccrued: string;
 }
 
 export interface Selection {

@@ -1,11 +1,12 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { symbolOf, short } from '@/lib/chain';
 import { TokenLogo } from './TokenLogo';
 import { StatusChip } from './StatusChip';
 import { CurveGlyph } from './CurveGlyph';
+import { ageLabel, feeLabel, compact } from '@/lib/boardMetrics';
 import { fmt } from '@/lib/curve';
 import { NETWORK } from '@/lib/config';
 import { selectLaunches, type LaunchRow, type SortKey } from '@/lib/launchList';
@@ -34,6 +35,21 @@ const SORTS: Array<{ key: SortKey; label: string; hint: string }> = [
 ];
 
 export function LaunchList({ rows }: { rows: LaunchRow[] }) {
+  /*
+   * One clock for the whole board, taken on mount rather than per card.
+   *
+   * `Date.now()` during render differs between the server pass and the first client
+   * pass, which React reports as a hydration mismatch and which blanks the list it
+   * happens in. Seeded at zero so both passes agree, then set in an effect: ages are
+   * absent for one frame, which is better than a list that fails to hydrate.
+   */
+  const [nowSeconds, setNowSeconds] = useState(0);
+  useEffect(() => {
+    setNowSeconds(Math.floor(Date.now() / 1000));
+    const id = window.setInterval(() => setNowSeconds(Math.floor(Date.now() / 1000)), 30_000);
+    return () => window.clearInterval(id);
+  }, []);
+
   const [q, setQ] = useState('');
   const [sort, setSort] = useState<SortKey>('progress');
   const [hideGraduated, setHideGraduated] = useState(false);
@@ -126,8 +142,22 @@ export function LaunchList({ rows }: { rows: LaunchRow[] }) {
                       own parts and nothing else. The full value is one click away on
                       the detail page, and search still covers it.
                     */}
-                  <div className="sym" title={r.denom}>
-                    {symbolOf(r.denom)}
+                  <div style={{ minWidth: 0 }}>
+                    <div className="sym" title={r.denom}>
+                      {symbolOf(r.denom)}
+                    </div>
+                    {/*
+                        Who made it and when, the line every mature launchpad puts
+                        here. The age comes from the curve's `opened_at`, which the
+                        contract already stores for the opening-fee decay, so it costs
+                        no extra query and cannot drift from what the fee uses.
+                      */}
+                    <div className="card-by">
+                      by {short(r.creator, 5)}
+                      {ageLabel(r.openedAt, nowSeconds) && (
+                        <> · {ageLabel(r.openedAt, nowSeconds)}</>
+                      )}
+                    </div>
                   </div>
                 </div>
                 {/*
@@ -136,7 +166,10 @@ export function LaunchList({ rows }: { rows: LaunchRow[] }) {
                     which is the most confident possible label on the one state where
                     the contract refuses every buy.
                   */}
-                <StatusChip graduated={r.graduated} rules={r.rules} />
+                <div className="card-badges">
+                  <span className="chip chip-sm">{feeLabel(BigInt(r.curve.feeBps))}</span>
+                  <StatusChip graduated={r.graduated} rules={r.rules} />
+                </div>
               </div>
 
               {/*
@@ -146,6 +179,20 @@ export function LaunchList({ rows }: { rows: LaunchRow[] }) {
                   it, thinner: progress is still worth a glance, it just is not the
                   thing that distinguishes one launch from another.
                 */}
+              {/*
+                  Market cap as the headline, which is how a launchpad board is read.
+                  Quoted in INJ rather than USD: a USD figure needs a price for INJ,
+                  which is a separate measurement with its own provenance, and an
+                  unlabelled dollar sign over an unsourced conversion is the kind of
+                  number this project keeps finding and removing.
+                */}
+              <div className="card-mc">
+                <span className="mc-label">MC</span>
+                <span className="mc-value mono">
+                  {compact(BigInt(r.marketCap))} {NETWORK.quoteSymbol}
+                </span>
+              </div>
+
               <div className="card-curve">
                 <CurveGlyph
                   config={{

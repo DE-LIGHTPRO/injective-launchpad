@@ -1,4 +1,5 @@
 import { CurveGlyph } from '@/components/CurveGlyph';
+import { marketCap, boardTotals, compact } from '@/lib/boardMetrics';
 import type { LaunchRules } from '@/lib/launchRules';
 import Link from 'next/link';
 import { listLaunches, getLaunchDetail, symbolOf, short, type Launch } from '@/lib/chain';
@@ -35,6 +36,8 @@ interface Row {
   rules: LaunchRules;
   config: CurveConfig;
   tokensSold: bigint;
+  marketCap: bigint;
+  feesAccrued: bigint;
 }
 
 async function loadRows(): Promise<{ rows: Row[]; error?: string; errorDetail?: string }> {
@@ -52,6 +55,14 @@ async function loadRows(): Promise<{ rows: Row[]; error?: string; errorDetail?: 
           rules: d.rules,
           config: d.config,
           tokensSold: d.state.tokensSold,
+          /*
+           * Fully diluted: spot times the WHOLE supply, curve plus the reserve held
+           * back for the pool. Every launchpad quotes it this way and it is still a
+           * larger claim than it looks on a curve, which is why the card labels it
+           * "MC" rather than calling it a valuation.
+           */
+          marketCap: marketCap(d.config, d.state, d.config.curveSupply + d.lpReserve),
+          feesAccrued: d.creatorOwed + d.platformOwed,
         };
       }),
     );
@@ -90,6 +101,9 @@ function toRow(r: Row): LaunchRow {
       feeBps: r.config.feeBps.toString(),
     },
     tokensSold: r.tokensSold.toString(),
+    marketCap: r.marketCap.toString(),
+    openedAt: r.rules.openedAt,
+    feesAccrued: r.feesAccrued.toString(),
     raised: r.raised.toString(),
     target: r.target.toString(),
     progress: r.progress,
@@ -165,9 +179,54 @@ export default async function Home() {
       )}
 
       {rows.length > 0 && (
-        <div style={{ marginTop: 'var(--space-5)' }}>
-          <LaunchList rows={rows.map(toRow)} />
-        </div>
+        <>
+          {/*
+              Totals summed from the rows already on screen, not from a second query.
+              A totals bar with its own data source is the classic place for a page to
+              contradict itself, and a visitor who adds up the cards and gets a
+              different number trusts neither figure afterwards.
+            */}
+          {(() => {
+            const t = boardTotals(
+              rows.map((r) => ({ raised: r.raised, feesAccrued: r.feesAccrued, graduated: r.graduated })),
+            );
+            return (
+              <div className="totals">
+                <div>
+                  <span className="v mono">{t.launches}</span>
+                  <span className="k">Launches</span>
+                </div>
+                <div>
+                  {/*
+                      "In curve reserves", not "volume". A sell reduces the reserve, so
+                      this falls when people exit where volume never would. Lifetime
+                      volume needs every trade ever, which is a log scan this chain's
+                      query limits make unreliable, so it is left out rather than
+                      approximated by a number that means something else.
+                    */}
+                  <span className="v mono">
+                    {compact(t.raised)} {NETWORK.quoteSymbol}
+                  </span>
+                  <span className="k">In curve reserves</span>
+                </div>
+                <div>
+                  <span className="v mono">
+                    {compact(t.feesAccrued, 18, 4)} {NETWORK.quoteSymbol}
+                  </span>
+                  <span className="k">Fees accrued</span>
+                </div>
+                <div>
+                  <span className="v mono">{t.graduated}</span>
+                  <span className="k">Graduated</span>
+                </div>
+              </div>
+            );
+          })()}
+
+          <div style={{ marginTop: 'var(--space-5)' }}>
+            <LaunchList rows={rows.map(toRow)} />
+          </div>
+        </>
       )}
     </>
   );
