@@ -212,6 +212,26 @@ step(2, 'Checking the signer can pay for this');
   }
 }
 
+/**
+ * Refuses anything that is not a wasm module, before it is broadcast.
+ *
+ * Four bytes, read locally, costing nothing. Without it a mis-encoded upload is found
+ * by the chain after a simulate and a signature, and the message comes back as a
+ * `TransactionException` with a Go file path in it, which reads as the node being
+ * broken rather than as the payload being wrong.
+ */
+function assertWasm(bytes, name) {
+  const magic = [0x00, 0x61, 0x73, 0x6d];
+  const got = Array.from(bytes.subarray(0, 4));
+  if (magic.some((b, i) => got[i] !== b)) {
+    const hex = (a) => a.map((b) => '0x' + b.toString(16).padStart(2, '0')).join(' ');
+    die(
+      `${name} does not start with the wasm magic number.`,
+      `expected ${hex(magic)}, got ${hex(got)}. If the actual bytes spell ASCII, something base64-encoded the module instead of sending it.`,
+    );
+  }
+}
+
 // --------------------------------------------------------------- artifacts --
 
 function loadWasm(name) {
@@ -267,7 +287,20 @@ function safeDecode(v) {
 }
 
 async function storeCode(label, bytes) {
-  const msg = MsgStoreCode.fromJSON({ sender, wasmBytes: bytes.toString('base64') });
+  /*
+   * RAW BYTES, not base64. `MsgStoreCode.fromJSON` takes a Uint8Array and puts it on
+   * the wire as-is; handed a base64 string it encodes that STRING's characters, so the
+   * chain receives the text "AGFzbQ…" where the module should be:
+   *
+   *   magic header not detected: bad magic number
+   *   expected=[0x0, 0x61, 0x73, 0x6d]  actual=[0x41, 0x47, 0x46, 0x7a]
+   *
+   * `0x41 0x47 0x46 0x7a` is the ASCII of "AGFz", which is the base64 OF the expected
+   * magic. The error is exact and the fix is one call; what cost the attempt was that
+   * nothing checked the bytes before spending gas on them.
+   */
+  assertWasm(bytes, label);
+  const msg = MsgStoreCode.fromJSON({ sender, wasmBytes: new Uint8Array(bytes) });
   const res = await broadcaster.broadcast({ msgs: msg });
   const codeId = fromEvents(res, 'cosmwasm.wasm.v1.EventCodeStored', 'code_id')
     ?? fromEvents(res, 'store_code', 'code_id');
