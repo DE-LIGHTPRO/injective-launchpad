@@ -21,7 +21,7 @@ import { NETWORK, getLcdUrl } from './config.ts';
  * states plainly that it has never run against a chain.
  */
 
-export type WalletName = 'keplr' | 'leap';
+export type WalletName = 'keplr' | 'leap' | 'cosmostation' | 'ninji' | 'owallet';
 
 export interface WalletAccount {
   name: WalletName;
@@ -47,16 +47,87 @@ interface InjectedWallet {
   experimentalSuggestChain?: (c: unknown) => Promise<void>;
 }
 
-/** The extensions this app knows how to talk to, in the order it offers them. */
-export const SUPPORTED: Array<{ name: WalletName; label: string; install: string }> = [
-  { name: 'keplr', label: 'Keplr', install: 'https://www.keplr.app/download' },
-  { name: 'leap', label: 'Leap', install: 'https://www.leapwallet.io/download' },
+/**
+ * The extensions this app knows how to talk to, in the order it offers them.
+ *
+ * All five expose the SAME injected surface: `window.<name>.enable(chainId)` and
+ * `.getKey(chainId)`, the interface Keplr defined and the others implement for
+ * compatibility. That is why adding one is a row here rather than an adapter: the
+ * code path is identical and `available()` proves presence by reading the global
+ * rather than by trusting this list.
+ *
+ * NOT HERE, deliberately: MetaMask and other Ethereum wallets. Injective accepts
+ * them through EIP-712, but that is a different signing path with a different
+ * account type, and listing one as if it worked would be the defect this project
+ * keeps recording. A wallet is offered when its path has been written, not when
+ * the chain could in principle accept it.
+ *
+ * `globalKey` exists because two of these do not inject under their own name:
+ * Cosmostation uses `window.cosmostation.providers.keplr`, and Ninji injects as
+ * `window.ninji`. Assuming `window[name]` for all five would have silently hidden
+ * Cosmostation from every user who had it, which looks exactly like not having it.
+ */
+export const SUPPORTED: Array<{
+  name: WalletName;
+  label: string;
+  install: string;
+  /** Where on `window` the Keplr-compatible object actually lives. */
+  globalKey: string;
+}> = [
+  { name: 'keplr', label: 'Keplr', install: 'https://www.keplr.app/download', globalKey: 'keplr' },
+  { name: 'leap', label: 'Leap', install: 'https://www.leapwallet.io/download', globalKey: 'leap' },
+  {
+    name: 'ninji',
+    label: 'Ninji',
+    install: 'https://ninji.xyz',
+    globalKey: 'ninji',
+  },
+  {
+    name: 'cosmostation',
+    label: 'Cosmostation',
+    install: 'https://www.cosmostation.io/wallet',
+    globalKey: 'cosmostation.providers.keplr',
+  },
+  {
+    name: 'owallet',
+    label: 'OWallet',
+    install: 'https://owallet.dev',
+    globalKey: 'owallet',
+  },
 ];
 
 function injected(name: WalletName): InjectedWallet | null {
-  if (typeof window === 'undefined') return null;
-  const w = window as unknown as Record<string, InjectedWallet | undefined>;
-  return w[name] ?? null;
+  const meta = SUPPORTED.find((w) => w.name === name);
+  if (!meta) return null;
+
+  /*
+   * Rooted at `globalThis`, not at `window`, and that is not a style choice.
+   *
+   * `window` does not exist under Node, so the whole of this function was
+   * unreachable from a test: the guard returned null before anything else ran, and
+   * detection for five wallets had no coverage at all. In a browser
+   * `globalThis === window`, and during server rendering `globalThis` simply has no
+   * extension on it, so the SSR behaviour is identical. The difference is that it
+   * can now be exercised.
+   */
+  let node: unknown = globalThis;
+  for (const part of meta.globalKey.split('.')) {
+    if (node === null || typeof node !== 'object') return null;
+    node = (node as Record<string, unknown>)[part];
+  }
+  if (node === null || typeof node !== 'object') return null;
+
+  /*
+   * Checked for the methods it will actually be called with, not just for
+   * presence. A page can carry a stub on `window.keplr` (another extension's
+   * shim, a mock left by a test harness), and offering it as a wallet produces a
+   * "not a function" at the moment the user clicks, which reads as the app being
+   * broken rather than the wallet being absent.
+   */
+  const cand = node as Partial<InjectedWallet>;
+  return typeof cand.enable === 'function' && typeof cand.getKey === 'function'
+    ? (cand as InjectedWallet)
+    : null;
 }
 
 /**

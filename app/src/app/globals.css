@@ -692,6 +692,37 @@ button.go.ghost:hover:not(:disabled) { border-color: var(--accent-deep); }
   .toggle input[type='checkbox'] { width: 24px; height: 24px; }
 }
 
+/*
+ * A BASE RULE FOR `button`, which did not exist.
+ *
+ * Every button in this app was styled through a class: `.go`, `.ghost`,
+ * `.segmented button`. A `<button>` carrying none of them rendered at browser
+ * default, and two of them were doing exactly that in the header and the wallet
+ * menu: grey rectangles with system borders on a glass surface. Reported from a
+ * screenshot, because no test reads colour and the class-reachability guard only
+ * sees classes that are written down.
+ *
+ * Styling the ELEMENT rather than adding a third class is the fix that covers the
+ * next one too. The variants are all higher specificity, so nothing below changes.
+ */
+button {
+  font: inherit;
+  color: var(--text);
+  background: var(--glass-fill);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-2) var(--space-4);
+  cursor: pointer;
+  transition: border-color 0.18s var(--ease), background-color 0.18s var(--ease);
+}
+button:hover:not(:disabled) { border-color: var(--glass-border-lit); }
+button:disabled { color: var(--text-faint); cursor: not-allowed; }
+/* 24px on a coarse pointer (WCAG 2.5.8), which a class-based floor never reached
+   for a button that carries no class. */
+@media (pointer: coarse) {
+  button { min-height: 24px; }
+}
+
 /* Wallet, create form and trade feed. */
 .wallet { position: relative; display: inline-flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; }
 .wallet-acct { display: inline-flex; flex-direction: column; line-height: 1.25; min-width: 0; }
@@ -706,7 +737,17 @@ button.go.ghost:hover:not(:disabled) { border-color: var(--accent-deep); }
    * is darker than a card's: a white-alpha fill here would let the text behind
    * it show through the menu text.
    */
-  background: rgba(17, 20, 29, 0.78);
+  /*
+   * Raised from 0.78 to 0.94 after reading the page through it.
+   *
+   * The comment above was right about the hazard and the number was still wrong:
+   * card headings and a checkbox label were legible through the menu text at 0.78,
+   * even with the heavy blur, because the blur smears contrast without removing it.
+   * A popover that lets the page show through its own labels is harder to read than
+   * an opaque one and gains nothing. The glass still reads: the border, the inset
+   * highlight and the shadow are what make it a pane, not the transparency.
+   */
+  background: rgba(13, 16, 24, 0.94);
   backdrop-filter: var(--glass-blur-heavy);
   -webkit-backdrop-filter: var(--glass-blur-heavy);
   border: 1px solid var(--glass-border-lit);
@@ -714,9 +755,38 @@ button.go.ghost:hover:not(:disabled) { border-color: var(--accent-deep); }
   box-shadow: 0 1px 0 0 var(--glass-highlight) inset, 0 20px 48px -16px rgb(0 0 0 / 0.7);
 }
 .wallet-list { list-style: none; margin: var(--space-2) 0; padding: 0; display: grid; gap: var(--space-2); }
-.wallet-list button, .wallet-list a { width: 100%; text-align: left; }
-.wallet-list a { display: block; padding: var(--space-2) var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--accent); }
+.wallet-list button,
+.wallet-list a {
+  width: 100%;
+  text-align: left;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  background: var(--glass-well);
+  color: var(--text);
+  font-weight: 540;
+}
+.wallet-list button:hover:not(:disabled),
+.wallet-list a:hover {
+  border-color: var(--accent-deep);
+  background: var(--accent-wash);
+}
+.wallet-list a { color: var(--accent); }
+/* The extension's own mark, so a row is recognisable before the name is read. */
+.wallet-list img { width: 22px; height: 22px; border-radius: var(--radius-xs, 4px); flex: none; }
 button.ghost { background: transparent; border: 1px solid var(--line); color: var(--text-dim); }
+/* The header's connect trigger: the one action on the page, so it reads as one. */
+.wallet > button:not(.ghost) {
+  background: linear-gradient(180deg, var(--accent), var(--accent-deep));
+  border-color: transparent;
+  color: #04221b;
+  font-weight: 650;
+  box-shadow: 0 1px 0 0 rgba(255, 255, 255, 0.22) inset;
+}
+.wallet > button:not(.ghost):hover { filter: brightness(1.06); }
 
 /*
  * The create form, which had no styling at all.
