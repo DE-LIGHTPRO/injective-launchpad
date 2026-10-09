@@ -218,8 +218,22 @@ export async function connect(name: WalletName): Promise<WalletAccount> {
   } catch (e) {
     const msg = errorText(e);
 
-    if (/reject|denied|closed/i.test(msg)) {
+    if (/reject|denied|closed|cancell?ed/i.test(msg)) {
       throw new WalletError('rejected', 'You closed the wallet prompt, so nothing was connected.');
+    }
+
+    /*
+     * A locked extension is the single most common cause and says so in several
+     * different ways depending on the wallet. Keplr says "Key ring is not unlocked",
+     * Leap says "wallet is locked", and neither matched anything before, so both
+     * landed in the generic fallback with the actual instruction buried.
+     */
+    if (/lock|keyring|key ring|not unlocked|no account|empty account/i.test(msg)) {
+      throw new WalletError(
+        'failed',
+        'The wallet is locked. Open the extension, unlock it, then try again.',
+        msg,
+      );
     }
 
     /*

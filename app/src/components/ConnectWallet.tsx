@@ -37,7 +37,7 @@ export function ConnectWallet({
   const [balance, setBalance] = useState<bigint | null>(null);
   const [installed, setInstalled] = useState<WalletName[] | null>(null);
   const [open, setOpen] = useState(false);
-  const [error, setError] = useState<{ message: string; detail?: string } | null>(null);
+  const [error, setError] = useState<{ message: string; detail?: string; expand?: boolean } | null>(null);
   const [busy, setBusy] = useState<WalletName | null>(null);
   const menuId = useId();
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -133,9 +133,16 @@ export function ConnectWallet({
        * diagnose from.
        */
       if (e instanceof WalletError) {
-        setError({ message: e.message, detail: e.detail });
+        /*
+         * An UNRECOGNISED failure opens its detail by default, and that is the whole
+         * point of keeping it. When the sentence above is a real translation the raw
+         * text adds nothing and stays folded; when it is the catch-all, the raw text
+         * is the only thing that identifies the problem, and hiding it behind a click
+         * means nobody reads it, including me.
+         */
+        setError({ message: e.message, detail: e.detail, expand: e.kind === 'failed' });
       } else {
-        setError({ message: 'The wallet did not open.', detail: String(e) });
+        setError({ message: 'The wallet did not open.', detail: String(e), expand: true });
       }
     } finally {
       setBusy(null);
@@ -219,7 +226,7 @@ export function ConnectWallet({
                  * only thing that identifies an unexpected failure, so it is one click
                  * away rather than gone.
                  */
-                <details className="raw">
+                <details className="raw" open={error.expand}>
                   <summary>What the wallet said</summary>
                   <pre>{error.detail}</pre>
                 </details>

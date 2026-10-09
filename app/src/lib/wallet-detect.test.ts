@@ -210,3 +210,46 @@ test('an unrecognised failure keeps the wallet"s own words', async () => {
   }
   clearAll();
 });
+
+test('a locked wallet says to unlock it, in whichever words the extension used', async () => {
+  /*
+   * The most common cause of a failed connect, and it was landing in the catch-all.
+   * Each wallet phrases it differently and none of the phrasings matched anything:
+   * Keplr says "Key ring is not unlocked", Leap says "wallet is locked". The
+   * instruction the user needs was buried behind a disclosure in both cases.
+   */
+  for (const words of [
+    'Key ring is not unlocked',
+    'keyring is locked',
+    'The wallet is locked',
+    'no account found in keyring',
+  ]) {
+    clearAll();
+    installKeplr({
+      enable: async () => {
+        throw new Error(words);
+      },
+    });
+    await assert.rejects(connect('keplr'), (e: unknown) => {
+      const w = e as { message: string; detail?: string };
+      assert.match(w.message, /locked/i, `"${words}" did not produce an unlock instruction`);
+      assert.ok(w.detail?.includes(words), 'the extension\'s own words were lost');
+      return true;
+    });
+  }
+  clearAll();
+});
+
+test('a cancelled prompt reads as a choice, however it is spelled', async () => {
+  // "cancelled" and "canceled" are both in the wild, and neither matched before.
+  for (const words of ['Request rejected', 'User cancelled', 'Request canceled by user']) {
+    clearAll();
+    installKeplr({
+      enable: async () => {
+        throw new Error(words);
+      },
+    });
+    await assert.rejects(connect('keplr'), /closed the wallet prompt/);
+  }
+  clearAll();
+});
