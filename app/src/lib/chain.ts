@@ -71,10 +71,22 @@ interface RawCurveState {
 export class ChainError extends Error {
   /** The underlying detail, for logs and dev builds only. */
   readonly detail?: string;
-  constructor(message: string, detail?: string) {
+  /**
+   * True when the thing asked for does not exist, as opposed to not being reachable.
+   *
+   * The distinction decides an HTTP STATUS, which is why it is a flag rather than a
+   * message anyone can match on. A missing launch rendered the error inline and
+   * answered 200, so every wrong id in a URL told crawlers and link checkers that a
+   * real page lived there. "The chain is unreachable" must not do the same: that page
+   * exists and will work again in a minute, and answering 404 for it would have search
+   * engines drop real launches during an outage.
+   */
+  readonly notFound: boolean;
+  constructor(message: string, detail?: string, notFound = false) {
     super(message);
     this.name = 'ChainError';
     this.detail = detail;
+    this.notFound = notFound;
   }
 }
 
@@ -147,7 +159,7 @@ export async function listLaunches(limit = 50): Promise<Launch[]> {
 export async function getLaunch(id: number): Promise<Launch> {
   if (isDemoMode()) {
     const found = demoLaunches().find((l) => l.id === id);
-    if (!found) throw new ChainError('No such launch.');
+    if (!found) throw new ChainError('No such launch.', undefined, true);
     return found;
   }
   const factory = getFactoryAddress();

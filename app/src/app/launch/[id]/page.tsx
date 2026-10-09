@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import type { Metadata } from 'next';
-import { getLaunch, getLaunchDetail, symbolOf, short } from '@/lib/chain';
+import { notFound } from 'next/navigation';
+import { getLaunch, getLaunchDetail, symbolOf, short, ChainError } from '@/lib/chain';
 import { TokenLogo } from '@/components/TokenLogo';
 import { visibleLinks } from '@/lib/tokenProfile';
 import { describeRules, hasAnyRule } from '@/lib/launchRules';
@@ -93,6 +94,12 @@ export default async function LaunchPage({ params }: { params: Promise<{ id: str
     launch = await getLaunch(numericId);
     detail = await getLaunchDetail(launch.curve);
   } catch (e) {
+    /*
+     * A launch that does not exist is a 404, not a rendered error at 200.
+     * `notFound()` is what sets the status; returning markup, however correct the
+     * words, leaves the response saying the page is fine.
+     */
+    if (e instanceof ChainError && e.notFound) notFound();
     return (
       <div className="empty">
         <p className="danger-text">{(e as Error).message}</p>
