@@ -10,6 +10,15 @@ out/
 # about NEXT_PUBLIC_*.
 .env.local
 .env*.local
+# Anchored on a leading `.env`, which is easy to miss when naming a new file. A
+# key file called `DEPLOY-KEY.env.local` is NOT matched by the line above, and git
+# listed exactly that as untracked and ready to add while it held a seed phrase.
+# Belt and braces: anything whose name contains a secret-shaped word, anywhere.
+*mnemonic*
+*MNEMONIC*
+*seed-phrase*
+*.key
+*privkey*
 
 .DS_Store
 *.log
