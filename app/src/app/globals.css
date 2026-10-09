@@ -926,6 +926,32 @@ button.ghost { background: transparent; border: 1px solid var(--line); color: va
 .spark-change.down { color: var(--danger); }
 .spark-foot { display: flex; justify-content: space-between; font-size: var(--text-micro); color: var(--text-faint); }
 
+.copy-btn {
+  font-size: var(--text-micro);
+  padding: 1px var(--space-2);
+  margin-left: var(--space-2);
+  border-radius: var(--radius-xs, 4px);
+  color: var(--text-dim);
+  vertical-align: middle;
+}
+/* A 24px hit area from a pseudo-element (WCAG 2.5.8) without growing the glyph,
+   which would make a copy affordance compete with the address it sits beside. */
+@media (pointer: coarse) {
+  .copy-btn { position: relative; }
+  .copy-btn::after { content: ''; position: absolute; inset: -9px -6px; }
+}
+
+.quick-amounts { display: flex; gap: var(--space-2); margin-top: var(--space-3); flex-wrap: wrap; }
+.quick-amounts button {
+  flex: 1 1 0;
+  /* `min-width: 0` so four buttons can shrink below their content width rather than
+     forcing the panel wider than its column, which is rule 28's sideways scroll. */
+  min-width: 0;
+  padding: var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--text-dim);
+}
+
 /* ------------------------------------------------------------ board metrics -- */
 
 .card-by { font-size: var(--text-xs); color: var(--text-faint); margin-top: 2px; }
@@ -941,6 +967,42 @@ button.ghost { background: transparent; border: 1px solid var(--line); color: va
   color: var(--text-faint);
 }
 .mc-value { font-size: var(--text-lg); font-weight: 650; letter-spacing: -0.01em; }
+
+/* The metric strip on a launch page: the figures a token is read by at a glance. */
+.metric-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(8.5rem, 100%), 1fr));
+  gap: 1px;
+  background: var(--glass-border);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  margin-top: var(--space-5);
+}
+.metric-strip > div {
+  background: var(--glass-fill);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  padding: var(--space-3) var(--space-4);
+  /* `min-width: 0` so a long figure wraps inside its cell rather than widening the
+     track and pushing the grid past the viewport. */
+  min-width: 0;
+}
+.metric-strip .k {
+  display: block;
+  font-size: var(--text-micro);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+.metric-strip .v {
+  display: block;
+  font-size: var(--text-base);
+  font-weight: 600;
+  margin-top: 2px;
+  /* A price can be 0.0000000012; it must wrap rather than widen the cell. */
+  word-break: break-all;
+}
 
 /* The totals strip above the board. */
 .totals {

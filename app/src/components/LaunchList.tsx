@@ -29,6 +29,11 @@ export type { LaunchRow };
  */
 
 const SORTS: Array<{ key: SortKey; label: string; hint: string }> = [
+  {
+    key: 'marketCap',
+    label: 'Market cap',
+    hint: 'Spot price times total supply, largest first',
+  },
   { key: 'progress', label: 'Closest to graduating', hint: 'Highest share of the target raised' },
   { key: 'raised', label: 'Most raised', hint: `Largest amount of ${NETWORK.quoteSymbol} collected` },
   { key: 'newest', label: 'Newest', hint: 'Most recently created' },
@@ -51,7 +56,13 @@ export function LaunchList({ rows }: { rows: LaunchRow[] }) {
   }, []);
 
   const [q, setQ] = useState('');
-  const [sort, setSort] = useState<SortKey>('progress');
+    /*
+   * Market cap first, which is what a launchpad board defaults to everywhere. The
+   * previous default was "closest to graduating", which answers a different question:
+   * it surfaces launches that are nearly finished rather than launches people are
+   * actually in.
+   */
+  const [sort, setSort] = useState<SortKey>('marketCap');
   const [hideGraduated, setHideGraduated] = useState(false);
 
   // One implementation, in `lib/launchList.ts`, where the tests can reach it.

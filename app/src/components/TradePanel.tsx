@@ -328,6 +328,25 @@ export function TradePanel({
         </span>
       </label>
 
+      {/*
+          Quick amounts, on the buy side only.
+          
+          Fixed quote figures make sense for buying: a buyer thinks "ten INJ". They do
+          not for selling, where the amount is in tokens whose scale differs by orders
+          of magnitude between launches, so a "100" button would be a rounding error on
+          one token and someone's whole position on another. Max already covers the
+          sell case and covers it exactly.
+        */}
+      {side === 'buy' && (
+        <div className="quick-amounts">
+          {[1, 5, 10, 50].map((v) => (
+            <button key={v} type="button" onClick={() => setInput(String(v))}>
+              {v} {NETWORK.quoteSymbol}
+            </button>
+          ))}
+        </div>
+      )}
+
       {quote && !quote.ok && (
         <div className="quote-box">
           <p className="note danger-text" style={{ margin: 0 }}>

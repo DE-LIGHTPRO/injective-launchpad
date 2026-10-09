@@ -16,7 +16,22 @@ import { symbolOf } from './chain.ts';
  * only pass for one of them.
  */
 
-export type SortKey = 'progress' | 'raised' | 'newest';
+/**
+ * How a board can be ordered here.
+ *
+ * nearly.trade offers Market cap, New, Hot, Volume, Holders and Gainers. Three of
+ * those are not available on this chain and are left out rather than approximated:
+ *
+ *   HOLDERS  `denom_owners` returns 501 for a factory denom. See `creatorHolding.ts`.
+ *   VOLUME   Lifetime volume needs every trade ever recorded. It is a tx-log scan per
+ *            launch, and Injective's query limits make that unreliable at board sizes.
+ *            `raised` is the curve's current reserve, which is a different claim: it
+ *            FALLS when people sell, where volume never would.
+ *   GAINERS  A change needs two prices separated by a known time. Without a price
+ *            history per launch there is no earlier price to compare against, and a
+ *            "gainers" tab ordered by something else is worse than no tab.
+ */
+export type SortKey = 'marketCap' | 'progress' | 'raised' | 'newest';
 
 export interface LaunchRow {
   id: number;
@@ -85,6 +100,13 @@ export function selectLaunches(rows: readonly LaunchRow[], sel: Selection): Laun
 
   return [...out].sort((a, b) => {
     if (sel.sort === 'newest') return b.id - a.id;
+    if (sel.sort === 'marketCap') {
+      // Bigints, for the same reason `raised` compares as one: at 18 decimals a
+      // Number comparison ties values that differ by real amounts.
+      const x = BigInt(a.marketCap);
+      const y = BigInt(b.marketCap);
+      return x > y ? -1 : x < y ? 1 : 0;
+    }
     if (sel.sort === 'raised') {
       /*
        * Compared as bigints. At 18 decimals a Number comparison starts tying

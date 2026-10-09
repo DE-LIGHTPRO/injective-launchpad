@@ -1,4 +1,5 @@
 import { listTrades, short, symbolOf, type Trade } from '@/lib/chain';
+import { firstBlockShare } from '@/lib/creatorHolding';
 import { fmt } from '@/lib/curve';
 import { NETWORK } from '@/lib/config';
 import { isDemoMode } from '@/lib/demo';
@@ -16,7 +17,16 @@ import { buildSeries, changeBps, pathFor } from '@/lib/priceSeries';
  * evidence about trading. And demo mode has no chain to read at all, which is
  * said rather than shown as an empty list.
  */
-export async function Trades({ curve, denom }: { curve: string; denom: string }) {
+export async function Trades({
+  curve,
+  denom,
+  totalSupply,
+}: {
+  curve: string;
+  denom: string;
+  /** Base units as a string, for the opening-concentration figure. */
+  totalSupply?: string;
+}) {
   if (isDemoMode()) {
     return (
       <div className="card">
@@ -44,6 +54,22 @@ export async function Trades({ curve, denom }: { curve: string; denom: string })
   }
 
   const sym = symbolOf(denom);
+
+  /*
+   * How much supply was taken in the opening blocks.
+   *
+   * Third-party analytics sell this as "bundle %", and a launchpad that charges a fee
+   * on those trades and then leaves buyers to find the concentration on someone else's
+   * site is choosing not to say. The function existed with its own tests and no call
+   * site, which is this project's most-repeated defect, so this is the wiring.
+   *
+   * Only shown past a threshold. Every launch has a first buyer, and reporting "3% was
+   * bought in the opening blocks" on all of them makes the number noise and teaches
+   * people to skip it, which costs exactly the launches where it matters.
+   */
+  const opening = totalSupply ? firstBlockShare(trades, BigInt(totalSupply)) : null;
+  const openingPct = opening?.share != null ? opening.share * 100 : null;
+
   const series = buildSeries(trades, NETWORK.quoteDecimals);
   const change = changeBps(series);
   const path = pathFor(series, 560, 60, 3);
@@ -51,6 +77,14 @@ export async function Trades({ curve, denom }: { curve: string; denom: string })
   return (
     <div className="card">
       <h2>Trades</h2>
+
+      {openingPct !== null && openingPct >= 20 && (
+        <p className="note warn-text">
+          {openingPct.toFixed(1)}% of the supply was bought within {opening?.blocks} blocks
+          of the first trade. That is the window a buyer watching for the launch cannot
+          realistically compete in.
+        </p>
+      )}
 
       {/*
           The history, which is a different question from the curve above it. The

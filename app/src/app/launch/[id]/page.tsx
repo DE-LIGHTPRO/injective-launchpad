@@ -5,8 +5,10 @@ import { getLaunch, getLaunchDetail, symbolOf, short, ChainError } from '@/lib/c
 import { TokenLogo } from '@/components/TokenLogo';
 import { visibleLinks } from '@/lib/tokenProfile';
 import { describeRules, hasAnyRule } from '@/lib/launchRules';
+import { marketCap, compact, feeLabel, ageLabel } from '@/lib/boardMetrics';
 import { StatusChip } from '@/components/StatusChip';
 import { CreatorPosition } from '@/components/CreatorPosition';
+import { CopyButton } from '@/components/CopyButton';
 import { graduationProgress, fmt, spotPrice, maxCollectable } from '@/lib/curve';
 import { NETWORK, isDeployed, isDevBuild } from '@/lib/config';
 import { isDemoMode } from '@/lib/demo';
@@ -127,6 +129,9 @@ export default async function LaunchPage({ params }: { params: Promise<{ id: str
    * reader's, and a launch that says it opens at a time nobody's clock agrees with is
    * worse than one that says UTC plainly.
    */
+  const totalSupply = detail.config.curveSupply + detail.lpReserve;
+  const nowSeconds = Math.floor(Date.now() / 1000);
+
   const ruleCopy = describeRules(
     detail.rules,
     (v) => fmt(v, 18, 0),
@@ -156,7 +161,7 @@ export default async function LaunchPage({ params }: { params: Promise<{ id: str
         />
       </div>
       <p className="sub mono" style={{ fontSize: 'var(--text-xs)', wordBreak: 'break-all' }}>
-        {detail.denom}
+        {detail.denom} <CopyButton value={detail.denom} label="Copy" />
       </p>
 
       {links.length > 0 && (
@@ -193,6 +198,57 @@ export default async function LaunchPage({ params }: { params: Promise<{ id: str
           <p className="note">Links are supplied by the creator and are not verified.</p>
         </>
       )}
+
+      {/*
+          The metric strip, which is how a token page is read at a glance.
+          
+          nearly.trade's row is Market cap, Price, Liquidity, 24h volume, Holders, ATH.
+          Four of those are here. Two are not, and are ABSENT rather than estimated:
+          holders needs an indexer this chain does not provide for factory denoms, and
+          24h volume needs timestamped trade history at a depth the query limits do not
+          reliably return. A column filled with a plausible guess is worse than a
+          column that is not there, because nobody can tell which it was.
+        */}
+      <div className="metric-strip">
+        <div>
+          <span className="k">Market cap</span>
+          <span className="v mono">
+            {compact(marketCap(detail.config, detail.state, totalSupply))} {NETWORK.quoteSymbol}
+          </span>
+        </div>
+        <div>
+          <span className="k">Price</span>
+          <span className="v mono">
+            {fmt(price, 18, 10)} {NETWORK.quoteSymbol}
+          </span>
+        </div>
+        <div>
+          {/*
+              "Curve reserve", not "liquidity". Until graduation there is no pool: the
+              reserve is what backs sells on the curve, and calling it liquidity would
+              borrow the word from a thing that does not exist yet.
+            */}
+          <span className="k">Curve reserve</span>
+          <span className="v mono">
+            {fmt(detail.state.injCollected, 18, 2)} {NETWORK.quoteSymbol}
+          </span>
+        </div>
+        <div>
+          <span className="k">Trading fee</span>
+          <span className="v mono">{feeLabel(detail.config.feeBps).replace(' fee', '')}</span>
+        </div>
+        <div>
+          <span className="k">Age</span>
+          {/*
+              Words, not a dash. The guard has no placeholder exemption and adding one
+              would be weakening a rule to fit a glyph, but the better argument is that
+              a dash here is ambiguous: it could mean zero, unknown, or not applicable.
+              This launch's creation time genuinely is not recorded, and saying so is
+              shorter to read than a symbol someone has to interpret.
+            */}
+          <span className="v">{ageLabel(detail.rules.openedAt, nowSeconds) ?? 'not recorded'}</span>
+        </div>
+      </div>
 
       {hasAnyRule(detail.rules) && (
         <div className="card" style={{ marginTop: 'var(--space-5)' }}>
@@ -299,7 +355,11 @@ export default async function LaunchPage({ params }: { params: Promise<{ id: str
           rules={detail.rules}
         />
 
-      <Trades curve={launch.curve} denom={launch.denom} />
+      <Trades
+        curve={launch.curve}
+        denom={launch.denom}
+        totalSupply={(detail.config.curveSupply + detail.lpReserve).toString()}
+      />
       </div>
     </>
   );
