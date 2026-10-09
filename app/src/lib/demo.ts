@@ -106,7 +106,7 @@ export function demoDetail(id: number): LaunchDetail | null {
      */
     rules:
       seed.symbol === 'KAIJU'
-        ? { maxPerWallet: amt(5_000_000n), tradeStart: null }
+        ? { maxPerWallet: amt(5_000_000n), tradeStart: null, earlyFee: null, openedAt: null }
         : seed.symbol === 'SOLARIS'
           ? /*
              * Opens in an hour from whenever the page is rendered, so the "not open
@@ -115,8 +115,21 @@ export function demoDetail(id: number): LaunchDetail | null {
              * and the state stops being reachable, which is how a branch nobody can
              * see gets broken without anyone noticing.
              */
-            { maxPerWallet: null, tradeStart: Math.floor(Date.now() / 1000) + 3600 }
-          : NO_RULES,
+            { maxPerWallet: null, tradeStart: Math.floor(Date.now() / 1000) + 3600, earlyFee: null, openedAt: null }
+          : seed.symbol === 'MERIDIAN'
+            ? /*
+               * An opening fee still running, so the decaying-fee state is visible in
+               * the demo rather than only in a test. `openedAt` is five minutes ago of
+               * a ten-minute window, so it renders mid-decay instead of at either end
+               * where the interesting half would be invisible.
+               */
+              {
+                maxPerWallet: null,
+                tradeStart: null,
+                earlyFee: { startBps: 1_000, seconds: 600 },
+                openedAt: Math.floor(Date.now() / 1000) - 300,
+              }
+            : NO_RULES,
     config: BASE_CONFIG,
     state,
     migrated: state.graduated,

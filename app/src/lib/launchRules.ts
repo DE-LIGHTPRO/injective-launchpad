@@ -16,19 +16,66 @@
  * "until it graduates", never "on the token" and never "every transfer".
  */
 
+export interface EarlyFee {
+  /** Fee in bps at the moment buying opens. Always above the curve's own fee. */
+  startBps: number;
+  /** Seconds over which it falls linearly to the curve's own fee. */
+  seconds: number;
+}
+
 export interface LaunchRules {
   /** Base units. Null means no cap. */
   maxPerWallet: bigint | null;
   /** Unix seconds. Null means open immediately. */
   tradeStart: number | null;
+  /** Null means the curve's own fee applies from the first block. */
+  earlyFee: EarlyFee | null;
+  /**
+   * When buying became possible: `tradeStart` if one was set, else the block that
+   * created the launch. The decay is measured from here, so a launch announced in
+   * advance does not spend its premium before anyone may trade.
+   */
+  openedAt: number | null;
 }
 
-export const NO_RULES: LaunchRules = { maxPerWallet: null, tradeStart: null };
+export const NO_RULES: LaunchRules = {
+  maxPerWallet: null,
+  tradeStart: null,
+  earlyFee: null,
+  openedAt: null,
+};
+
+/** Mirrors `MAX_EARLY_FEE_BPS` in the curve contract. */
+export const MAX_EARLY_FEE_BPS = 2_000;
+
+/**
+ * The fee a buy pays right now, in bps.
+ *
+ * Mirrors `EarlyFee::bps_at`, including rounding DOWN, because a client figure that
+ * disagrees with the chain is worse than no figure: the panel would quote one fee and
+ * the wallet would settle another.
+ */
+export function feeBpsAt(rules: LaunchRules, baseBps: number, nowSeconds: number): number {
+  const ef = rules.earlyFee;
+  if (ef === null || rules.openedAt === null) return baseBps;
+  const elapsed = Math.max(0, nowSeconds - rules.openedAt);
+  if (elapsed >= ef.seconds || ef.seconds <= 0) return baseBps;
+  const premium = Math.max(0, ef.startBps - baseBps);
+  return baseBps + Math.floor((premium * (ef.seconds - elapsed)) / ef.seconds);
+}
+
+/** Seconds until the opening fee reaches the curve's own, or null when it already has. */
+export function secondsUntilBaseFee(rules: LaunchRules, nowSeconds: number): number | null {
+  if (rules.earlyFee === null || rules.openedAt === null) return null;
+  const endsAt = rules.openedAt + rules.earlyFee.seconds;
+  return nowSeconds >= endsAt ? null : endsAt - nowSeconds;
+}
 
 /** What the contract stores, with amounts as decimal strings and time in nanoseconds. */
 export interface RawLaunchRules {
   max_per_wallet?: string | null;
   trade_start?: string | null;
+  early_fee?: { start_bps?: number; seconds?: number } | null;
 }
 
 /*
@@ -39,14 +86,32 @@ export interface RawLaunchRules {
  */
 const NANOS_PER_SECOND = 1_000_000_000n;
 
-export function parseRules(raw: unknown): LaunchRules {
+/**
+ * `openedAtSeconds` comes from the curve's own `Config.opened_at` rather than being
+ * inferred, because inferring it is wrong in the one case that matters: a launch with
+ * no `trade_start` opened at the block that created it, which this side cannot know.
+ */
+export function parseRules(raw: unknown, openedAtSeconds?: number | null): LaunchRules {
   if (raw === null || typeof raw !== 'object') return NO_RULES;
   const o = raw as RawLaunchRules;
   const cap = typeof o.max_per_wallet === 'string' ? o.max_per_wallet : null;
   const start = typeof o.trade_start === 'string' ? o.trade_start : null;
+  const startSecs = start === null ? null : Number(safeBigInt(start) / NANOS_PER_SECOND);
+
+  // The contract only stores a well-formed pair, but this parses chain data from a
+  // factory the UI may not control, so a half-formed one becomes no rule rather than
+  // a fee of NaN rendered beside a trade.
+  const raw_ef = o.early_fee;
+  const earlyFee: EarlyFee | null =
+    raw_ef && typeof raw_ef.start_bps === 'number' && typeof raw_ef.seconds === 'number'
+      ? { startBps: raw_ef.start_bps, seconds: raw_ef.seconds }
+      : null;
+
   return {
     maxPerWallet: cap === null ? null : safeBigInt(cap),
-    tradeStart: start === null ? null : Number(safeBigInt(start) / NANOS_PER_SECOND),
+    tradeStart: startSecs,
+    earlyFee,
+    openedAt: openedAtSeconds ?? startSecs,
   };
 }
 
@@ -75,8 +140,13 @@ export function rulesForChain(input: { maxPerWallet: bigint | null; tradeStart: 
   return out;
 }
 
+/** The early fee as `CreateLaunch` expects it, or nothing when there is none. */
+export function earlyFeeForChain(ef: EarlyFee | null): Record<string, unknown> {
+  return ef === null ? {} : { early_fee: { start_bps: ef.startBps, seconds: ef.seconds } };
+}
+
 export interface RuleProblem {
-  field: 'maxPerWallet' | 'tradeStart';
+  field: 'maxPerWallet' | 'tradeStart' | 'earlyFee';
   message: string;
 }
 
@@ -88,7 +158,12 @@ export interface RuleProblem {
  * whole sellable supply can never bind, and storing it would advertise a protection the
  * launch does not have.
  */
-export function validateRules(rules: LaunchRules, curveSupply: bigint, nowSeconds: number): RuleProblem[] {
+export function validateRules(
+  rules: LaunchRules,
+  curveSupply: bigint,
+  nowSeconds: number,
+  baseFeeBps = 0,
+): RuleProblem[] {
   const out: RuleProblem[] = [];
 
   if (rules.maxPerWallet !== null) {
@@ -113,6 +188,25 @@ export function validateRules(rules: LaunchRules, curveSupply: bigint, nowSecond
     out.push({ field: 'tradeStart', message: 'That time has already passed, so the launch would open immediately.' });
   }
 
+  if (rules.earlyFee !== null) {
+    const ef = rules.earlyFee;
+    // Mirrors the contract's refusals, so the form says which rule is wrong before a
+    // wallet opens rather than after a transaction fails.
+    if (!Number.isFinite(ef.startBps) || ef.startBps <= baseFeeBps) {
+      out.push({
+        field: 'earlyFee',
+        message: `An opening fee has to be above the trading fee of ${(baseFeeBps / 100).toFixed(2)}%, or it never applies.`,
+      });
+    } else if (ef.startBps > MAX_EARLY_FEE_BPS) {
+      out.push({
+        field: 'earlyFee',
+        message: `The most an opening fee can be is ${MAX_EARLY_FEE_BPS / 100}%.`,
+      });
+    } else if (!Number.isFinite(ef.seconds) || ef.seconds <= 0) {
+      out.push({ field: 'earlyFee', message: 'Give the opening fee a window to fall over.' });
+    }
+  }
+
   return out;
 }
 
@@ -122,7 +216,7 @@ export function buyingOpenAt(rules: LaunchRules, nowSeconds: number): boolean {
 }
 
 export function hasAnyRule(rules: LaunchRules): boolean {
-  return rules.maxPerWallet !== null || rules.tradeStart !== null;
+  return rules.maxPerWallet !== null || rules.tradeStart !== null || rules.earlyFee !== null;
 }
 
 /**
@@ -147,6 +241,19 @@ export function describeRules(
   }
   if (rules.tradeStart !== null) {
     lines.push(`Buying opens at ${formatTime(rules.tradeStart)}. Nothing can be bought before then.`);
+  }
+  if (rules.earlyFee !== null) {
+    const mins = Math.round(rules.earlyFee.seconds / 60);
+    const window = mins >= 1 ? `${mins} minute${mins === 1 ? '' : 's'}` : `${rules.earlyFee.seconds} seconds`;
+    /*
+     * Three things in one sentence, and none of them is optional: the fee, the
+     * window, and WHERE IT GOES. A launchpad charging an extra fee without saying who
+     * receives it reads as the creator taking more, which is the opposite of what
+     * this does and the reason anyone would object to it.
+     */
+    lines.push(
+      `Buys in the first ${window} pay up to ${(rules.earlyFee.startBps / 100).toFixed(2)}%, falling to the curve's own fee. The extra goes into the pool at graduation, not to the creator. Sells are not affected.`,
+    );
   }
 
   return {

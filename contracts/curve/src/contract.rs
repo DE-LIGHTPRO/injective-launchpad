@@ -1,7 +1,6 @@
 use cosmwasm_std::{
     coins, entry_point, to_json_binary, BankMsg, Binary, Deps, DepsMut, Env, MessageInfo, Response,
-    StdResult, Uint128,
-};
+    StdResult, Uint128, Timestamp};
 use launchpad_math::{quote_buy, quote_sell, spot_price, CurveConfig};
 
 use crate::error::ContractError;
@@ -16,7 +15,7 @@ const BPS: u128 = 10_000;
 #[entry_point]
 pub fn instantiate(
     deps: DepsMut,
-    _env: Env,
+    env: Env,
     info: MessageInfo,
     msg: InstantiateMsg,
 ) -> Result<Response, ContractError> {
@@ -33,7 +32,7 @@ pub fn instantiate(
     curve.validate()?;
     // Before the seed is checked, so a launch with a rule that can never bind is
     // refused before the creator's whole supply has moved anywhere.
-    msg.rules.validate(msg.curve.curve_supply)?;
+    msg.rules.validate(msg.curve.curve_supply, msg.curve.fee_bps)?;
 
     // The launch is funded here and only here: the creator sends the entire
     // sellable supply up front. Nothing mints later, so the curve can never
@@ -58,6 +57,11 @@ pub fn instantiate(
         lp_reserve: msg.lp_reserve,
         creator_fee_share_bps: msg.creator_fee_share_bps,
         curve: msg.curve,
+        // Measured from when buying becomes possible, not from instantiate. A launch
+        // announced a day in advance would otherwise burn its whole opening premium
+        // before anyone was allowed to trade, which is the rule doing nothing while
+        // appearing to be set.
+        opened_at: msg.rules.trade_start.unwrap_or(env.block.time),
         rules: msg.rules,
     };
     CONFIG.save(deps.storage, &cfg)?;
@@ -93,6 +97,22 @@ fn split_fee(fee: Uint128, creator_share_bps: u16) -> (Uint128, Uint128) {
     (creator, platform)
 }
 
+/// The fee this buy actually pays, in bps.
+///
+/// Separate from the handler so the decay is testable at its own boundaries, which is
+/// the lesson the wallet cap taught an hour earlier: an integration test cannot place a
+/// trade at an exact second of the decay, so the arithmetic has to be reachable on its
+/// own. The handler still proves it is called.
+fn effective_fee_bps(cfg: &Config, now: Timestamp) -> u16 {
+    let Some(ef) = &cfg.rules.early_fee else {
+        return cfg.curve.fee_bps;
+    };
+    // Saturating: a block before `opened_at` is possible when a start time is set, and
+    // it means zero elapsed rather than a negative that would wrap into a huge one.
+    let elapsed = now.seconds().saturating_sub(cfg.opened_at.seconds());
+    ef.bps_at(cfg.curve.fee_bps, elapsed)
+}
+
 fn exec_buy(
     deps: DepsMut,
     env: Env,
@@ -121,8 +141,36 @@ fn exec_buy(
     }
 
     let inj_in = cw_utils::must_pay(&info, &cfg.quote_denom)?;
+
     let curve: CurveConfig = (&cfg.curve).into();
-    let q = quote_buy(&curve, &state.curve_state(), inj_in)?;
+
+    /*
+     * The opening premium is taken off the top, not folded into the curve's fee.
+     *
+     * Folding it in was the first attempt: set `curve.fee_bps` to the decayed figure
+     * and quote with that. The maths crate refuses it, correctly, because its own
+     * `MAX_FEE_BPS` is 1000 and an opening fee is meant to exceed that. Mutating a
+     * validated config to get past its validation is the wrong shape of fix anyway.
+     *
+     * CHARGED ON WHAT IS ACTUALLY SPENT. The curve refunds whatever a buy cannot
+     * absorb, so skimming the premium from `inj_in` would charge it on quote that is
+     * handed straight back. That only happens on the buy that fills the curve, which
+     * during an opening window is close to impossible, and "close to impossible" is
+     * exactly the assumption that becomes a defect. One extra quote settles it.
+     */
+    let premium_bps = effective_fee_bps(&cfg, env.block.time).saturating_sub(cfg.curve.fee_bps);
+    let (q, premium, carried_refund) = if premium_bps == 0 {
+        // The common path, byte for byte what it was before the rule existed.
+        (quote_buy(&curve, &state.curve_state(), inj_in)?, Uint128::zero(), Uint128::zero())
+    } else {
+        let probe = quote_buy(&curve, &state.curve_state(), inj_in)?;
+        let spent = inj_in.checked_sub(probe.refund)?;
+        let premium = spent.multiply_ratio(premium_bps as u128, BPS);
+        // Reducing the input can only reduce the refund, never grow it, so the second
+        // quote's own refund is normally zero; it is carried anyway rather than assumed.
+        let q = quote_buy(&curve, &state.curve_state(), spent.checked_sub(premium)?)?;
+        (q, premium, probe.refund)
+    };
 
     if q.tokens_out < min_tokens_out {
         return Err(ContractError::Slippage {
@@ -131,6 +179,28 @@ fn exec_buy(
         });
     }
 
+    /*
+     * The premium is carved off BEFORE the split, so the creator and the platform are
+     * paid exactly what the curve's own fee would have produced and not a unit more.
+     * Splitting the whole fee instead would pay the creator for every sniper, giving
+     * them a reason to want the thing the rule exists to discourage.
+     *
+     * Computed as the base fee on the same input rather than by scaling `q.fee`, since
+     * the fee is linear in bps and the direct form has one rounding step instead of
+     * two. Saturating, so a rounding difference can only ever shrink the premium.
+     */
+    /*
+     * `q.fee` is the curve's own fee on what reached the curve, and it splits to
+     * creator and platform exactly as it always did. The premium never enters this
+     * sum: a creator who earns more when snipers win has a reason to want snipers,
+     * which is the opposite of what the rule is for.
+     *
+     * Note the second-order effect, measured rather than assumed: because the premium
+     * comes off the top, the curve's fee applies to what is left, so during an opening
+     * window the creator earns slightly LESS than they would without the rule (1% of
+     * 10%, at the fixture's numbers). That is the right direction and it is asserted
+     * as an inequality rather than left as a surprise.
+     */
     let (creator_cut, platform_cut) = split_fee(q.fee, cfg.creator_fee_share_bps);
 
     /*
@@ -162,6 +232,8 @@ fn exec_buy(
     state.tokens_sold = state.tokens_sold.checked_add(q.tokens_out)?;
     state.creator_owed = state.creator_owed.checked_add(creator_cut)?;
     state.platform_owed = state.platform_owed.checked_add(platform_cut)?;
+    state.lp_bonus = state.lp_bonus.checked_add(premium)?;
+    let total_refund = q.refund.checked_add(carried_refund)?;
     if q.graduates {
         state.graduated = true;
     }
@@ -177,14 +249,18 @@ fn exec_buy(
         .add_attribute("inj_in", inj_in)
         .add_attribute("tokens_out", q.tokens_out)
         .add_attribute("fee", q.fee)
-        .add_attribute("refund", q.refund)
+        .add_attribute("refund", total_refund)
+        .add_attribute("early_fee_premium", premium)
         .add_attribute("graduated", q.graduates.to_string());
 
-    // Partial fill: hand back whatever the curve could not absorb.
-    if !q.refund.is_zero() {
+    // Partial fill: hand back whatever the curve could not absorb, including the part
+    // the first quote already found unabsorbable. Reporting only `q.refund` would
+    // leave the carried amount owed and unsent, which is a solvency hole rather than
+    // a display bug.
+    if !total_refund.is_zero() {
         res = res.add_message(BankMsg::Send {
             to_address: info.sender.to_string(),
-            amount: coins(q.refund.u128(), &cfg.quote_denom),
+            amount: coins(total_refund.u128(), &cfg.quote_denom),
         });
     }
 
@@ -270,7 +346,16 @@ fn exec_graduate(deps: DepsMut, _env: Env) -> Result<Response, ContractError> {
         return Err(ContractError::NotReady);
     }
 
-    let reserve = state.inj_collected;
+    /*
+     * The opening-fee premium leaves with the reserve, because that is the only thing
+     * that makes the rule real. An accumulator that fills and is never paid out is a
+     * tax collected for nobody, and it would sit in the contract looking like solvency.
+     */
+    // Captured before the state is zeroed below, because the attribute is emitted
+    // after that and would otherwise report zero on every graduation: a figure that is
+    // always the same is indistinguishable from a feature that never ran.
+    let premium = state.lp_bonus;
+    let reserve = state.inj_collected.checked_add(premium)?;
     // The held-back LP allocation, plus anything the curve never managed to
     // sell. The LP allocation is what guarantees the migrated pool has a
     // token side at all, even when the curve sells out exactly.
@@ -284,12 +369,16 @@ fn exec_graduate(deps: DepsMut, _env: Env) -> Result<Response, ContractError> {
     state.graduated = true;
     state.migrated = true;
     state.inj_collected = Uint128::zero();
+    state.lp_bonus = Uint128::zero();
     state.tokens_sold = cfg.curve.curve_supply;
     STATE.save(deps.storage, &state)?;
 
     let mut res = Response::new()
         .add_attribute("action", "graduate")
         .add_attribute("reserve_moved", reserve)
+        // Reported separately so the figure is auditable: a pool that received more
+        // than the curve collected should say where the difference came from.
+        .add_attribute("early_fee_premium", premium)
         .add_attribute("tokens_moved", leftover)
         .add_attribute("target", cfg.migration_target.as_str());
 

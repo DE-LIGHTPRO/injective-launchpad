@@ -23,6 +23,9 @@ import {
   NO_RULES,
   launchStatus,
   statusLabel,
+  feeBpsAt,
+  secondsUntilBaseFee,
+  type LaunchRules,
 } from './launchRules.ts';
 
 const ONE = 10n ** 18n;
@@ -80,15 +83,15 @@ test('a cap that could never bind is refused before a wallet opens', () => {
   const supply = 800_000_000n * ONE;
   const now = 1_900_000_000;
 
-  const tooBig = validateRules({ maxPerWallet: supply, tradeStart: null }, supply, now);
+  const tooBig = validateRules({ maxPerWallet: supply, tradeStart: null, earlyFee: null, openedAt: null }, supply, now);
   assert.equal(tooBig.length, 1);
   assert.equal(tooBig[0].field, 'maxPerWallet');
 
-  assert.equal(validateRules({ maxPerWallet: supply + 1n, tradeStart: null }, supply, now).length, 1);
-  assert.equal(validateRules({ maxPerWallet: 0n, tradeStart: null }, supply, now).length, 1);
+  assert.equal(validateRules({ maxPerWallet: supply + 1n, tradeStart: null, earlyFee: null, openedAt: null }, supply, now).length, 1);
+  assert.equal(validateRules({ maxPerWallet: 0n, tradeStart: null, earlyFee: null, openedAt: null }, supply, now).length, 1);
 
   // Just under is fine, which is the boundary the contract uses too.
-  assert.deepEqual(validateRules({ maxPerWallet: supply - 1n, tradeStart: null }, supply, now), []);
+  assert.deepEqual(validateRules({ maxPerWallet: supply - 1n, tradeStart: null, earlyFee: null, openedAt: null }, supply, now), []);
 });
 
 test('a start time in the past is refused by the form though the chain allows it', () => {
@@ -100,18 +103,18 @@ test('a start time in the past is refused by the form though the chain allows it
    */
   const supply = 800_000_000n * ONE;
   const now = 1_900_000_000;
-  const problems = validateRules({ maxPerWallet: null, tradeStart: now - 1 }, supply, now);
+  const problems = validateRules({ maxPerWallet: null, tradeStart: now - 1, earlyFee: null, openedAt: null }, supply, now);
   assert.equal(problems.length, 1);
   assert.equal(problems[0].field, 'tradeStart');
 
-  assert.deepEqual(validateRules({ maxPerWallet: null, tradeStart: now }, supply, now), []);
-  assert.deepEqual(validateRules({ maxPerWallet: null, tradeStart: now + 60 }, supply, now), []);
+  assert.deepEqual(validateRules({ maxPerWallet: null, tradeStart: now, earlyFee: null, openedAt: null }, supply, now), []);
+  assert.deepEqual(validateRules({ maxPerWallet: null, tradeStart: now + 60, earlyFee: null, openedAt: null }, supply, now), []);
 });
 
 test('the open boundary matches the contract exactly', () => {
   // Inclusive on both sides, or a launch opens a block later on one of them than the
   // other and the UI calls a live launch closed.
-  const r = { maxPerWallet: null, tradeStart: 1_000 };
+  const r = { maxPerWallet: null, tradeStart: 1_000, earlyFee: null, openedAt: null };
   assert.equal(buyingOpenAt(r, 999), false);
   assert.equal(buyingOpenAt(r, 1_000), true);
   assert.equal(buyingOpenAt(r, 1_001), true);
@@ -126,7 +129,7 @@ test('every description names the curve and names graduation', () => {
    * writing this copy would reach for.
    */
   const { lines, scope } = describeRules(
-    { maxPerWallet: 1_000_000n * ONE, tradeStart: 1_900_000_000 },
+    { maxPerWallet: 1_000_000n * ONE, tradeStart: 1_900_000_000, earlyFee: null, openedAt: null },
     fmt,
     time,
   );
@@ -155,7 +158,7 @@ test('the cap is described as what it is, not as a holdings guarantee', () => {
    * the tokens elsewhere and buy again. Saying "holds at most" without "from this curve"
    * would be a guarantee about holdings that nothing enforces.
    */
-  const { lines, scope } = describeRules({ maxPerWallet: 1_000n * ONE, tradeStart: null }, fmt, time);
+  const { lines, scope } = describeRules({ maxPerWallet: 1_000n * ONE, tradeStart: null, earlyFee: null, openedAt: null }, fmt, time);
   const text = lines.join(' ').toLowerCase();
   assert.match(text, /from this curve/, 'the cap is described as a holdings cap');
   assert.match(text, /selling frees/, 'the copy does not say a sell frees allowance');
@@ -168,8 +171,8 @@ test('no rules means nothing is described', () => {
   // feature that failed to load rather than as a launch that has none.
   assert.equal(describeRules(NO_RULES, fmt, time).lines.length, 0);
   assert.equal(hasAnyRule(NO_RULES), false);
-  assert.equal(hasAnyRule({ maxPerWallet: null, tradeStart: 1 }), true);
-  assert.equal(hasAnyRule({ maxPerWallet: 1n, tradeStart: null }), true);
+  assert.equal(hasAnyRule({ maxPerWallet: null, tradeStart: 1, earlyFee: null, openedAt: null }), true);
+  assert.equal(hasAnyRule({ maxPerWallet: 1n, tradeStart: null, earlyFee: null, openedAt: null }), true);
 });
 
 test('a launch before its start time is not live', () => {
@@ -179,7 +182,7 @@ test('a launch before its start time is not live', () => {
    * start time had not arrived was labelled "live": the most confident possible word on
    * the one state where the contract refuses every buy.
    */
-  const pending = { maxPerWallet: null, tradeStart: 2_000 };
+  const pending = { maxPerWallet: null, tradeStart: 2_000, earlyFee: null, openedAt: null };
   assert.equal(launchStatus({ graduated: false, rules: pending, nowSeconds: 1_999 }), 'pending');
   assert.equal(launchStatus({ graduated: false, rules: pending, nowSeconds: 2_000 }), 'live');
   assert.equal(launchStatus({ graduated: false, rules: NO_RULES, nowSeconds: 0 }), 'live');
@@ -188,7 +191,7 @@ test('a launch before its start time is not live', () => {
 test('graduation outranks a start time', () => {
   // A launch that reached its target is past its start by definition, so reporting
   // "pending" there would be nonsense produced by checking the rules first.
-  const weird = { maxPerWallet: null, tradeStart: 9_999_999_999 };
+  const weird = { maxPerWallet: null, tradeStart: 9_999_999_999, earlyFee: null, openedAt: null };
   assert.equal(launchStatus({ graduated: true, rules: weird, nowSeconds: 0 }), 'graduated');
   assert.equal(
     launchStatus({ graduated: true, migrated: true, rules: weird, nowSeconds: 0 }),
@@ -205,4 +208,67 @@ test('the pending label says what the contract does, not what marketing would', 
   assert.equal(tone, 'muted');
   assert.equal(statusLabel('live').tone, 'accent');
   assert.equal(statusLabel('graduated').tone, 'warn');
+});
+
+test('the client fee mirrors the contract at every boundary', () => {
+  /*
+   * A client quote that disagrees with settlement is worse than no quote: it looks
+   * right until the wallet opens. These are the same boundaries asserted in
+   * `early_fee_tests` on the Rust side, written out again here rather than shared,
+   * because the point is that two independent implementations agree.
+   */
+  const r: LaunchRules = {
+    maxPerWallet: null,
+    tradeStart: null,
+    earlyFee: { startBps: 1_000, seconds: 100 },
+    openedAt: 1_000,
+  };
+  assert.equal(feeBpsAt(r, 100, 1_000), 1_000, 'the opening block did not charge the opening fee');
+  assert.equal(feeBpsAt(r, 100, 1_050), 100 + 450, 'halfway is not half the premium');
+  assert.equal(feeBpsAt(r, 100, 1_099), 109, 'the last second charged nothing extra');
+  assert.equal(feeBpsAt(r, 100, 1_100), 100, 'the decay did not finish on time');
+  assert.equal(feeBpsAt(r, 100, 9_999), 100, 'a premium survived past its window');
+  // Before the opening, which a start time makes reachable: zero elapsed, not negative.
+  assert.equal(feeBpsAt(r, 100, 500), 1_000);
+  // Rounding down, so an error favours the trader.
+  const odd: LaunchRules = { ...r, earlyFee: { startBps: 110, seconds: 3 } };
+  assert.equal(feeBpsAt(odd, 100, 1_001), 106, '10 * 2 / 3 should floor to 6');
+});
+
+test('no early fee means the curve fee, always', () => {
+  assert.equal(feeBpsAt(NO_RULES, 100, 0), 100);
+  assert.equal(secondsUntilBaseFee(NO_RULES, 0), null);
+  // A rule with no `openedAt` cannot be timed, so it charges nothing extra rather
+  // than guessing an origin: guessing "now" restarts the decay on every page load.
+  const noOrigin: LaunchRules = {
+    maxPerWallet: null, tradeStart: null, earlyFee: { startBps: 900, seconds: 60 }, openedAt: null,
+  };
+  assert.equal(feeBpsAt(noOrigin, 100, 12_345), 100);
+});
+
+test('the countdown ends exactly when the premium does', () => {
+  const r: LaunchRules = {
+    maxPerWallet: null, tradeStart: null, earlyFee: { startBps: 900, seconds: 60 }, openedAt: 1_000,
+  };
+  assert.equal(secondsUntilBaseFee(r, 1_000), 60);
+  assert.equal(secondsUntilBaseFee(r, 1_059), 1);
+  assert.equal(secondsUntilBaseFee(r, 1_060), null, 'the countdown outlived the premium');
+  assert.equal(feeBpsAt(r, 100, 1_060), 100);
+});
+
+test('the opening fee says where the money goes', () => {
+  /*
+   * A higher fee with no explanation reads as the creator taking more, which is the
+   * opposite of what this does. The destination is not a nicety: it is the only thing
+   * that distinguishes an anti-sniper measure from a tax.
+   */
+  const { lines } = describeRules(
+    { maxPerWallet: null, tradeStart: null, earlyFee: { startBps: 1_000, seconds: 600 }, openedAt: 1 },
+    (v) => `${v}`,
+    (s) => `${s}`,
+  );
+  const text = lines.join(' ').toLowerCase();
+  assert.match(text, /pool/, 'the copy does not say where the premium goes');
+  assert.match(text, /not to the creator/, 'the copy does not rule out the creator');
+  assert.match(text, /sells are not affected/, 'the copy does not say this is buys only');
 });

@@ -392,7 +392,7 @@ fn create_launch(
      * failing early means a bad launch never consumes a reply slot or an id, and the
      * creator sees which rule was wrong rather than a submessage failure.
      */
-    rules.validate(curve.curve_supply)?;
+    rules.validate(curve.curve_supply, curve.fee_bps)?;
 
     let init = CurveInstantiateMsg {
         rules,

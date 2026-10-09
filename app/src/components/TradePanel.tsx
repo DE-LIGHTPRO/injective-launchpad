@@ -16,7 +16,7 @@ import {
 } from '@/lib/curve';
 import { NETWORK } from '@/lib/config';
 import { isDemoMode } from '@/lib/demo';
-import { buyingOpenAt, NO_RULES, type LaunchRules } from '@/lib/launchRules';
+import { buyingOpenAt, feeBpsAt, secondsUntilBaseFee, NO_RULES, type LaunchRules } from '@/lib/launchRules';
 
 type Side = 'buy' | 'sell';
 
@@ -63,13 +63,52 @@ export function TradePanel({
     return () => window.clearInterval(id);
   }, [notOpenYet]);
 
+  /*
+   * The fee THIS BLOCK charges, which during an opening window is not the curve's own.
+   *
+   * The panel showed `config.feeBps` and quoted with it, so for the length of a decay
+   * it promised more tokens than the chain would deliver. A quote that disagrees with
+   * settlement is the defect this codebase calls a faked execution path, and it is
+   * worse than no quote because it looks right until the wallet opens.
+   *
+   * Ticks while the premium is running, both so the figure stays true and so a buyer
+   * can watch it fall, which is the behaviour the rule is trying to encourage.
+   */
+  const baseBps = Number(config.feeBps);
+  const chargedBps = feeBpsAt(rules, baseBps, now);
+  const premiumBps = Math.max(0, chargedBps - baseBps);
+  const decaySecondsLeft = secondsUntilBaseFee(rules, now);
+  useEffect(() => {
+    if (decaySecondsLeft === null) return;
+    const id = window.setInterval(() => setNow(Math.floor(Date.now() / 1000)), 1_000);
+    return () => window.clearInterval(id);
+  }, [decaySecondsLeft]);
+
   const quote = useMemo(() => {
     if (!input.trim()) return null;
     try {
       const raw = parseAmount(input);
       if (raw <= 0n) return null;
+      /*
+       * The premium comes off the top before the curve is quoted, exactly as the
+       * contract does it. Folding it into `config.feeBps` would be the other way to
+       * write this and it is the one the maths crate refuses, since its own fee cap
+       * is below what an opening fee is meant to reach.
+       *
+       * Sells are untouched: the rule is a charge for taking the opening, not an exit
+       * tax, and applying it to sells would punish an early buyer for changing their
+       * mind.
+       */
+      const premium =
+        side === 'buy' && premiumBps > 0 ? (raw * BigInt(premiumBps)) / 10_000n : 0n;
+      const forCurve = raw - premium;
       return side === 'buy'
-        ? ({ ok: true, side: 'buy', ...quoteBuy(config, state, raw) } as const)
+        ? ({
+            ok: true,
+            side: 'buy',
+            ...quoteBuy(config, state, forCurve),
+            earlyFeePremium: premium,
+          } as const)
         : ({ ok: true, side: 'sell', ...quoteSell(config, state, raw) } as const);
     } catch (e) {
       return {
@@ -77,7 +116,7 @@ export function TradePanel({
         error: e instanceof CurveError ? e.message : 'That amount could not be quoted.',
       } as const;
     }
-  }, [input, side, config, state]);
+  }, [input, side, config, state, premiumBps]);
 
   /** Worst acceptable fill, sent as the contract's min_* guard. */
   const minOut = useMemo(() => {
@@ -204,11 +243,35 @@ export function TradePanel({
             </span>
           </div>
           <div className="metric-row">
-            <span className="k">Fee · {Number(config.feeBps) / 100}%</span>
-            <span className="v mono">
-              {fmt(quote.fee, 18, 6)} {NETWORK.quoteSymbol}
+            <span className={premiumBps > 0 && quote.side === 'buy' ? 'k warn-text' : 'k'}>
+              Fee · {(quote.side === 'buy' ? chargedBps : baseBps) / 100}%
+            </span>
+            <span className={premiumBps > 0 && quote.side === 'buy' ? 'v mono warn-text' : 'v mono'}>
+              {fmt(
+                quote.side === 'buy' ? quote.fee + (quote.earlyFeePremium ?? 0n) : quote.fee,
+                18,
+                6,
+              )}{' '}
+              {NETWORK.quoteSymbol}
             </span>
           </div>
+          {premiumBps > 0 && quote.side === 'buy' && decaySecondsLeft !== null && (
+            /*
+             * Named, timed, and attributed. A higher fee with no explanation reads as
+             * the creator taking more, which is the opposite of what this does: the
+             * premium goes into the pool at graduation. The countdown is the point of
+             * the rule, so it is shown rather than buried in the rules panel.
+             */
+            <p className="note warn-text">
+              Opening fee: {(premiumBps / 100).toFixed(2)}% above the curve&rsquo;s{' '}
+              {(baseBps / 100).toFixed(2)}%, falling to it in{' '}
+              {decaySecondsLeft >= 60
+                ? `${Math.ceil(decaySecondsLeft / 60)} min`
+                : `${decaySecondsLeft}s`}
+              . It goes into the pool at graduation, not to the creator, and sells are
+              not affected.
+            </p>
+          )}
                     {(
             <div className="metric-row">
               <span

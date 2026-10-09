@@ -13,7 +13,15 @@ import { parseAmount, fmt, maxCollectable, type CurveConfig, type CurveState } f
 import { NETWORK, getFactoryAddress } from '@/lib/config';
 import type { WalletAccount } from '@/lib/wallet';
 import { profileForChain, profileFieldError, imageSrc } from '@/lib/tokenProfile';
-import { rulesForChain, validateRules, describeRules, hasAnyRule, type LaunchRules } from '@/lib/launchRules';
+import {
+  rulesForChain,
+  earlyFeeForChain,
+  validateRules,
+  describeRules,
+  hasAnyRule,
+  type LaunchRules,
+  type EarlyFee,
+} from '@/lib/launchRules';
 
 /**
  * Create a launch.
@@ -47,6 +55,8 @@ const DEFAULTS = {
   telegram: '',
   maxPerWallet: '',
   tradeStart: '',
+  openingFeePct: '',
+  openingFeeMins: '10',
   totalSupply: '1000000000',
   curveShare: '80',
   target: '85',
@@ -118,7 +128,7 @@ export function CreateLaunch() {
           symbol: f.symbol.trim(),
           name: f.name,
           description: f.description,
-          rules: rulesForChain(builtRules),
+          rules: { ...rulesForChain(builtRules), ...earlyFeeForChain(builtRules.earlyFee) },
           profile: profileForChain({
             image: f.image,
             website: f.website,
@@ -165,17 +175,37 @@ export function CreateLaunch() {
       const ms = new Date(f.tradeStart).getTime();
       start = Number.isFinite(ms) ? Math.floor(ms / 1000) : null;
     }
-    return { maxPerWallet: cap, tradeStart: start };
-  }, [f.maxPerWallet, f.tradeStart]);
+    /*
+     * Asked for as a percentage and a number of minutes, which is how a creator
+     * thinks about it. Basis points and seconds are what the contract stores, and
+     * asking for those directly is how a launch ends up with a ten-second window
+     * nobody meant, permanently.
+     */
+    let earlyFee: EarlyFee | null = null;
+    const pct = Number(f.openingFeePct);
+    const mins = Number(f.openingFeeMins);
+    if (f.openingFeePct.trim().length > 0 && Number.isFinite(pct)) {
+      earlyFee = {
+        startBps: Math.round(pct * 100),
+        seconds: Number.isFinite(mins) ? Math.round(mins * 60) : 0,
+      };
+    }
+    return { maxPerWallet: cap, tradeStart: start, earlyFee, openedAt: start };
+  }, [f.maxPerWallet, f.tradeStart, f.openingFeePct, f.openingFeeMins]);
 
   const ruleProblems = useMemo(
     () =>
       'error' in built
         ? []
-        : validateRules(builtRules, built.curve.curveSupply, Math.floor(Date.now() / 1000)),
+        : validateRules(
+            builtRules,
+            built.curve.curveSupply,
+            Math.floor(Date.now() / 1000),
+            Number(built.curve.feeBps),
+          ),
     [builtRules, built],
   );
-  const ruleError = (field: 'maxPerWallet' | 'tradeStart') =>
+  const ruleError = (field: 'maxPerWallet' | 'tradeStart' | 'earlyFee') =>
     ruleProblems.find((p) => p.field === field)?.message ?? null;
 
   const fresh: CurveState = { injCollected: 0n, tokensSold: 0n, graduated: false };
@@ -425,6 +455,35 @@ export function CreateLaunch() {
               aria-invalid={ruleError('tradeStart') !== null}
             />
             {ruleError('tradeStart') && <p className="note err-text">{ruleError('tradeStart')}</p>}
+          </div>
+        </div>
+
+        <div className="field-row">
+          <div className="field">
+            <label htmlFor="cl-openfee">
+              Opening fee <span className="hint">%, blank for none</span>
+            </label>
+            <input
+              id="cl-openfee"
+              value={f.openingFeePct}
+              onChange={(e) => set('openingFeePct')(e.target.value)}
+              placeholder="none"
+              inputMode="decimal"
+              aria-invalid={ruleError('earlyFee') !== null}
+            />
+            {ruleError('earlyFee') && <p className="note err-text">{ruleError('earlyFee')}</p>}
+          </div>
+          <div className="field">
+            <label htmlFor="cl-openmins">
+              Falling over <span className="hint">minutes</span>
+            </label>
+            <input
+              id="cl-openmins"
+              value={f.openingFeeMins}
+              onChange={(e) => set('openingFeeMins')(e.target.value)}
+              inputMode="decimal"
+              disabled={f.openingFeePct.trim().length === 0}
+            />
           </div>
         </div>
 

@@ -10,6 +10,16 @@
 
 import { parseProfile, type TokenProfile } from './tokenProfile.ts';
 import { parseRules, type LaunchRules } from './launchRules.ts';
+
+/** Nanoseconds as a string, as CosmWasm sends a `Timestamp`, to whole seconds. */
+function openedAtSeconds(raw: unknown): number | null {
+  if (typeof raw !== 'string') return null;
+  try {
+    return Number(BigInt(raw) / 1_000_000_000n);
+  } catch {
+    return null;
+  }
+}
 import { NETWORK, getLcdUrl, getFactoryAddress } from './config.ts';
 import { isDemoMode, demoLaunches, demoDetail, demoDetailByCurve } from './demo.ts';
 import type { CurveConfig, CurveState } from './curve.ts';
@@ -198,7 +208,18 @@ export async function getLaunchDetail(curveAddress: string): Promise<LaunchDetai
       tokensSold: BigInt(st.tokens_sold),
       graduated: st.graduated,
     },
-    rules: parseRules((cfg as { rules?: unknown }).rules),
+    /*
+     * `opened_at` comes from the contract rather than being inferred. A launch with no
+     * start time opened at the block that created it, which this side has no way to
+     * know, and guessing "now" would make the decay restart on every page load: a
+     * premium that never ends, displayed as one that is always just beginning.
+     *
+     * CosmWasm sends it as nanoseconds, same as `trade_start`.
+     */
+    rules: parseRules(
+      (cfg as { rules?: unknown }).rules,
+      openedAtSeconds((cfg as { opened_at?: unknown }).opened_at),
+    ),
     migrated: st.migrated,
     platformOwed: BigInt(st.platform_owed),
     creatorOwed: BigInt(st.creator_owed),

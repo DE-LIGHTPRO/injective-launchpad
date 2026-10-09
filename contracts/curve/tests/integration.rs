@@ -152,12 +152,19 @@ impl Fixture {
     fn assert_solvent(&self) {
         let st = self.state();
         let held = self.balance(&self.addr, QUOTE);
-        let owed = st.inj_collected + st.platform_owed + st.creator_owed;
+        /*
+         * `lp_bonus` counts as owed. It is quote the contract is holding for the pool
+         * at graduation, and leaving it out of this sum would let the opening-fee
+         * premium be spent on a sell or a fee claim while every solvency assertion in
+         * the suite still passed: the exact shape of hole this helper exists to find.
+         */
+        let owed = st.inj_collected + st.platform_owed + st.creator_owed + st.lp_bonus;
         assert!(
             held >= owed,
-            "insolvent: holds {held} {QUOTE}, owes {owed} (reserve {} + fees {})",
+            "insolvent: holds {held} {QUOTE}, owes {owed} (reserve {} + fees {} + lp bonus {})",
             st.inj_collected,
-            st.platform_owed + st.creator_owed
+            st.platform_owed + st.creator_owed,
+            st.lp_bonus
         );
     }
 }
@@ -487,7 +494,7 @@ fn a_wallet_cap_refuses_the_buy_that_would_cross_it() {
     // such buy and refuses the second.
     let one_buy = quoted_tokens(&setup(), amt(1));
     let cap = one_buy + one_buy / Uint128::new(2);
-    let mut f = setup_with(LaunchRules { max_per_wallet: Some(cap), trade_start: None });
+    let mut f = setup_with(LaunchRules { max_per_wallet: Some(cap), trade_start: None, early_fee: None });
     let alice = f.alice.clone();
 
     f.buy(&alice, amt(1)).expect("a buy under the cap was refused");
@@ -508,7 +515,7 @@ fn the_cap_is_per_address_and_does_not_bleed_between_buyers() {
     // looks correct until a second buyer shows up.
     let one_buy = quoted_tokens(&setup(), amt(1));
     let cap = one_buy + one_buy / Uint128::new(2);
-    let mut f = setup_with(LaunchRules { max_per_wallet: Some(cap), trade_start: None });
+    let mut f = setup_with(LaunchRules { max_per_wallet: Some(cap), trade_start: None, early_fee: None });
     let alice = f.alice.clone();
     let bob = f.bob.clone();
 
@@ -529,7 +536,7 @@ fn selling_frees_cap_allowance_so_an_exit_is_not_a_permanent_lockout() {
      */
     let one_buy = quoted_tokens(&setup(), amt(1));
     let cap = one_buy + one_buy / Uint128::new(2);
-    let mut f = setup_with(LaunchRules { max_per_wallet: Some(cap), trade_start: None });
+    let mut f = setup_with(LaunchRules { max_per_wallet: Some(cap), trade_start: None, early_fee: None });
     let alice = f.alice.clone();
 
     f.buy(&alice, amt(1)).unwrap();
@@ -556,7 +563,7 @@ fn selling_more_than_the_curve_sold_you_does_not_abort_the_trade() {
      */
     let one_buy = quoted_tokens(&setup(), amt(1));
     let cap = one_buy + one_buy / Uint128::new(2);
-    let mut f = setup_with(LaunchRules { max_per_wallet: Some(cap), trade_start: None });
+    let mut f = setup_with(LaunchRules { max_per_wallet: Some(cap), trade_start: None, early_fee: None });
     let alice = f.alice.clone();
     let bob = f.bob.clone();
 
@@ -589,6 +596,7 @@ fn a_launch_with_a_start_time_refuses_buys_before_it() {
     let mut f = setup_with(LaunchRules {
         max_per_wallet: None,
         trade_start: Some(now.plus_seconds(600)),
+        early_fee: None,
     });
     let alice = f.alice.clone();
     let err = f.buy(&alice, amt(1)).unwrap_err().to_string();
@@ -606,7 +614,7 @@ fn a_start_time_that_has_passed_is_simply_open() {
     // The boundary is inclusive, so a launch whose start is exactly this block is open.
     // Refusing the boundary would push every start one block later than asked for.
     let now = setup().app.block_info().time;
-    let mut f = setup_with(LaunchRules { max_per_wallet: None, trade_start: Some(now) });
+    let mut f = setup_with(LaunchRules { max_per_wallet: None, trade_start: Some(now), early_fee: None });
     let alice = f.alice.clone();
     f.buy(&alice, amt(1)).expect("a launch starting now was closed");
 }
@@ -622,7 +630,7 @@ fn a_rule_that_could_never_bind_is_refused_at_launch() {
     let supply = curve_cfg().curve_supply;
     for bad in [supply, supply + Uint128::one(), Uint128::zero()] {
         let res = std::panic::catch_unwind(move || {
-            setup_with(LaunchRules { max_per_wallet: Some(bad), trade_start: None })
+            setup_with(LaunchRules { max_per_wallet: Some(bad), trade_start: None, early_fee: None })
         });
         assert!(res.is_err(), "a cap of {bad} was accepted");
     }
@@ -643,7 +651,7 @@ fn a_buy_landing_exactly_on_the_cap_is_allowed() {
      * lands on it precisely.
      */
     let exact = quoted_tokens(&setup(), amt(1));
-    let mut f = setup_with(LaunchRules { max_per_wallet: Some(exact), trade_start: None });
+    let mut f = setup_with(LaunchRules { max_per_wallet: Some(exact), trade_start: None, early_fee: None });
     let alice = f.alice.clone();
 
     f.buy(&alice, amt(1)).expect("a buy landing exactly on the cap was refused");
@@ -653,5 +661,241 @@ fn a_buy_landing_exactly_on_the_cap_is_allowed() {
     // is about the boundary rather than about the size of the second order.
     let err = f.buy(&alice, Uint128::new(1_000)).unwrap_err().to_string();
     assert!(err.contains("caps a wallet"), "one unit over the cap was allowed: {err}");
+    f.assert_solvent();
+}
+
+// ------------------------------------------------------------- early fee --
+
+fn with_early_fee(start_bps: u16, secs: u64) -> LaunchRules {
+    LaunchRules {
+        max_per_wallet: None,
+        trade_start: None,
+        early_fee: Some(curve::state::EarlyFee { start_bps, seconds: secs }),
+    }
+}
+
+#[test]
+fn an_early_buyer_pays_the_opening_fee_and_a_later_one_does_not() {
+    /*
+     * The rule working, measured as tokens received rather than as a fee figure.
+     *
+     * That is deliberate: a buyer does not read the fee, they read what they got. If
+     * the premium were charged and the quote still handed over the base-fee quantity,
+     * the contract would owe tokens it had not reserved, and the fee number would look
+     * right the whole time.
+     */
+    /*
+     * TWO SEPARATE LAUNCHES, and the first version of this test did not do that.
+     *
+     * It bought twice on one curve and expected the later buy to receive more. It
+     * received less, by a wide margin, because the first buy had moved the price:
+     * early 245.7M tokens, late 167.8M. The curve effect dominates a 10% fee
+     * difference easily, so a same-curve comparison measures the curve, not the rule.
+     * Both buys here are the FIRST buy on identical curves, so the only difference
+     * left is the fee.
+     */
+    let mut early = setup_with(with_early_fee(1_100, 1_000)); // 11% opening, 1% base
+    let a1 = early.alice.clone();
+    early.buy(&a1, amt(10)).unwrap();
+    let early_tokens = early.balance(&a1, TOKEN);
+
+    let mut late = setup_with(with_early_fee(1_100, 1_000));
+    let a2 = late.alice.clone();
+    late.app.update_block(|b| b.time = b.time.plus_seconds(1_001)); // past the decay
+    late.buy(&a2, amt(10)).unwrap();
+    let late_tokens = late.balance(&a2, TOKEN);
+
+    assert!(
+        late_tokens > early_tokens,
+        "the opening fee did not make being early more expensive: early {early_tokens}, late {late_tokens}"
+    );
+    early.assert_solvent();
+    late.assert_solvent();
+}
+
+#[test]
+fn the_premium_goes_to_the_pool_and_not_to_the_creator() {
+    /*
+     * The design decision, asserted so it cannot drift. A creator who earns more when
+     * snipers win has a reason to want snipers, which is the opposite of the rule's
+     * purpose. Creator and platform are paid exactly what the curve's own fee would
+     * have produced; the difference is held for the pool.
+     */
+    let mut f = setup_with(with_early_fee(1_100, 1_000));
+    let alice = f.alice.clone();
+    f.buy(&alice, amt(10)).unwrap();
+    let early = f.state();
+
+    // The same trade on a launch with no opening fee, for the baseline.
+    let mut g = setup();
+    let a2 = g.alice.clone();
+    g.buy(&a2, amt(10)).unwrap();
+    let plain = g.state();
+
+    /*
+     * NEVER MORE, and in fact slightly less, which is a real consequence of taking the
+     * premium off the top rather than folding it into the curve's fee: the curve's own
+     * fee then applies to what is left after the premium. The difference is
+     * second-order (1% of 10%) and it points the right way, since a creator earns
+     * marginally less during an opening window rather than more.
+     *
+     * Asserted as an inequality because the direction is the property that matters. An
+     * equality here would also fail if the creator were paid MORE, but it would fail
+     * for a correct implementation too, which is how a test ends up being "fixed" by
+     * weakening the thing it was protecting.
+     */
+    assert!(
+        early.creator_owed <= plain.creator_owed,
+        "the creator was paid MORE because of the opening fee: {} vs {}",
+        early.creator_owed,
+        plain.creator_owed
+    );
+    assert!(
+        early.platform_owed <= plain.platform_owed,
+        "the platform was paid more because of the opening fee"
+    );
+    // And the shortfall is small: the premium is not quietly coming out of their share.
+    assert!(
+        early.creator_owed * Uint128::new(100) >= plain.creator_owed * Uint128::new(85),
+        "the creator lost more than a rounding margin: {} vs {}",
+        early.creator_owed,
+        plain.creator_owed
+    );
+    assert!(early.lp_bonus > Uint128::zero(), "no premium was accrued");
+    f.assert_solvent();
+}
+
+#[test]
+fn the_premium_leaves_with_the_reserve_at_graduation() {
+    /*
+     * An accumulator that fills and is never paid out is a tax collected for nobody,
+     * and it would sit in the contract looking exactly like solvency. This is the test
+     * that makes the rule real rather than merely accounted.
+     */
+    let mut f = setup_with(with_early_fee(1_100, 100_000));
+    let alice = f.alice.clone();
+    let migration = f.migration.clone();
+
+    for _ in 0..12 {
+        if f.state().graduated { break }
+        let _ = f.buy(&alice, amt(10));
+    }
+    assert!(f.state().graduated, "the curve never graduated");
+    let accrued = f.state().lp_bonus;
+    assert!(accrued > Uint128::zero(), "no premium was accrued during the decay");
+
+    /*
+     * The EXACT amount, because `>=` was not an assertion.
+     *
+     * The first version checked `moved >= accrued`, and mutation testing showed the
+     * premium could be dropped from the payout entirely and it still passed: the
+     * reserve alone is tens of INJ and the premium is a couple, so the inequality
+     * holds either way. An assertion that cannot fail for the defect it names is
+     * worse than none, because it reads as coverage.
+     */
+    let reserve = f.state().inj_collected;
+    let expected = reserve + accrued;
+    let before = f.balance(&migration, QUOTE);
+    f.app
+        .execute_contract(alice.clone(), f.addr.clone(), &ExecuteMsg::Graduate {}, &[])
+        .unwrap();
+    let moved = f.balance(&migration, QUOTE) - before;
+
+    assert_eq!(
+        moved, expected,
+        "the pool received {moved}, expected reserve {reserve} plus premium {accrued}"
+    );
+    assert_eq!(f.state().lp_bonus, Uint128::zero(), "the premium was paid but not cleared");
+    f.assert_solvent();
+}
+
+#[test]
+fn the_decay_is_measured_from_the_start_time_not_from_creation() {
+    /*
+     * A launch announced in advance would otherwise spend its whole opening premium
+     * before anyone was allowed to trade: the rule set, displayed, and doing nothing.
+     * That is the quietest way for this feature to fail, because the configuration
+     * still reads correctly afterwards.
+     */
+    let open_at = {
+        let f = setup();
+        f.app.block_info().time.plus_seconds(500)
+    };
+    let mut f = setup_with(LaunchRules {
+        max_per_wallet: None,
+        trade_start: Some(open_at),
+        early_fee: Some(curve::state::EarlyFee { start_bps: 1_100, seconds: 1_000 }),
+    });
+    let alice = f.alice.clone();
+
+    // Move to exactly the opening. The decay has not started, so the first buyer pays
+    // the full opening fee even though 500 seconds have passed since creation.
+    f.app.update_block(|b| b.time = open_at);
+    f.buy(&alice, amt(10)).unwrap();
+    let at_open = f.balance(&alice, TOKEN);
+
+    // The same launch, opening immediately, bought at the same block height offset.
+    let mut g = setup_with(with_early_fee(1_100, 1_000));
+    let a2 = g.alice.clone();
+    g.app.update_block(|b| b.time = b.time.plus_seconds(500));
+    g.buy(&a2, amt(10)).unwrap();
+    let half_decayed = g.balance(&a2, TOKEN);
+
+    assert!(
+        half_decayed > at_open,
+        "the delayed launch had already decayed before it opened: {at_open} vs {half_decayed}"
+    );
+    f.assert_solvent();
+}
+
+#[test]
+fn a_buy_that_fills_the_curve_during_the_opening_window_refunds_in_full() {
+    /*
+     * The refund path crossed with the premium, which is the one combination where
+     * the accounting can leak.
+     *
+     * The premium is charged on what is SPENT, so the curve is quoted twice: once to
+     * learn what it cannot absorb, then again on the remainder. That leaves two
+     * refunds to hand back, and mutation testing showed dropping the first one broke
+     * nothing, because no test had ever filled a curve while an opening fee was
+     * running. Money the contract keeps and does not owe anyone is the quietest
+     * possible hole.
+     *
+     * Asserted on the BUYER'S BALANCE rather than on an attribute: an attribute can
+     * report a refund that was never sent.
+     */
+    let mut f = setup_with(with_early_fee(1_100, 100_000));
+    let alice = f.alice.clone();
+
+    // Fill most of the curve, then send far more than it can still take.
+    for _ in 0..8 {
+        if f.state().graduated { break }
+        let _ = f.buy(&alice, amt(10));
+    }
+    assert!(!f.state().graduated, "the curve filled before the oversized buy");
+
+    let before = f.balance(&alice, QUOTE);
+    let sent = amt(400);
+    assert!(before >= sent, "the fixture cannot fund the oversized buy");
+    f.buy(&alice, sent).unwrap();
+    let spent = before - f.balance(&alice, QUOTE);
+
+    assert!(f.state().graduated, "the oversized buy did not fill the curve");
+    assert!(
+        spent < sent,
+        "nothing was refunded on a buy that filled the curve: sent {sent}, spent {spent}"
+    );
+    /*
+     * The contract may keep only what it accounts for. Anything else is quote it is
+     * holding on nobody's behalf, which `assert_solvent` cannot see because solvency
+     * asks whether it holds ENOUGH, never whether it holds too much.
+     */
+    let st = f.state();
+    let accounted = st.inj_collected + st.platform_owed + st.creator_owed + st.lp_bonus;
+    let held = f.balance(&f.addr, QUOTE);
+    assert_eq!(
+        held, accounted,
+        "the contract holds {held} but accounts for {accounted}: the difference was not refunded"
+    );
     f.assert_solvent();
 }

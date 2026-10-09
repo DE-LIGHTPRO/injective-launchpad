@@ -82,7 +82,9 @@ export interface LaunchInput {
    * Validated by `validateRules` before the plan is built and by the contract again.
    * Never described to a user as a property of the token: see `launchRules.ts`.
    */
-  rules?: Record<string, string>;
+  // `unknown` because `early_fee` is a nested object while the others are strings;
+  // narrowing to `string` here was what made the rules field quietly reject it.
+  rules?: Record<string, unknown>;
   curve: CurveConfig;
   lpReserve: bigint;
   creatorFeeShareBps: number;
