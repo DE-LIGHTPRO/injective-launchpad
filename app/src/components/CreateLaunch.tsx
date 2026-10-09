@@ -10,7 +10,7 @@ import {
   type LaunchPlan,
 } from '@/lib/createLaunch';
 import { parseAmount, fmt, maxCollectable, type CurveConfig, type CurveState } from '@/lib/curve';
-import { NETWORK, getFactoryAddress } from '@/lib/config';
+import { NETWORK, getFactoryAddress, isDeployed } from '@/lib/config';
 import type { WalletAccount } from '@/lib/wallet';
 import { profileForChain, profileFieldError, imageSrc } from '@/lib/tokenProfile';
 import {
@@ -558,6 +558,24 @@ export function CreateLaunch() {
 
       <div className="card">
         <h2>Sign</h2>
+
+        {/*
+            Said FIRST, and said once.
+            
+            Without a factory the form still accepts every field and only refuses at
+            the end, after someone has chosen a ticker, a supply, a curve shape and
+            three rules. The information that none of it can be submitted was available
+            before they typed anything, and withholding it until the last step is the
+            same defect as an inviting button on a quote that cannot execute.
+          */}
+        {!isDeployed() && (
+          <p className="note warn-text">
+            No launchpad contracts are deployed on {NETWORK.name} yet, so nothing here
+            can be submitted. The curve above is real arithmetic and the messages below
+            are the ones that will be sent once there is a factory to send them to.
+          </p>
+        )}
+
         {!account && (
           <>
             <p className="note">Connect a wallet to see exactly what would be signed.</p>

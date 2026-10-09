@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import type { Metadata } from 'next';
 import { getLaunch, getLaunchDetail, symbolOf, short } from '@/lib/chain';
 import { TokenLogo } from '@/components/TokenLogo';
 import { visibleLinks } from '@/lib/tokenProfile';
@@ -13,6 +14,62 @@ import { TradePanel } from '@/components/TradePanel';
 import { Trades } from '@/components/Trades';
 
 export const dynamic = 'force-dynamic';
+
+/**
+ * What a shared launch link looks like.
+ *
+ * A launchpad spreads by links: a creator posts their token, and whatever the preview
+ * shows is the whole pitch. With no metadata every one of them rendered as the site's
+ * generic title with no description, so four different tokens shared identically and
+ * none of them said what it was.
+ *
+ * Built from the launch's own figures rather than a template, and it reports PROGRESS
+ * rather than a price, because progress is the one number that means the same thing
+ * whenever the link is opened. A price in a preview is cached by the platform that
+ * scraped it and goes stale within minutes, which is worse than saying nothing.
+ */
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}): Promise<Metadata> {
+  const { id } = await params;
+  const numericId = Number(id);
+  if (!Number.isInteger(numericId)) return { title: 'Launch' };
+
+  try {
+    const launch = await getLaunch(numericId);
+    const detail = await getLaunchDetail(launch.curve);
+    const sym = symbolOf(detail.denom);
+    const pct = (graduationProgress(detail.config, detail.state) * 100).toFixed(1);
+    const raised = fmt(detail.state.injCollected, 18, 2);
+    const target = fmt(detail.config.graduationTarget, 18, 0);
+
+    const state = detail.state.graduated
+      ? 'Graduated'
+      : `${pct}% to graduation, ${raised} of ${target} ${NETWORK.quoteSymbol} raised`;
+    const description = `${state}. One-sided bonding curve on Injective: the creator supplies tokens, buyers bring ${NETWORK.quoteSymbol}.`;
+
+    /*
+     * The creator's image is NOT used as the preview card.
+     *
+     * It is a URL a stranger controls, and a social platform fetching it on our behalf
+     * turns every shared link into a request we cannot see and did not make. The
+     * scheme allowlist protects this page from a hostile value; it does not make the
+     * destination ours to vouch for.
+     */
+    return {
+      title: `${sym} on inj·pad`,
+      description,
+      openGraph: { title: `${sym} on inj·pad`, description, type: 'website' },
+      twitter: { card: 'summary', title: `${sym} on inj·pad`, description },
+    };
+  } catch {
+    // A launch that cannot be read still needs a title, and it must not be the
+    // error: a preview saying "no such launch" is worse than a plain one.
+    return { title: 'Launch' };
+  }
+}
 
 const ONE = 1_000_000_000_000_000_000n;
 
@@ -223,6 +280,7 @@ export default async function LaunchPage({ params }: { params: Promise<{ id: str
           config={detail.config}
           state={detail.state}
           symbol={symbol}
+          denom={detail.denom}
           tradingClosed={detail.state.graduated}
           rules={detail.rules}
         />

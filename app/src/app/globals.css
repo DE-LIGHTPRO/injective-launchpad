@@ -723,6 +723,26 @@ button:disabled { color: var(--text-faint); cursor: not-allowed; }
   button { min-height: 24px; }
 }
 
+/* The balance row above an amount field, and its Max. */
+.bal-row { display: inline-flex; align-items: center; gap: var(--space-2); font-size: var(--text-xs); color: var(--text-dim); }
+.max-btn {
+  font-size: var(--text-micro);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-sm);
+  color: var(--accent);
+  border-color: var(--accent-deep);
+  background: var(--accent-wash);
+}
+/* A 24px hit area from a pseudo-element, so the glyph stays small on a desktop and
+   the target still clears WCAG 2.5.8 on a thumb. Growing the button instead would
+   make it compete with the amount field it sits above. */
+@media (pointer: coarse) {
+  .max-btn { position: relative; }
+  .max-btn::after { content: ''; position: absolute; inset: -8px -6px; }
+}
+
 /* Wallet, create form and trade feed. */
 .wallet { position: relative; display: inline-flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; }
 .wallet-acct { display: inline-flex; flex-direction: column; line-height: 1.25; min-width: 0; }

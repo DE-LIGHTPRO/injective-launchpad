@@ -17,8 +17,34 @@ import {
 import { NETWORK } from '@/lib/config';
 import { isDemoMode } from '@/lib/demo';
 import { buyingOpenAt, feeBpsAt, secondsUntilBaseFee, NO_RULES, type LaunchRules } from '@/lib/launchRules';
+import { useConnectedAccount } from '@/lib/walletStore';
+import { denomBalance } from '@/lib/wallet';
 
 type Side = 'buy' | 'sell';
+
+/**
+ * Left behind by Max on a buy, so the transaction can pay its own fee.
+ *
+ * 0.05 INJ against a launch transaction that simulates near 3,000,000 gas. Spending the
+ * whole balance instead produces a transaction that is rejected for fees AFTER the user
+ * has approved it, which reads as the app being broken rather than as a balance being
+ * exactly empty.
+ */
+const GAS_RESERVE = 5n * 10n ** 16n;
+
+/**
+ * Base units to a plain decimal string, with nothing dropped.
+ *
+ * `fmt` rounds for display, and rounding here is the bug: a Max that rounds DOWN leaves
+ * dust behind, and one that rounds UP produces an amount larger than the balance, which
+ * the chain refuses. This is the exact figure.
+ */
+function formatExact(v: bigint, decimals: number): string {
+  const unit = 10n ** BigInt(decimals);
+  const whole = v / unit;
+  const frac = (v % unit).toString().padStart(decimals, '0').replace(/0+$/, '');
+  return frac.length > 0 ? `${whole}.${frac}` : `${whole}`;
+}
 
 /**
  * Quotes are computed locally from the same maths the contract runs, so the
@@ -30,17 +56,61 @@ export function TradePanel({
   config,
   state,
   symbol,
+  denom,
   tradingClosed,
   rules = NO_RULES,
 }: {
   config: CurveConfig;
   state: CurveState;
   symbol: string;
+  /** The launched token's denom, so the panel can read what the account holds. */
+  denom: string;
   tradingClosed: boolean;
   rules?: LaunchRules;
 }) {
   const [side, setSide] = useState<Side>('buy');
   const [input, setInput] = useState('');
+
+  /*
+   * What the connected account actually holds, on both sides.
+   *
+   * Missing entirely until now, and on the sell side that is not a convenience: a
+   * holder could not see their position and had no way to sell all of it, because the
+   * amount is in base units and nobody types eighteen decimals by hand. They had to
+   * guess low and leave a remainder, or guess high and be refused.
+   *
+   * `null` means not read, never zero. An unreachable LCD rendered as "0" on a sell
+   * screen tells someone their position is gone, which is the most alarming lie this
+   * panel could tell.
+   */
+  const account = useConnectedAccount();
+  const [quoteBal, setQuoteBal] = useState<bigint | null>(null);
+  const [tokenBal, setTokenBal] = useState<bigint | null>(null);
+
+  useEffect(() => {
+    if (!account) {
+      setQuoteBal(null);
+      setTokenBal(null);
+      return;
+    }
+    let live = true;
+    void Promise.all([
+      denomBalance(account.address, NETWORK.quoteDenom),
+      denomBalance(account.address, denom),
+    ]).then(([q, t]) => {
+      // Guarded, because switching launches while a read is in flight would otherwise
+      // write the previous token's balance under the new token's name.
+      if (live) {
+        setQuoteBal(q);
+        setTokenBal(t);
+      }
+    });
+    return () => {
+      live = false;
+    };
+  }, [account, denom]);
+
+  const held = side === 'buy' ? quoteBal : tokenBal;
   const [slippagePct, setSlippagePct] = useState(1);
 
   /*
@@ -210,6 +280,40 @@ export function TradePanel({
       <label className="field">
         <span className="lbl">
           <span>{side === 'buy' ? 'You spend' : 'You sell'}</span>
+          {account && (
+            <span className="bal-row">
+              <span className="mono">
+                {/*
+                    "not read" rather than "0". An unreachable LCD showing zero on a
+                    sell screen tells a holder their position is gone.
+                  */}
+                {held === null ? 'balance not read' : `${fmt(held, 18, held === 0n ? 0 : 4)} ${unit}`}
+              </span>
+              {held !== null && held > 0n && (
+                /*
+                 * Max exists because the alternative is typing eighteen decimals by
+                 * hand. Without it a seller guesses low and leaves a remainder, or
+                 * guesses high and is refused; neither is a choice anyone is making
+                 * on purpose.
+                 *
+                 * On a BUY it deliberately leaves gas behind. Spending the entire
+                 * balance produces a transaction that cannot pay its own fee, which
+                 * fails after the wallet prompt and looks like the app is broken.
+                 */
+                <button
+                  type="button"
+                  className="max-btn"
+                  onClick={() => {
+                    const spendable =
+                      side === 'buy' ? (held > GAS_RESERVE ? held - GAS_RESERVE : 0n) : held;
+                    setInput(formatExact(spendable, 18));
+                  }}
+                >
+                  Max
+                </button>
+              )}
+            </span>
+          )}
         </span>
         <span className="input-wrap">
           <input

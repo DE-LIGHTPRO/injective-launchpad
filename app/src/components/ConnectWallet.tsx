@@ -14,6 +14,7 @@ import {
 import { fmt } from '@/lib/curve';
 import { NETWORK } from '@/lib/config';
 import { useDismissOnEscape } from '@/lib/useDismissOnEscape';
+import { setConnectedAccount } from '@/lib/walletStore';
 
 /**
  * Connect, and show which account is connected.
@@ -99,6 +100,9 @@ export function ConnectWallet({
 
   useEffect(() => {
     onAccount?.(account);
+    // Published for components that have no ancestor in common with this one, which
+    // is every panel on a server-rendered page. See `walletStore`.
+    setConnectedAccount(account);
     if (!account) {
       setBalance(null);
       return;

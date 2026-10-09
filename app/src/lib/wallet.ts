@@ -332,7 +332,20 @@ async function finishConnect(name: WalletName, ext: InjectedWallet): Promise<Wal
  * normal state of a fresh address and not an error.
  */
 export async function quoteBalance(address: string): Promise<bigint | null> {
-  const url = `${getLcdUrl()}/cosmos/bank/v1beta1/balances/${address}/by_denom?denom=${encodeURIComponent(NETWORK.quoteDenom)}`;
+  return denomBalance(address, NETWORK.quoteDenom);
+}
+
+/**
+ * Any denom's balance, in base units, or null when it could not be read.
+ *
+ * `null` is NOT zero, and the distinction is the whole reason this returns one. An
+ * unreachable LCD rendered as "0" tells a holder they have nothing, which on a sell
+ * screen is the most alarming possible lie: it looks like their position is gone.
+ * A bank query for a denom an account has never held returns a zero balance rather
+ * than an error, so a real zero is still a real zero.
+ */
+export async function denomBalance(address: string, denom: string): Promise<bigint | null> {
+  const url = `${getLcdUrl()}/cosmos/bank/v1beta1/balances/${address}/by_denom?denom=${encodeURIComponent(denom)}`;
   let res: Response;
   try {
     res = await fetch(url, { headers: { accept: 'application/json' } });

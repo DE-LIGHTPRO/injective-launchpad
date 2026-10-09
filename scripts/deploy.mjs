@@ -144,7 +144,10 @@ function loadWasm(name) {
   if (!existsSync(path)) {
     die(
       `Missing ${name}.`,
-      'Build first: RUSTFLAGS="-C link-arg=-s" cargo build --release --target wasm32-unknown-unknown -p curve -p factory',
+      // One crate per invocation. The combined form fails to link, because cargo
+      // unifies the `library` feature across both and the factory ends up carrying
+      // curve's entry points. See scripts/build-wasm.sh.
+      'Build first: ./scripts/build-wasm.sh',
     );
   }
   const bytes = readFileSync(path);
