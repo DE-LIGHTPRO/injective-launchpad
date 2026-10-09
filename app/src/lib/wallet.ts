@@ -42,11 +42,61 @@ export interface WalletAccount {
 
 export class WalletError extends Error {
   readonly kind: 'absent' | 'rejected' | 'wrong-chain' | 'failed';
-  constructor(kind: WalletError['kind'], message: string) {
+  /**
+   * The extension's own words, kept rather than discarded.
+   *
+   * The first version of this threw away the original message and reported "The
+   * wallet could not be opened." for anything it did not recognise. A real failure
+   * then arrived with no information in it at all: the user saw a generic sentence,
+   * and so did I, so there was nothing to diagnose from. Translating an error for a
+   * person is right; destroying it is not. This is shown behind a disclosure and
+   * logged, never used as the headline.
+   */
+  readonly detail?: string;
+  constructor(kind: WalletError['kind'], message: string, detail?: string) {
     super(message);
     this.name = 'WalletError';
     this.kind = kind;
+    this.detail = detail;
   }
+}
+
+/**
+ * Chain parameters for an extension that does not already know Injective.
+ *
+ * Keplr ships Injective MAINNET and, depending on the build, not the testnet. An
+ * `enable('injective-888')` against a build without it throws, which is what produced
+ * "The wallet could not be opened." on a browser with Keplr plainly installed.
+ *
+ * `coinType: 60` is the detail that matters most here: Injective derives Ethereum-style
+ * keys, and suggesting coinType 118 like a standard Cosmos chain would hand back a
+ * valid-looking `inj1…` address derived from the wrong path, for an account holding
+ * nothing and signing nothing the chain accepts.
+ */
+function chainSuggestion() {
+  const inj = { coinDenom: 'INJ', coinMinimalDenom: 'inj', coinDecimals: 18, coinGeckoId: 'injective-protocol' };
+  const isTestnet = NETWORK.name === 'testnet';
+  return {
+    chainId: NETWORK.chainId,
+    chainName: isTestnet ? 'Injective Testnet' : 'Injective',
+    rpc: isTestnet
+      ? 'https://testnet.sentry.tm.injective.network'
+      : 'https://sentry.tm.injective.network',
+    rest: NETWORK.lcd,
+    bip44: { coinType: 60 },
+    bech32Config: {
+      bech32PrefixAccAddr: 'inj',
+      bech32PrefixAccPub: 'injpub',
+      bech32PrefixValAddr: 'injvaloper',
+      bech32PrefixValPub: 'injvaloperpub',
+      bech32PrefixConsAddr: 'injvalcons',
+      bech32PrefixConsPub: 'injvalconspub',
+    },
+    currencies: [inj],
+    feeCurrencies: [{ ...inj, gasPriceStep: { low: 500000000, average: 700000000, high: 900000000 } }],
+    stakeCurrency: inj,
+    features: ['ibc-transfer', 'ibc-go', 'eth-address-gen', 'eth-key-sign'],
+  };
 }
 
 interface InjectedWallet {
@@ -166,24 +216,90 @@ export async function connect(name: WalletName): Promise<WalletAccount> {
     // choice rather than a fault, so it gets its own kind.
     await ext.enable(NETWORK.chainId);
   } catch (e) {
-    const msg = (e as Error).message ?? '';
+    const msg = errorText(e);
+
     if (/reject|denied|closed/i.test(msg)) {
       throw new WalletError('rejected', 'You closed the wallet prompt, so nothing was connected.');
     }
+
     /*
-     * Keplr answers an unknown chain id with a "there is no chain info" error.
-     * Both wallets ship Injective mainnet and testnet, so this normally means the
-     * configured chain id is wrong rather than that the user needs to add a chain,
-     * and saying so sends them to the right place.
+     * An unknown chain is ASKED FOR rather than reported.
+     *
+     * This used to say "this wallet does not know the chain id, check which network
+     * the app is configured for", on the belief that both wallets ship Injective
+     * mainnet and testnet. They do not: Keplr's build may carry mainnet only, so a
+     * browser with Keplr plainly installed got told the app was misconfigured when
+     * the fix was one call the extension exists to serve. Suggesting the chain shows
+     * the user a prompt naming Injective, which is a better answer than a sentence
+     * about chain ids.
+     *
+     * The retry is what proves it worked. Treating `suggestChain` as success without
+     * re-enabling would report a connection that never happened.
      */
-    if (/no chain info|unknown chain|not supported/i.test(msg)) {
+    if (/no chain info|unknown chain|not supported|chain.*not.*found/i.test(msg)) {
+      if (typeof ext.experimentalSuggestChain === 'function') {
+        try {
+          await ext.experimentalSuggestChain(chainSuggestion());
+          await ext.enable(NETWORK.chainId);
+          return finishConnect(name, ext);
+        } catch (suggestErr) {
+          const sm = errorText(suggestErr);
+          if (/reject|denied|closed/i.test(sm)) {
+            throw new WalletError('rejected', 'You declined adding the Injective network.');
+          }
+          throw new WalletError(
+            'wrong-chain',
+            `This wallet could not add ${NETWORK.chainId}. Add Injective ${NETWORK.name} to it manually, then try again.`,
+            sm,
+          );
+        }
+      }
       throw new WalletError(
         'wrong-chain',
-        `This wallet does not know the chain id ${NETWORK.chainId}. Check which network the app is configured for.`,
+        `This wallet does not know ${NETWORK.chainId} and cannot be asked to add it. Add Injective ${NETWORK.name} to it manually.`,
+        msg,
       );
     }
-    throw new WalletError('failed', 'The wallet could not be opened.');
+
+    /*
+     * The fallback carries the detail. Without it this sentence was the only thing
+     * anyone saw, including me, and a real failure became undiagnosable.
+     */
+    throw new WalletError(
+      'failed',
+      'The wallet did not open. Unlock it and try again.',
+      msg,
+    );
   }
+
+  return finishConnect(name, ext);
+}
+
+/**
+ * Pulls out whatever text an error carries.
+ *
+ * Extensions throw strings, plain objects and `Error`s interchangeably, and
+ * `(e as Error).message` is `undefined` for two of those three. That `undefined`
+ * matched none of the patterns above, which is how every unrecognised failure
+ * collapsed into one generic sentence.
+ */
+function errorText(e: unknown): string {
+  if (typeof e === 'string') return e;
+  if (e instanceof Error) return e.message;
+  if (e && typeof e === 'object') {
+    const o = e as { message?: unknown; error?: unknown };
+    if (typeof o.message === 'string') return o.message;
+    if (typeof o.error === 'string') return o.error;
+    try {
+      return JSON.stringify(e);
+    } catch {
+      return String(e);
+    }
+  }
+  return String(e ?? '');
+}
+
+async function finishConnect(name: WalletName, ext: InjectedWallet): Promise<WalletAccount> {
 
   let key: { bech32Address: string; name?: string };
   try {

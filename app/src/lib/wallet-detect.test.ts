@@ -108,3 +108,105 @@ test('the order offered is stable and starts with the most common', () => {
     assert.ok(w.label.trim().length > 0, `${w.name} has no label`);
   }
 });
+
+// ------------------------------------------------- connect failure handling --
+
+import { connect } from './wallet.ts';
+
+function installKeplr(behaviour: Partial<{ enable: () => Promise<void>; suggest: () => Promise<void> }>) {
+  install('keplr', {
+    enable: behaviour.enable ?? (async () => {}),
+    getKey: async () => ({ bech32Address: 'inj1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqry8wy684', name: 'Acct' }),
+    experimentalSuggestChain: behaviour.suggest,
+  });
+}
+
+test('an unknown chain is asked for, not reported as misconfiguration', async () => {
+  /*
+   * The defect from the screenshot. Keplr was installed and the app said "The wallet
+   * could not be opened." Keplr's build carried Injective mainnet and not the testnet,
+   * so `enable('injective-888')` threw, and the code treated an unknown chain as the
+   * app being misconfigured instead of calling the one method the extension provides
+   * for exactly this.
+   */
+  clearAll();
+  let suggested = 0;
+  let enableCalls = 0;
+  installKeplr({
+    enable: async () => {
+      enableCalls += 1;
+      // Fails until the chain has been suggested, which is how Keplr behaves.
+      if (suggested === 0) throw new Error('There is no chain info for injective-888');
+    },
+    suggest: async () => {
+      suggested += 1;
+    },
+  });
+
+  const account = await connect('keplr');
+  assert.equal(suggested, 1, 'the chain was never suggested');
+  assert.equal(enableCalls, 2, 'the connection was not retried after suggesting');
+  assert.match(account.address, /^inj1/);
+  // The provider is carried so signing uses this extension rather than a re-lookup.
+  assert.ok(account.provider, 'the account did not carry its provider');
+  clearAll();
+});
+
+test('suggesting is retried, never assumed to have worked', async () => {
+  // Treating `suggestChain` as success without re-enabling would report a connection
+  // that never happened, and the next action would fail with no wallet behind it.
+  clearAll();
+  installKeplr({
+    enable: async () => {
+      throw new Error('There is no chain info for injective-888');
+    },
+    suggest: async () => {},
+  });
+  await assert.rejects(connect('keplr'), /could not add|does not know/);
+  clearAll();
+});
+
+test('declining the add prompt is a choice, not a fault', async () => {
+  clearAll();
+  installKeplr({
+    enable: async () => {
+      throw new Error('There is no chain info for injective-888');
+    },
+    suggest: async () => {
+      throw new Error('Request rejected');
+    },
+  });
+  await assert.rejects(connect('keplr'), /declined adding/);
+  clearAll();
+});
+
+test('an unrecognised failure keeps the wallet"s own words', async () => {
+  /*
+   * The part that made this undiagnosable. Extensions throw strings, plain objects and
+   * Errors interchangeably, and `(e as Error).message` is undefined for two of the
+   * three, so every unexpected failure collapsed into one generic sentence with
+   * nothing behind it.
+   */
+  for (const thrown of [
+    new Error('keystore is locked'),
+    'keystore is locked',
+    { message: 'keystore is locked' },
+    { error: 'keystore is locked' },
+  ]) {
+    clearAll();
+    installKeplr({
+      enable: async () => {
+        throw thrown;
+      },
+    });
+    await assert.rejects(connect('keplr'), (e: unknown) => {
+      const w = e as { detail?: string; message: string };
+      assert.ok(
+        w.detail?.includes('keystore is locked'),
+        `the wallet's words were lost for ${typeof thrown}: ${w.detail}`,
+      );
+      return true;
+    });
+  }
+  clearAll();
+});

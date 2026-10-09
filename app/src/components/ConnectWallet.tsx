@@ -36,7 +36,7 @@ export function ConnectWallet({
   const [balance, setBalance] = useState<bigint | null>(null);
   const [installed, setInstalled] = useState<WalletName[] | null>(null);
   const [open, setOpen] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<{ message: string; detail?: string } | null>(null);
   const [busy, setBusy] = useState<WalletName | null>(null);
   const menuId = useId();
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -121,7 +121,18 @@ export function ConnectWallet({
     } catch (e) {
       // The wallet's own words are for integrators. These are written for the
       // person who just clicked, and a rejection is a choice rather than a fault.
-      setError(e instanceof WalletError ? e.message : 'The wallet could not be opened.');
+      /*
+       * The extension's own words are kept alongside the translated sentence rather
+       * than replacing it or being thrown away. Thrown away is what the first version
+       * did, and a real Keplr failure then showed "The wallet could not be opened."
+       * with nothing behind it: nothing for the user to act on and nothing for me to
+       * diagnose from.
+       */
+      if (e instanceof WalletError) {
+        setError({ message: e.message, detail: e.detail });
+      } else {
+        setError({ message: 'The wallet did not open.', detail: String(e) });
+      }
     } finally {
       setBusy(null);
     }
@@ -194,7 +205,23 @@ export function ConnectWallet({
             </ul>
           )}
 
-          {error && <p className="note danger-text">{error}</p>}
+          {error && (
+            <>
+              <p className="note danger-text">{error.message}</p>
+              {error.detail && (
+                /*
+                 * Behind a disclosure, not in the sentence. An extension's error text
+                 * is written for an integrator and reads as a crash, but it is the
+                 * only thing that identifies an unexpected failure, so it is one click
+                 * away rather than gone.
+                 */
+                <details className="raw">
+                  <summary>What the wallet said</summary>
+                  <pre>{error.detail}</pre>
+                </details>
+              )}
+            </>
+          )}
           <p className="note">
             Connecting shares your public address with this page. It signs nothing.
           </p>
