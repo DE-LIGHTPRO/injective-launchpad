@@ -1,3 +1,4 @@
+import type { LaunchRules } from '@/lib/launchRules';
 import Link from 'next/link';
 import { listLaunches, getLaunchDetail, symbolOf, short, type Launch } from '@/lib/chain';
 import { graduationProgress, fmt } from '@/lib/curve';
@@ -14,6 +15,7 @@ interface Row {
   target: bigint;
   progress: number;
   graduated: boolean;
+  rules: LaunchRules;
 }
 
 async function loadRows(): Promise<{ rows: Row[]; error?: string; errorDetail?: string }> {
@@ -28,6 +30,7 @@ async function loadRows(): Promise<{ rows: Row[]; error?: string; errorDetail?: 
           target: d.config.graduationTarget,
           progress: graduationProgress(d.config, d.state),
           graduated: d.state.graduated,
+          rules: d.rules,
         };
       }),
     );
@@ -55,6 +58,9 @@ function toRow(r: Row): LaunchRow {
     // nulls, so it crosses the server-component boundary without the bigint problem
     // described above.
     profile: r.launch.profile,
+    // The list needs the rules only to label the status honestly; the row stays
+    // serialisable because rules are a bigint-free shape by the time they get here.
+    rules: r.rules,
     raised: r.raised.toString(),
     target: r.target.toString(),
     progress: r.progress,

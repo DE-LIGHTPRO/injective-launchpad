@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   quoteBuy,
   priceImpactBps,
@@ -16,6 +16,7 @@ import {
 } from '@/lib/curve';
 import { NETWORK } from '@/lib/config';
 import { isDemoMode } from '@/lib/demo';
+import { buyingOpenAt, NO_RULES, type LaunchRules } from '@/lib/launchRules';
 
 type Side = 'buy' | 'sell';
 
@@ -30,15 +31,37 @@ export function TradePanel({
   state,
   symbol,
   tradingClosed,
+  rules = NO_RULES,
 }: {
   config: CurveConfig;
   state: CurveState;
   symbol: string;
   tradingClosed: boolean;
+  rules?: LaunchRules;
 }) {
   const [side, setSide] = useState<Side>('buy');
   const [input, setInput] = useState('');
   const [slippagePct, setSlippagePct] = useState(1);
+
+  /*
+   * A launch that has not opened yet gets its own state, and this was missing.
+   *
+   * `buyingOpenAt` existed with six tests and no call site: the panel rendered a live
+   * quote and a button for a launch the contract would refuse at signing, which is the
+   * worst version of this because the price looks real right up to the wallet popup.
+   * Found by sweeping for exported symbols nothing reaches, not by using the page.
+   *
+   * Ticking rather than read once, so the panel opens on its own at the start time. A
+   * state that requires a reload to clear reads as a broken page, and the one minute
+   * after a launch opens is the minute people are actually looking at it.
+   */
+  const [now, setNow] = useState(() => Math.floor(Date.now() / 1000));
+  const notOpenYet = !tradingClosed && !buyingOpenAt(rules, now);
+  useEffect(() => {
+    if (!notOpenYet) return;
+    const id = window.setInterval(() => setNow(Math.floor(Date.now() / 1000)), 1_000);
+    return () => window.clearInterval(id);
+  }, [notOpenYet]);
 
   const quote = useMemo(() => {
     if (!input.trim()) return null;
@@ -88,6 +111,37 @@ export function TradePanel({
       return null;
     }
   }, [quote, config, state, input]);
+
+  if (notOpenYet && rules.tradeStart !== null) {
+    return (
+      <div className="card">
+        <h2>Not open yet</h2>
+        <p className="note">
+          {/*
+              The time is named, and named in UTC. A launch that says only "opens soon"
+              gives nobody a reason to come back at the right moment, and a local time
+              rendered from a server is the server's local time rather than the
+              reader's.
+            */}
+          Buying opens at{' '}
+          <strong>
+            {new Date(rules.tradeStart * 1000).toISOString().slice(0, 16).replace('T', ' ')} UTC
+          </strong>
+          . The curve refuses every buy before then, so there is no advantage to being early.
+        </p>
+        <p className="note">
+          {/*
+              The clock caveat, stated rather than hidden. The contract gates on BLOCK
+              time and this panel reads the browser's, so the two can disagree by a few
+              seconds. Promising the button will work at the exact second would be a
+              claim this page cannot keep.
+            */}
+          The contract gates on block time, so the first block after this may land a few
+          seconds either side.
+        </p>
+      </div>
+    );
+  }
 
   if (tradingClosed) {
     return (

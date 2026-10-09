@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { symbolOf, short } from '@/lib/chain';
 import { TokenLogo } from './TokenLogo';
+import { StatusChip } from './StatusChip';
 import { fmt } from '@/lib/curve';
 import { NETWORK } from '@/lib/config';
 import { selectLaunches, type LaunchRow, type SortKey } from '@/lib/launchList';
@@ -128,9 +129,13 @@ export function LaunchList({ rows }: { rows: LaunchRow[] }) {
                     {symbolOf(r.denom)}
                   </div>
                 </div>
-                <span className={`chip ${r.graduated ? 'warn' : 'accent'}`}>
-                  {r.graduated ? 'graduated' : 'live'}
-                </span>
+                {/*
+                    Status comes from `launchStatus`, never from `graduated` alone.
+                    This chip read "live" on a launch whose start time had not arrived,
+                    which is the most confident possible label on the one state where
+                    the contract refuses every buy.
+                  */}
+                <StatusChip graduated={r.graduated} rules={r.rules} />
               </div>
 
               <div className="bar">

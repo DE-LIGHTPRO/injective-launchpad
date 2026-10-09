@@ -3,6 +3,7 @@ import { getLaunch, getLaunchDetail, symbolOf, short } from '@/lib/chain';
 import { TokenLogo } from '@/components/TokenLogo';
 import { visibleLinks } from '@/lib/tokenProfile';
 import { describeRules, hasAnyRule } from '@/lib/launchRules';
+import { StatusChip } from '@/components/StatusChip';
 import { graduationProgress, fmt, spotPrice, maxCollectable } from '@/lib/curve';
 import { NETWORK, isDeployed, isDevBuild } from '@/lib/config';
 import { isDemoMode } from '@/lib/demo';
@@ -83,9 +84,11 @@ export default async function LaunchPage({ params }: { params: Promise<{ id: str
           <TokenLogo profile={launch.profile} symbol={symbol} size={48} />
           <h1>{symbol}</h1>
         </div>
-        <span className={`chip ${detail.state.graduated ? 'warn' : 'accent'}`}>
-          {detail.state.graduated ? (detail.migrated ? 'migrated' : 'graduated') : 'live'}
-        </span>
+        <StatusChip
+          graduated={detail.state.graduated}
+          migrated={detail.migrated}
+          rules={detail.rules}
+        />
       </div>
       <p className="sub mono" style={{ fontSize: 'var(--text-xs)', wordBreak: 'break-all' }}>
         {detail.denom}
@@ -221,6 +224,7 @@ export default async function LaunchPage({ params }: { params: Promise<{ id: str
           state={detail.state}
           symbol={symbol}
           tradingClosed={detail.state.graduated}
+          rules={detail.rules}
         />
 
       <Trades curve={launch.curve} denom={launch.denom} />

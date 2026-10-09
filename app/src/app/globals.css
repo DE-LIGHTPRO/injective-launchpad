@@ -275,6 +275,12 @@ header.top .spacer { margin-left: auto; }
 }
 .chip.accent { color: var(--accent); border-color: var(--accent-deep); background: var(--accent-wash); }
 .chip.warn { color: var(--warn); border-color: rgba(242, 180, 92, 0.35); }
+/*
+ * A launch that has not opened yet. Deliberately the quietest of the three: it is not
+ * a warning, because nothing is wrong, and not an accent, because accenting it would
+ * compete with the launches somebody can actually trade.
+ */
+.chip.muted { color: var(--text-dim); border-color: var(--line-strong); background: var(--glass-well); }
 
 /* ------------------------------------------------------------- typography -- */
 

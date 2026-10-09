@@ -1,4 +1,5 @@
 import type { TokenProfile } from './tokenProfile.ts';
+import type { LaunchRules } from './launchRules.ts';
 import { symbolOf } from './chain.ts';
 
 /**
@@ -28,6 +29,8 @@ export interface LaunchRow {
   graduated: boolean;
   /** Already normalised by `parseProfile`; the values inside are still untrusted. */
   profile: TokenProfile;
+  /** Needed for the status chip: a launch before its start time is not "live". */
+  rules: LaunchRules;
 }
 
 export interface Selection {

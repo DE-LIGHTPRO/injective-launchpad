@@ -162,3 +162,40 @@ export function describeRules(
       'Enforced by the curve contract on every buy and sell until this launch graduates. Afterwards the token trades on a DEX and these no longer apply. A cap is per address, so it raises the cost of taking the opening cheaply rather than making it impossible.',
   };
 }
+
+/**
+ * What a launch is right now, in one place.
+ *
+ * Three states, not two. The chip said "live" on a launch whose start time had not
+ * arrived, which is a launch the contract refuses every buy on: the most confident
+ * possible label on the one state where it is wrong. The list and the detail page were
+ * each deriving it from `graduated` alone, so fixing one would have left the other.
+ */
+export type LaunchStatus = 'pending' | 'live' | 'graduated' | 'migrated';
+
+export function launchStatus(opts: {
+  graduated: boolean;
+  migrated?: boolean;
+  rules: LaunchRules;
+  nowSeconds: number;
+}): LaunchStatus {
+  // Graduation wins: a launch that reached its target is past its start time by
+  // definition, and reporting "pending" there would be nonsense.
+  if (opts.graduated) return opts.migrated ? 'migrated' : 'graduated';
+  return buyingOpenAt(opts.rules, opts.nowSeconds) ? 'live' : 'pending';
+}
+
+/** The chip's words, and the tone that goes with them. */
+export function statusLabel(s: LaunchStatus): { text: string; tone: 'accent' | 'warn' | 'muted' } {
+  switch (s) {
+    case 'pending':
+      // Not "coming soon": that is marketing. This says what the contract does.
+      return { text: 'not open yet', tone: 'muted' };
+    case 'live':
+      return { text: 'live', tone: 'accent' };
+    case 'graduated':
+      return { text: 'graduated', tone: 'warn' };
+    case 'migrated':
+      return { text: 'migrated', tone: 'warn' };
+  }
+}

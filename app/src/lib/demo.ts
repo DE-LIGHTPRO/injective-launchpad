@@ -107,7 +107,16 @@ export function demoDetail(id: number): LaunchDetail | null {
     rules:
       seed.symbol === 'KAIJU'
         ? { maxPerWallet: amt(5_000_000n), tradeStart: null }
-        : NO_RULES,
+        : seed.symbol === 'SOLARIS'
+          ? /*
+             * Opens in an hour from whenever the page is rendered, so the "not open
+             * yet" panel is visible in the demo instead of only existing in a test.
+             * Relative rather than a fixed date: a hardcoded timestamp quietly passes
+             * and the state stops being reachable, which is how a branch nobody can
+             * see gets broken without anyone noticing.
+             */
+            { maxPerWallet: null, tradeStart: Math.floor(Date.now() / 1000) + 3600 }
+          : NO_RULES,
     config: BASE_CONFIG,
     state,
     migrated: state.graduated,

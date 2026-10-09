@@ -1,4 +1,5 @@
 import { EMPTY_PROFILE } from './tokenProfile.ts';
+import { NO_RULES } from './launchRules.ts';
 /**
  * Search, sort and filter for the launch index.
  *
@@ -30,6 +31,8 @@ const row = (
   creator,
   // Selection has no opinion about identity, so the fixture carries none.
   profile: EMPTY_PROFILE,
+  // Selection has no opinion about rules either; the status chip reads them, not this.
+  rules: NO_RULES,
   raised: (raisedInj * ONE).toString(),
   target: (100n * ONE).toString(),
   progress,

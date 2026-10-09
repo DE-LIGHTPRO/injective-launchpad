@@ -21,6 +21,8 @@ import {
   hasAnyRule,
   describeRules,
   NO_RULES,
+  launchStatus,
+  statusLabel,
 } from './launchRules.ts';
 
 const ONE = 10n ** 18n;
@@ -168,4 +170,39 @@ test('no rules means nothing is described', () => {
   assert.equal(hasAnyRule(NO_RULES), false);
   assert.equal(hasAnyRule({ maxPerWallet: null, tradeStart: 1 }), true);
   assert.equal(hasAnyRule({ maxPerWallet: 1n, tradeStart: null }), true);
+});
+
+test('a launch before its start time is not live', () => {
+  /*
+   * The defect this exists for shipped and was found by audit, not by use. Both the
+   * list and the detail page derived the chip from `graduated` alone, so a launch whose
+   * start time had not arrived was labelled "live": the most confident possible word on
+   * the one state where the contract refuses every buy.
+   */
+  const pending = { maxPerWallet: null, tradeStart: 2_000 };
+  assert.equal(launchStatus({ graduated: false, rules: pending, nowSeconds: 1_999 }), 'pending');
+  assert.equal(launchStatus({ graduated: false, rules: pending, nowSeconds: 2_000 }), 'live');
+  assert.equal(launchStatus({ graduated: false, rules: NO_RULES, nowSeconds: 0 }), 'live');
+});
+
+test('graduation outranks a start time', () => {
+  // A launch that reached its target is past its start by definition, so reporting
+  // "pending" there would be nonsense produced by checking the rules first.
+  const weird = { maxPerWallet: null, tradeStart: 9_999_999_999 };
+  assert.equal(launchStatus({ graduated: true, rules: weird, nowSeconds: 0 }), 'graduated');
+  assert.equal(
+    launchStatus({ graduated: true, migrated: true, rules: weird, nowSeconds: 0 }),
+    'migrated',
+  );
+});
+
+test('the pending label says what the contract does, not what marketing would', () => {
+  // "Coming soon" is a promise; "not open yet" is a description of the gate. And the
+  // tone is muted rather than accent, so a launch nobody can trade does not compete
+  // with the ones they can.
+  const { text, tone } = statusLabel('pending');
+  assert.equal(text, 'not open yet');
+  assert.equal(tone, 'muted');
+  assert.equal(statusLabel('live').tone, 'accent');
+  assert.equal(statusLabel('graduated').tone, 'warn');
 });
