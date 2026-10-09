@@ -29,6 +29,15 @@ export interface WalletAccount {
   address: string;
   /** The label the extension shows for this account. */
   label: string;
+  /**
+   * The injected object this account came from.
+   *
+   * Carried rather than looked up again at signing time, because a browser can have
+   * several of these installed and re-reading `window.keplr` would sign with whichever
+   * one is there instead of the one the user chose. With five wallets offered that is
+   * not hypothetical.
+   */
+  provider: unknown;
 }
 
 export class WalletError extends Error {
@@ -195,7 +204,7 @@ export async function connect(name: WalletName): Promise<WalletAccount> {
     );
   }
 
-  return { name, address: key.bech32Address, label: key.name || 'Account' };
+  return { name, address: key.bech32Address, label: key.name || 'Account', provider: ext };
 }
 
 /**

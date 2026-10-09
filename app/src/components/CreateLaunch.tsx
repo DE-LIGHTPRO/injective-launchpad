@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { ConnectWallet } from './ConnectWallet';
 import { CurveChart } from './CurveChart';
 import {
@@ -69,6 +69,10 @@ export function CreateLaunch() {
   const [f, setF] = useState(DEFAULTS);
   const [account, setAccount] = useState<WalletAccount | null>(null);
   const [confirmed, setConfirmed] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<string | null>(null);
+  const [signError, setSignError] = useState<string | null>(null);
+
   const set = (k: keyof typeof DEFAULTS) => (v: string) => setF((p) => ({ ...p, [k]: v }));
 
   /*
@@ -207,6 +211,35 @@ export function CreateLaunch() {
   );
   const ruleError = (field: 'maxPerWallet' | 'tradeStart' | 'earlyFee') =>
     ruleProblems.find((p) => p.field === field)?.message ?? null;
+
+  /*
+   * Signing, behind the confirmation the user already ticked.
+   *
+   * `busy` guards re-entry rather than relying on the button's `disabled`: a second
+   * click landing while the first prompt is open produces a second transaction with
+   * the same sequence number, and the chain rejects one of them after both have been
+   * approved. That reads as a launch failing at random.
+   */
+  const sign = useCallback(async () => {
+    if (!account || busy) return;
+    if (plan === null || !('plan' in plan)) return;
+    setBusy(true);
+    setSignError(null);
+    try {
+      const { broadcastLaunch } = await import('@/lib/broadcast');
+      const { txHash } = await broadcastLaunch({
+        plan: plan.plan,
+        sender: account.address,
+        wallet: account.provider,
+      });
+      setResult(txHash);
+    } catch (e) {
+      const err = e as Error & { kind?: string };
+      setSignError(err.message || 'The launch could not be signed.');
+    } finally {
+      setBusy(false);
+    }
+  }, [account, busy, plan]);
 
   const fresh: CurveState = { injCollected: 0n, tokensSold: 0n, graduated: false };
   // A rule problem blocks the plan as firmly as a bad curve does. Both are permanent
@@ -546,7 +579,7 @@ export function CreateLaunch() {
             </ul>
 
             <details className="raw">
-              <summary>The four messages, exactly as they would be sent</summary>
+              <summary>The four messages, exactly as they will be sent</summary>
               <pre>{JSON.stringify(plan.plan.messages, null, 2)}</pre>
             </details>
 
@@ -563,20 +596,43 @@ export function CreateLaunch() {
               </span>
             </label>
 
-            {/*
-                The button states the blocker instead of offering an action that
-                cannot complete. A quote can be real and still not executable, and
-                the honest move is to say which.
-              */}
-            <button className="go" disabled>
-              Broadcasting is not wired up yet
+            <button
+              className="go"
+              disabled={!confirmed || busy}
+              onClick={() => void sign()}
+            >
+              {busy ? 'Waiting for your wallet…' : `Create ${f.symbol.trim() || 'launch'}`}
             </button>
+
+            {result && (
+              <p className="note">
+                Launch created.{' '}
+                <a
+                  href={`${NETWORK.explorer}/transaction/${result}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  View the transaction
+                </a>
+                .
+              </p>
+            )}
+            {signError && <p className="note err-text">{signError}</p>}
+
+            {/*
+                THE HONEST LABEL, and it is not a disclaimer to delete once this looks
+                like it works. The messages are built by a tested function and shown
+                above exactly as they will be sent, but the ENCODING has never run
+                against a node, and I cannot run it: that needs a wallet extension.
+                What makes it safe to offer anyway is that all four messages are one
+                transaction, so a mis-built launch is a rejected transaction rather
+                than a denom created with no curve behind it, and the factory refuses
+                any attached amount but the exact supply.
+              */}
             <p className="note">
-              The messages above are built and tested against the contract&rsquo;s own
-              expectations, but they have never been signed against a chain. Signing needs
-              Injective&rsquo;s protobuf types and a wallet to exercise them, and shipping a
-              transaction builder nobody has run is how a launch ends up sending the wrong
-              thing. Use them with <code>injectived tx</code> in the meantime.
+              This signing path has not yet been run against a chain. All four messages
+              go in a single transaction, so if anything is wrong the chain refuses the
+              whole thing and nothing is created. Try it on testnet first.
             </p>
           </>
         )}
