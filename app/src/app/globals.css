@@ -396,6 +396,22 @@ a.card:focus-visible { border-color: var(--accent-deep); }
   word-break: break-all;
 }
 
+/*
+ * One line inside a card, whatever the denom's length.
+ *
+ * `word-break: break-all` is right on the detail page, where the full denom is worth
+ * reading and there is room for it. In a grid of cards it made every header a different
+ * height, because a denom wraps to three or four lines depending on where the creator
+ * address happens to break. The full value is still in the `title` and on the detail
+ * page, and search covers it either way.
+ */
+.card .denom {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  word-break: normal;
+}
+
 .bar {
   height: 6px;
   background: var(--surface-3);

@@ -211,6 +211,27 @@ export function short(addr: string, keep = 6): string {
   return `${addr.slice(0, keep)}…${addr.slice(-keep)}`;
 }
 
+/**
+ * A factory denom shortened for a list, keeping the part that identifies it.
+ *
+ * `factory/<creator>/<subdenom>` is around 60 characters, and a plain `short()` would
+ * cut the middle out of the whole string and take the subdenom with it, leaving every
+ * row looking alike. The creator address is the long part and the only part worth
+ * eliding; the subdenom is the name, and the `factory/` prefix is what says this is a
+ * tokenfactory denom rather than a contract.
+ *
+ * Added because the token logo took the width the denom had been wrapping into, so the
+ * card headers went to four lines of monospace of differing heights. Truncating to one
+ * line is the fix; truncating the wrong end would have been a different defect.
+ */
+export function shortDenom(denom: string, keep = 6): string {
+  const parts = denom.split('/');
+  // Not a factory denom: nothing structural to keep, so fall back to the generic form.
+  if (parts.length < 3) return short(denom, keep);
+  const [prefix, creator, ...rest] = parts;
+  return `${prefix}/${short(creator, keep)}/${rest.join('/')}`;
+}
+
 /** A token denom's display symbol, pulled from the tokenfactory subdenom. */
 export function symbolOf(denom: string): string {
   const parts = denom.split('/');

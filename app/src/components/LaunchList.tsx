@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
-import { symbolOf, short } from '@/lib/chain';
+import { symbolOf, short, shortDenom } from '@/lib/chain';
 import { TokenLogo } from './TokenLogo';
 import { fmt } from '@/lib/curve';
 import { NETWORK } from '@/lib/config';
@@ -116,7 +116,7 @@ export function LaunchList({ rows }: { rows: LaunchRow[] }) {
                   <TokenLogo profile={r.profile} symbol={symbolOf(r.denom)} size={40} />
                   <div style={{ minWidth: 0 }}>
                     <div className="sym">{symbolOf(r.denom)}</div>
-                    <div className="denom mono">{r.denom}</div>
+                    <div className="denom mono" title={r.denom}>{shortDenom(r.denom)}</div>
                   </div>
                 </div>
                 <span className={`chip ${r.graduated ? 'warn' : 'accent'}`}>
