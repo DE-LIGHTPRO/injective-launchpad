@@ -504,7 +504,7 @@ input.amount:focus { outline: none; border-color: var(--accent-deep); box-shadow
   pointer-events: none;
 }
 
-button.go {
+.go {
   width: 100%;
   margin-top: var(--space-4);
   background: var(--accent);
@@ -518,15 +518,15 @@ button.go {
   cursor: pointer;
   transition: filter 0.18s var(--ease);
 }
-button.go { box-shadow: 0 1px 0 0 rgba(255, 255, 255, 0.22) inset, 0 8px 20px -10px rgba(20, 226, 173, 0.5); }
-button.go:hover:not(:disabled) { filter: brightness(1.08); }
-button.go:disabled { background: var(--surface-3); color: var(--text-faint); cursor: not-allowed; }
-button.go.ghost {
+.go { box-shadow: 0 1px 0 0 rgba(255, 255, 255, 0.22) inset, 0 8px 20px -10px rgba(20, 226, 173, 0.5); }
+.go:hover:not(:disabled) { filter: brightness(1.08); }
+.go:disabled { background: var(--surface-3); color: var(--text-faint); cursor: not-allowed; }
+.go.ghost {
   background: transparent;
   border: 1px solid var(--line-strong);
   color: var(--text);
 }
-button.go.ghost:hover:not(:disabled) { border-color: var(--accent-deep); }
+.go.ghost:hover:not(:disabled) { border-color: var(--accent-deep); }
 
 .quote-box {
   background: var(--surface-3);
@@ -925,6 +925,78 @@ button.ghost { background: transparent; border: 1px solid var(--line); color: va
 .spark-change.up { color: var(--accent); }
 .spark-change.down { color: var(--danger); }
 .spark-foot { display: flex; justify-content: space-between; font-size: var(--text-micro); color: var(--text-faint); }
+
+/* ---------------------------------------------------------------- the curve -- */
+
+/*
+ * The curve is this product's identity, so it gets the space a decorative header
+ * would have taken and earns it by being real data.
+ */
+.curve-glyph { display: block; width: 100%; }
+
+.card-curve {
+  margin-top: var(--space-4);
+  /* Its own recessed well, so the shape reads as a readout rather than as a
+     background flourish sitting loose on the card. */
+  background: var(--glass-well);
+  box-shadow: var(--glass-well-inset);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-1);
+  overflow: hidden;
+}
+
+/* The progress bar survives, demoted: still worth a glance, no longer the thing that
+   distinguishes one launch from another. */
+.bar-thin { height: 3px; margin-top: var(--space-2); }
+
+/* The empty state of a live launchpad, which is currently the whole front page. */
+.empty-hero {
+  text-align: center;
+  padding: var(--space-7) var(--space-5);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+  background: var(--glass-fill);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  box-shadow: var(--glass-shadow);
+}
+.empty-hero .curve-glyph {
+  /* Wide enough that the flat opening of the curve is visible. At 24rem the first
+     half was a line indistinguishable from the baseline and the shape read as a
+     fragment starting in mid-air. */
+  max-width: 40rem;
+  margin: 0 auto var(--space-5);
+  opacity: 0.9;
+}
+.empty-hero h2 { margin-bottom: var(--space-2); }
+.empty-hero .note { max-width: 34rem; margin: 0 auto; }
+.empty-cta {
+  display: inline-block;
+  margin-top: var(--space-5);
+  width: auto;
+  text-decoration: none;
+}
+
+/*
+ * `.go` is scoped to the CLASS, not to `button`.
+ *
+ * It was `button.go`, so a `<Link>` carrying it rendered as plain text: the
+ * "Create the first launch" call to action on the empty state was an unstyled
+ * sentence. Same shape as `button` having had no base rule at all. A primary
+ * action is sometimes a link and sometimes a button, and the style belongs to
+ * what it IS rather than to which element draws it.
+ */
+.go {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+}
+
+/* The mark sits with the wordmark, optically aligned to its baseline. */
+.brand-mark { flex: none; }
+header.top .brand { display: inline-flex; align-items: center; gap: var(--space-2); }
 
 /* ------------------------------------------------------------ token identity -- */
 

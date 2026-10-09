@@ -31,6 +31,21 @@ export interface LaunchRow {
   profile: TokenProfile;
   /** Needed for the status chip: a launch before its start time is not "live". */
   rules: LaunchRules;
+  /**
+   * The curve's own numbers, as decimal strings.
+   *
+   * Strings because a bigint cannot cross the server-component boundary: passing one
+   * throws at render, and passing it as a Number silently loses the low digits at 18
+   * decimals, which is the quieter failure and the worse one.
+   */
+  curve: {
+    virtualInj: string;
+    virtualTokens: string;
+    curveSupply: string;
+    graduationTarget: string;
+    feeBps: string;
+  };
+  tokensSold: string;
 }
 
 export interface Selection {

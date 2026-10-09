@@ -1,3 +1,4 @@
+import { BrandMark } from '@/components/BrandMark';
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { NETWORK } from '@/lib/config';
@@ -17,7 +18,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <header className="top">
           <div className="wrap inner">
             <Link href="/" className="brand">
-              inj<em>·</em>pad
+              <BrandMark />
+              <span>
+                inj<em>·</em>pad
+              </span>
             </Link>
             <Link href="/create" className="nav-create">
               Create

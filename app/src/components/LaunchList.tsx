@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { symbolOf, short } from '@/lib/chain';
 import { TokenLogo } from './TokenLogo';
 import { StatusChip } from './StatusChip';
+import { CurveGlyph } from './CurveGlyph';
 import { fmt } from '@/lib/curve';
 import { NETWORK } from '@/lib/config';
 import { selectLaunches, type LaunchRow, type SortKey } from '@/lib/launchList';
@@ -138,7 +139,31 @@ export function LaunchList({ rows }: { rows: LaunchRow[] }) {
                 <StatusChip graduated={r.graduated} rules={r.rules} />
               </div>
 
-              <div className="bar">
+              {/*
+                  The curve, not a progress bar. Two launches at 40% show the same bar
+                  and completely different curves, and the shape is what tells a buyer
+                  whether the next purchase costs sharply more. The bar stays beneath
+                  it, thinner: progress is still worth a glance, it just is not the
+                  thing that distinguishes one launch from another.
+                */}
+              <div className="card-curve">
+                <CurveGlyph
+                  config={{
+                    virtualInj: BigInt(r.curve.virtualInj),
+                    virtualTokens: BigInt(r.curve.virtualTokens),
+                    curveSupply: BigInt(r.curve.curveSupply),
+                    graduationTarget: BigInt(r.curve.graduationTarget),
+                    feeBps: BigInt(r.curve.feeBps),
+                  }}
+                  state={{
+                    injCollected: BigInt(r.raised),
+                    tokensSold: BigInt(r.tokensSold),
+                    graduated: r.graduated,
+                  }}
+                  height={48}
+                />
+              </div>
+              <div className="bar bar-thin">
                 <i style={{ width: `${Math.min(100, r.progress * 100).toFixed(1)}%` }} />
               </div>
 

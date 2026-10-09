@@ -33,6 +33,16 @@ const row = (
   profile: EMPTY_PROFILE,
   // Selection has no opinion about rules either; the status chip reads them, not this.
   rules: NO_RULES,
+  // Selection sorts and filters; it has no opinion about curve shape, so the fixture
+  // carries the smallest thing that satisfies the type.
+  curve: {
+    virtualInj: '0',
+    virtualTokens: '0',
+    curveSupply: '0',
+    graduationTarget: '0',
+    feeBps: '0',
+  },
+  tokensSold: '0',
   raised: (raisedInj * ONE).toString(),
   target: (100n * ONE).toString(),
   progress,
