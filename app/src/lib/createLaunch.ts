@@ -76,6 +76,13 @@ export interface LaunchInput {
    * because these end up as `href` and `src` in a browser.
    */
   profile?: Record<string, string>;
+  /**
+   * Trading rules the curve enforces until graduation. Absent means an open launch.
+   *
+   * Validated by `validateRules` before the plan is built and by the contract again.
+   * Never described to a user as a property of the token: see `launchRules.ts`.
+   */
+  rules?: Record<string, string>;
   curve: CurveConfig;
   lpReserve: bigint;
   creatorFeeShareBps: number;
@@ -83,7 +90,14 @@ export interface LaunchInput {
 }
 
 export class LaunchInputError extends Error {
-  readonly field: keyof LaunchInput | 'symbol' | 'lpReserve' | 'creatorFeeShareBps' | 'curve' | 'profile';
+  readonly field:
+    | keyof LaunchInput
+    | 'symbol'
+    | 'lpReserve'
+    | 'creatorFeeShareBps'
+    | 'curve'
+    | 'profile'
+    | 'rules';
   constructor(field: LaunchInputError['field'], message: string) {
     super(message);
     this.name = 'LaunchInputError';
@@ -260,6 +274,9 @@ export function planLaunch(input: LaunchInput): LaunchPlan {
               ...(input.profile && Object.keys(input.profile).length > 0
                 ? { profile: input.profile }
                 : {}),
+              // Same treatment: omitted when empty, so a launch with no rules sends
+              // nothing rather than a zero cap the contract would refuse.
+              ...(input.rules && Object.keys(input.rules).length > 0 ? { rules: input.rules } : {}),
               lp_reserve: input.lpReserve.toString(),
               creator_fee_share_bps: input.creatorFeeShareBps,
               curve: curveMsg,

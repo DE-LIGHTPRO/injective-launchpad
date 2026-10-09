@@ -16,7 +16,7 @@ use launchpad_math::CurveConfig;
 use thiserror::Error;
 
 use curve::msg::InstantiateMsg as CurveInstantiateMsg;
-use curve::state::CurveConfigStored;
+use curve::state::{CurveConfigStored, LaunchRules};
 
 /// Submessage id for the curve instantiate we are waiting on.
 const REPLY_INSTANTIATE_CURVE: u64 = 1;
@@ -34,6 +34,11 @@ pub enum FactoryError {
 
     #[error("{0}")]
     Curve(#[from] launchpad_math::CurveError),
+
+    /// The same type the curve raises, so the sentence a creator reads is identical
+    /// whichever contract refused the launch.
+    #[error("{0}")]
+    Rule(#[from] curve::state::RuleError),
 
     #[error("unauthorised")]
     Unauthorised,
@@ -226,6 +231,10 @@ pub enum ExecuteMsg {
         /// honest, where a token with a broken one is not.
         #[serde(default)]
         profile: TokenProfile,
+        /// Trading rules the curve enforces until graduation. Absent means an open
+        /// launch, which is what every launch before this field existed was.
+        #[serde(default)]
+        rules: LaunchRules,
     },
     /// Point the factory at a new curve code id. Only affects future launches;
     /// existing ones are immutable by construction.
@@ -289,6 +298,7 @@ pub fn execute(
             creator_fee_share_bps,
             curve,
             profile,
+            rules,
         } => create_launch(
             deps,
             env,
@@ -298,6 +308,7 @@ pub fn execute(
             creator_fee_share_bps,
             curve,
             profile,
+            rules,
         ),
         ExecuteMsg::SetCurveCodeId { code_id } => {
             let mut cfg = CONFIG.load(deps.storage)?;
@@ -332,6 +343,7 @@ fn create_launch(
     creator_fee_share_bps: u16,
     curve: CurveConfigStored,
     profile: TokenProfile,
+    rules: LaunchRules,
 ) -> Result<Response, FactoryError> {
     let cfg = CONFIG.load(deps.storage)?;
 
@@ -375,7 +387,15 @@ fn create_launch(
         },
     )?;
 
+    /*
+     * Validated here as well as in the curve, for the same reason the curve config is:
+     * failing early means a bad launch never consumes a reply slot or an id, and the
+     * creator sees which rule was wrong rather than a submessage failure.
+     */
+    rules.validate(curve.curve_supply)?;
+
     let init = CurveInstantiateMsg {
+        rules,
         denom: denom.clone(),
         quote_denom: cfg.quote_denom.clone(),
         creator: info.sender.to_string(),

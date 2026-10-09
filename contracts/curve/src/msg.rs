@@ -1,6 +1,7 @@
 use cosmwasm_schema::{cw_serde, QueryResponses};
 use cosmwasm_std::Uint128;
 
+use crate::state::LaunchRules;
 use crate::state::{Config, CurveConfigStored, State};
 
 #[cw_serde]
@@ -18,6 +19,10 @@ pub struct InstantiateMsg {
     pub lp_reserve: Uint128,
     pub creator_fee_share_bps: u16,
     pub curve: CurveConfigStored,
+    /// Trading rules. Absent means an open launch with no cap and no start time,
+    /// which is what a launch created before this field existed had.
+    #[serde(default)]
+    pub rules: LaunchRules,
 }
 
 #[cw_serde]

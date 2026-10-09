@@ -13,6 +13,7 @@
  */
 
 import { EMPTY_PROFILE } from './tokenProfile.ts';
+import { NO_RULES } from './launchRules.ts';
 import { quoteBuy, type CurveConfig, type CurveState } from './curve.ts';
 import type { Launch, LaunchDetail } from './chain.ts';
 
@@ -97,6 +98,16 @@ export function demoDetail(id: number): LaunchDetail | null {
     quoteDenom: 'inj',
     creator: seed.creator,
     lpReserve: amt(200_000_000n),
+    /*
+     * KAIJU carries a cap so the rules panel is exercised in the demo; the rest are
+     * open. A demo where every launch looks identical hides the half of the UI that
+     * only appears when a rule exists, which is how an unstyled or unwired panel
+     * ships: nobody ever sees it locally.
+     */
+    rules:
+      seed.symbol === 'KAIJU'
+        ? { maxPerWallet: amt(5_000_000n), tradeStart: null }
+        : NO_RULES,
     config: BASE_CONFIG,
     state,
     migrated: state.graduated,

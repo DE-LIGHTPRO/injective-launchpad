@@ -34,6 +34,24 @@ pub enum ContractError {
     #[error("creator fee share is {got} bps, maximum is 10000")]
     BadFeeShare { got: u16 },
 
+    #[error("{0}")]
+    Rule(#[from] crate::state::RuleError),
+
+    /// Names the cap and what the buyer already holds, because "too much" without the
+    /// two numbers leaves them guessing how much smaller to make the order.
+    #[error("this launch caps a wallet at {cap} tokens from the curve; you hold {held} and this buy would add {adding}")]
+    WalletCapExceeded {
+        cap: cosmwasm_std::Uint128,
+        held: cosmwasm_std::Uint128,
+        adding: cosmwasm_std::Uint128,
+    },
+
+    #[error("trading opens at {start}; the current block time is {now}")]
+    NotOpenYet {
+        start: cosmwasm_std::Timestamp,
+        now: cosmwasm_std::Timestamp,
+    },
+
     #[error("trading has closed; this launch has graduated")]
     Graduated,
 

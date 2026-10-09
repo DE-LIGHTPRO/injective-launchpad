@@ -121,6 +121,16 @@ impl Fx {
     }
 
     fn create_with(&mut self, denom: &str, profile: TokenProfile) -> anyhow::Result<()> {
+        // An open launch: no cap, no start time.
+        self.create_full(denom, profile, Default::default())
+    }
+
+    fn create_full(
+        &mut self,
+        denom: &str,
+        profile: TokenProfile,
+        rules: LaunchRules,
+    ) -> anyhow::Result<()> {
         self.app
             .execute_contract(
                 self.creator.clone(),
@@ -131,6 +141,7 @@ impl Fx {
                     creator_fee_share_bps: 5_000,
                     curve: curve_cfg(),
                     profile,
+                    rules,
                 },
                 &coins(seed_total().u128(), denom),
             )
@@ -222,6 +233,7 @@ fn wrong_seed_amount_is_refused() {
         f.factory.clone(),
         &ExecuteMsg::CreateLaunch {
             profile: Default::default(),
+            rules: Default::default(),
             denom: TOKEN.into(),
             lp_reserve: lp_reserve(),
             creator_fee_share_bps: 0,
@@ -245,6 +257,7 @@ fn an_unreachable_graduation_target_is_refused_at_creation() {
         f.factory.clone(),
         &ExecuteMsg::CreateLaunch {
             profile: Default::default(),
+            rules: Default::default(),
             denom: TOKEN.into(),
             lp_reserve: lp_reserve(),
             creator_fee_share_bps: 0,
@@ -322,6 +335,7 @@ fn only_admin_can_repoint_the_curve_code() {
 
 // ---------------------------------------------------------------- token profile --
 
+use curve::state::LaunchRules;
 use factory::{TokenProfile, MAX_URI_LEN};
 
 fn profile_with(field: &str, value: &str) -> TokenProfile {

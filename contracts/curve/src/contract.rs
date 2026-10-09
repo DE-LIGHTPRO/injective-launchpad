@@ -9,7 +9,7 @@ use crate::msg::{
     ExecuteMsg, InstantiateMsg, QueryMsg, SimulateBuyResponse, SimulateSellResponse,
     SpotPriceResponse,
 };
-use crate::state::{Config, State, CONFIG, STATE};
+use crate::state::{PURCHASED, Config, State, CONFIG, STATE};
 
 const BPS: u128 = 10_000;
 
@@ -31,6 +31,9 @@ pub fn instantiate(
 
     let curve: CurveConfig = (&msg.curve).into();
     curve.validate()?;
+    // Before the seed is checked, so a launch with a rule that can never bind is
+    // refused before the creator's whole supply has moved anywhere.
+    msg.rules.validate(msg.curve.curve_supply)?;
 
     // The launch is funded here and only here: the creator sends the entire
     // sellable supply up front. Nothing mints later, so the curve can never
@@ -55,6 +58,7 @@ pub fn instantiate(
         lp_reserve: msg.lp_reserve,
         creator_fee_share_bps: msg.creator_fee_share_bps,
         curve: msg.curve,
+        rules: msg.rules,
     };
     CONFIG.save(deps.storage, &cfg)?;
     STATE.save(deps.storage, &State::default())?;
@@ -74,7 +78,7 @@ pub fn execute(
     msg: ExecuteMsg,
 ) -> Result<Response, ContractError> {
     match msg {
-        ExecuteMsg::Buy { min_tokens_out } => exec_buy(deps, info, min_tokens_out),
+        ExecuteMsg::Buy { min_tokens_out } => exec_buy(deps, env, info, min_tokens_out),
         ExecuteMsg::Sell { min_inj_out } => exec_sell(deps, info, min_inj_out),
         ExecuteMsg::Graduate {} => exec_graduate(deps, env),
         ExecuteMsg::ClaimFees {} => exec_claim_fees(deps),
@@ -91,6 +95,7 @@ fn split_fee(fee: Uint128, creator_share_bps: u16) -> (Uint128, Uint128) {
 
 fn exec_buy(
     deps: DepsMut,
+    env: Env,
     info: MessageInfo,
     min_tokens_out: Uint128,
 ) -> Result<Response, ContractError> {
@@ -98,6 +103,21 @@ fn exec_buy(
     let mut state = STATE.load(deps.storage)?;
     if state.graduated {
         return Err(ContractError::Graduated);
+    }
+
+    /*
+     * Before anything is quoted or any funds are counted.
+     *
+     * A start-time check placed after the quote would still refuse the trade, and it
+     * would do so having already done work, with an error that arrives after the UI has
+     * shown the buyer a price. Refusing first means the panel can say "not open yet"
+     * rather than quoting something nobody can take.
+     */
+    if !cfg.rules.buying_open_at(env.block.time) {
+        return Err(ContractError::NotOpenYet {
+            start: cfg.rules.trade_start.expect("a closed launch has a start time"),
+            now: env.block.time,
+        });
     }
 
     let inj_in = cw_utils::must_pay(&info, &cfg.quote_denom)?;
@@ -112,6 +132,30 @@ fn exec_buy(
     }
 
     let (creator_cut, platform_cut) = split_fee(q.fee, cfg.creator_fee_share_bps);
+
+    /*
+     * The cap is checked against what the quote would actually deliver, not against
+     * what was paid.
+     *
+     * Those differ: the curve refunds whatever the buy cannot absorb, so an order sized
+     * in quote is not an order sized in tokens. Checking the payment would cap the wrong
+     * quantity and would get it wrong by more the steeper the curve is, which is exactly
+     * where the rule is supposed to bite.
+     */
+    if let Some(cap) = cfg.rules.max_per_wallet {
+        let held = PURCHASED
+            .may_load(deps.storage, &info.sender)?
+            .unwrap_or_default();
+        let after = held.checked_add(q.tokens_out)?;
+        if cfg.rules.would_exceed_cap(held, q.tokens_out) {
+            return Err(ContractError::WalletCapExceeded {
+                cap,
+                held,
+                adding: q.tokens_out,
+            });
+        }
+        PURCHASED.save(deps.storage, &info.sender, &after)?;
+    }
 
     // Effects before interactions: state is written before any funds move.
     state.inj_collected = state.inj_collected.checked_add(q.inj_in_after_fee)?;
@@ -175,6 +219,27 @@ fn exec_sell(
     let (creator_cut, platform_cut) = split_fee(q.fee, cfg.creator_fee_share_bps);
 
     state.inj_collected = state.inj_collected.checked_sub(gross)?;
+    /*
+     * Selling frees allowance, and that choice is the whole semantics of the cap.
+     *
+     * Counted as buys minus sells, the cap limits what one address holds through the
+     * curve AT ONCE, which is the quantity that competes with other buyers for the
+     * opening price. Not decrementing would instead make it a lifetime quota, so anyone
+     * who sold a single token could never buy back in, and a rule that punishes exiting
+     * is a rule that traps people.
+     *
+     * Saturating rather than checked, deliberately: a seller can hold tokens this curve
+     * never sold them, bought from someone else or received as a transfer, so selling
+     * more than the recorded figure is ordinary and must not abort the trade. The floor
+     * is zero.
+     */
+    if cfg.rules.max_per_wallet.is_some() {
+        let held = PURCHASED
+            .may_load(deps.storage, &info.sender)?
+            .unwrap_or_default();
+        PURCHASED.save(deps.storage, &info.sender, &held.saturating_sub(tokens_in))?;
+    }
+
     state.tokens_sold = state.tokens_sold.checked_sub(tokens_in)?;
     state.creator_owed = state.creator_owed.checked_add(creator_cut)?;
     state.platform_owed = state.platform_owed.checked_add(platform_cut)?;
@@ -371,6 +436,9 @@ mod tests {
         let who = deps.api.addr_make("creator");
         let seed = curve_cfg().curve_supply.u128() + LP_RESERVE;
         let msg = InstantiateMsg {
+            // An open launch: no cap, no start time. The default path,
+            // and the one every existing test was written against.
+            rules: Default::default(),
             denom: TOKEN.to_string(),
             quote_denom: QUOTE.to_string(),
             creator: who.to_string(),
@@ -392,6 +460,9 @@ mod tests {
         let mut deps = mock_dependencies();
         let who = deps.api.addr_make("creator");
         let msg = InstantiateMsg {
+            // An open launch: no cap, no start time. The default path,
+            // and the one every existing test was written against.
+            rules: Default::default(),
             denom: QUOTE.to_string(),
             quote_denom: QUOTE.to_string(),
             creator: who.to_string(),

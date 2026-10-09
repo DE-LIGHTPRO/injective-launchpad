@@ -9,6 +9,7 @@
  */
 
 import { parseProfile, type TokenProfile } from './tokenProfile.ts';
+import { parseRules, type LaunchRules } from './launchRules.ts';
 import { NETWORK, getLcdUrl, getFactoryAddress } from './config.ts';
 import { isDemoMode, demoLaunches, demoDetail, demoDetailByCurve } from './demo.ts';
 import type { CurveConfig, CurveState } from './curve.ts';
@@ -170,6 +171,8 @@ export interface LaunchDetail {
   migrated: boolean;
   platformOwed: bigint;
   creatorOwed: bigint;
+  /** Normalised; `NO_RULES` for a launch that has none. */
+  rules: LaunchRules;
 }
 
 /** Everything the trade panel needs, in one place and already in bigint. */
@@ -195,6 +198,7 @@ export async function getLaunchDetail(curveAddress: string): Promise<LaunchDetai
       tokensSold: BigInt(st.tokens_sold),
       graduated: st.graduated,
     },
+    rules: parseRules((cfg as { rules?: unknown }).rules),
     migrated: st.migrated,
     platformOwed: BigInt(st.platform_owed),
     creatorOwed: BigInt(st.creator_owed),

@@ -13,6 +13,7 @@ import { parseAmount, fmt, maxCollectable, type CurveConfig, type CurveState } f
 import { NETWORK, getFactoryAddress } from '@/lib/config';
 import type { WalletAccount } from '@/lib/wallet';
 import { profileForChain, profileFieldError, imageSrc } from '@/lib/tokenProfile';
+import { rulesForChain, validateRules, describeRules, hasAnyRule, type LaunchRules } from '@/lib/launchRules';
 
 /**
  * Create a launch.
@@ -44,6 +45,8 @@ const DEFAULTS = {
   website: '',
   x: '',
   telegram: '',
+  maxPerWallet: '',
+  tradeStart: '',
   totalSupply: '1000000000',
   curveShare: '80',
   target: '85',
@@ -115,6 +118,7 @@ export function CreateLaunch() {
           symbol: f.symbol.trim(),
           name: f.name,
           description: f.description,
+          rules: rulesForChain(builtRules),
           profile: profileForChain({
             image: f.image,
             website: f.website,
@@ -137,8 +141,47 @@ export function CreateLaunch() {
   // fire a request on every keystroke.
   const logoPreview = useMemo(() => imageSrc(f.image), [f.image]);
 
+  /*
+   * Rules are parsed from two plain inputs rather than asked for in base units and
+   * nanoseconds. A creator thinks in whole tokens and in a local date; the contract
+   * wants 1e18 units and a nanosecond epoch, and asking for either directly is how a
+   * launch ends up with a cap a thousand times smaller than intended, permanently.
+   */
+  const builtRules = useMemo((): LaunchRules => {
+    let cap: bigint | null = null;
+    if (f.maxPerWallet.trim().length > 0) {
+      try {
+        cap = parseAmount(f.maxPerWallet);
+      } catch {
+        // Reported by `ruleProblems` below rather than thrown; a half-typed number
+        // must not take the panel to the error boundary while someone is typing.
+        cap = 0n;
+      }
+    }
+    let start: number | null = null;
+    if (f.tradeStart.trim().length > 0) {
+      // `datetime-local` has no zone, so it is read in the browser's own, which is the
+      // zone the creator is looking at while they type it.
+      const ms = new Date(f.tradeStart).getTime();
+      start = Number.isFinite(ms) ? Math.floor(ms / 1000) : null;
+    }
+    return { maxPerWallet: cap, tradeStart: start };
+  }, [f.maxPerWallet, f.tradeStart]);
+
+  const ruleProblems = useMemo(
+    () =>
+      'error' in built
+        ? []
+        : validateRules(builtRules, built.curve.curveSupply, Math.floor(Date.now() / 1000)),
+    [builtRules, built],
+  );
+  const ruleError = (field: 'maxPerWallet' | 'tradeStart') =>
+    ruleProblems.find((p) => p.field === field)?.message ?? null;
+
   const fresh: CurveState = { injCollected: 0n, tokensSold: 0n, graduated: false };
-  const ok = plan !== null && 'plan' in plan;
+  // A rule problem blocks the plan as firmly as a bad curve does. Both are permanent
+  // once created, and the form is the only place either can still be changed.
+  const ok = plan !== null && 'plan' in plan && ruleProblems.length === 0;
 
   return (
     <>
@@ -347,6 +390,79 @@ export function CreateLaunch() {
           </div>
         </div>
       )}
+
+      <div className="card">
+        <h2>Launch rules</h2>
+        <p className="note">
+          Optional. Both are enforced by the curve contract on every buy and sell until
+          this launch graduates. Afterwards the token trades on a DEX and neither applies.
+        </p>
+
+        <div className="field-row" style={{ marginTop: 'var(--space-4)' }}>
+          <div className="field">
+            <label htmlFor="cl-cap">
+              Max per wallet <span className="hint">tokens, blank for no cap</span>
+            </label>
+            <input
+              id="cl-cap"
+              value={f.maxPerWallet}
+              onChange={(e) => set('maxPerWallet')(e.target.value)}
+              placeholder="no cap"
+              inputMode="decimal"
+              aria-invalid={ruleError('maxPerWallet') !== null}
+            />
+            {ruleError('maxPerWallet') && <p className="note err-text">{ruleError('maxPerWallet')}</p>}
+          </div>
+          <div className="field">
+            <label htmlFor="cl-start">
+              Buying opens <span className="hint">your local time, blank for immediately</span>
+            </label>
+            <input
+              id="cl-start"
+              type="datetime-local"
+              value={f.tradeStart}
+              onChange={(e) => set('tradeStart')(e.target.value)}
+              aria-invalid={ruleError('tradeStart') !== null}
+            />
+            {ruleError('tradeStart') && <p className="note err-text">{ruleError('tradeStart')}</p>}
+          </div>
+        </div>
+
+        {hasAnyRule(builtRules) && ruleProblems.length === 0 && (
+          <div style={{ marginTop: 'var(--space-4)' }}>
+            <ul className="plan">
+              {describeRules(
+                builtRules,
+                (v) => fmt(v, 18, 0),
+                (s) => new Date(s * 1000).toLocaleString(),
+              ).lines.map((l) => (
+                <li key={l}>{l}</li>
+              ))}
+            </ul>
+            {/*
+                The limits, stated here rather than discovered later. A cap is per
+                address, so one person with several addresses gets several caps, and
+                no on-chain rule fixes that. Saying so is the difference between a
+                fair-launch tool and a promise the product cannot keep.
+              */}
+            <p className="note">
+              {describeRules(builtRules, (v) => fmt(v, 18, 0), (s) => new Date(s * 1000).toLocaleString()).scope}
+            </p>
+          </div>
+        )}
+
+        {/*
+            There is no transfer rule here, and the reason is worth stating once on the
+            page rather than letting a creator look for one. On Solana a token can carry
+            a transfer hook; an Injective tokenfactory denom is a bank denom and a bank
+            send runs no contract code, so nothing can run on a transfer.
+          */}
+        <p className="note">
+          Rules cannot be attached to transfers on Injective: a tokenfactory denom is a
+          bank denom, and a bank send runs no contract code. What the curve can enforce
+          is every trade it settles, which is every trade until graduation.
+        </p>
+      </div>
 
       <div className="card">
         <h2>Sign</h2>

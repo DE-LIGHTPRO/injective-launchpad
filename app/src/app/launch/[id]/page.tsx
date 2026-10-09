@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { getLaunch, getLaunchDetail, symbolOf, short } from '@/lib/chain';
 import { TokenLogo } from '@/components/TokenLogo';
 import { visibleLinks } from '@/lib/tokenProfile';
+import { describeRules, hasAnyRule } from '@/lib/launchRules';
 import { graduationProgress, fmt, spotPrice, maxCollectable } from '@/lib/curve';
 import { NETWORK, isDeployed, isDevBuild } from '@/lib/config';
 import { isDemoMode } from '@/lib/demo';
@@ -53,6 +54,18 @@ export default async function LaunchPage({ params }: { params: Promise<{ id: str
   // Only the links that survive the scheme allowlist, so nothing hostile reaches an
   // href even if the chain the UI is pointed at never checked them.
   const links = visibleLinks(launch.profile);
+  /*
+   * Formatted on the server, so the figures are the same ones the page renders rather
+   * than being recomputed per client. The time is rendered in UTC here for the same
+   * reason: a server-rendered local time is the SERVER's local time, which is not the
+   * reader's, and a launch that says it opens at a time nobody's clock agrees with is
+   * worse than one that says UTC plainly.
+   */
+  const ruleCopy = describeRules(
+    detail.rules,
+    (v) => fmt(v, 18, 0),
+    (secs) => `${new Date(secs * 1000).toISOString().slice(0, 16).replace('T', ' ')} UTC`,
+  );
   const progress = graduationProgress(detail.config, detail.state);
   const price = spotPrice(detail.config, detail.state, ONE);
   const ceiling = maxCollectable(detail.config);
@@ -111,6 +124,23 @@ export default async function LaunchPage({ params }: { params: Promise<{ id: str
             */}
           <p className="note">Links are supplied by the creator and are not verified.</p>
         </>
+      )}
+
+      {hasAnyRule(detail.rules) && (
+        <div className="card" style={{ marginTop: 'var(--space-5)' }}>
+          <h2>Launch rules</h2>
+          <ul className="plan">
+            {ruleCopy.lines.map((l) => (
+              <li key={l}>{l}</li>
+            ))}
+          </ul>
+          {/*
+              The scope sentence is not optional decoration. These rules stop at
+              graduation, and a buyer reading a cap without that is being told
+              something about the token rather than about this curve.
+            */}
+          <p className="note">{ruleCopy.scope}</p>
+        </div>
       )}
 
       <div className="cols" style={{ marginTop: 'var(--space-5)' }}>
