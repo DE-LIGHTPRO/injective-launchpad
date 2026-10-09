@@ -136,9 +136,23 @@ const mnemonic = process.env.INJ_MNEMONIC?.trim();
 const rawKey = process.env.INJ_PRIVATE_KEY?.trim();
 
 if (!mnemonic && !rawKey) {
+  /*
+   * Says WHICH state it is in, because the three are fixed differently and the same
+   * sentence for all of them is a setup guide rather than an error. The common one is
+   * the third: the example was copied and the key line left as it came, so the file
+   * exists, the permissions are right, and nothing says the one line that matters is
+   * still blank.
+   */
+  const envPath = join(HERE, '.env.local');
+  if (!existsSync(envPath)) {
+    die(
+      'No signing key found, and scripts/.env.local does not exist.',
+      'cp scripts/.env.example scripts/.env.local && chmod 600 scripts/.env.local, then put your phrase on the INJ_MNEMONIC line.',
+    );
+  }
   die(
-    'No signing key found.',
-    'Put INJ_MNEMONIC="word word …" (or INJ_PRIVATE_KEY=0x…) in scripts/.env.local, chmod 600 it, and re-run. Do not pass it on the command line: an interactive shell records that in ~/.zsh_history in plaintext.',
+    'scripts/.env.local exists, but INJ_MNEMONIC and INJ_PRIVATE_KEY are both empty.',
+    'Open it and put your phrase after INJ_MNEMONIC= on one line. Do not pass it on the command line: an interactive shell records that in ~/.zsh_history in plaintext.',
   );
 }
 
