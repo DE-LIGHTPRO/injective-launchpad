@@ -1,11 +1,22 @@
 /**
  * Deploy the launchpad to Injective.
  *
- *   INJ_MNEMONIC="..." node deploy.mjs            # testnet
- *   INJ_MNEMONIC="..." node deploy.mjs --mainnet  # mainnet, needs a second flag too
+ *   node scripts/deploy.mjs            # testnet
+ *   node scripts/deploy.mjs --mainnet  # mainnet, needs a second flag too
  *
- * Your key is read from the environment and never printed, written, or sent
- * anywhere but the signer. Nothing here logs it, not even on failure.
+ * PUT THE KEY IN `scripts/.env.local`, NOT ON THE COMMAND LINE. This file used to
+ * document `INJ_MNEMONIC="..." node deploy.mjs`, which is the one instruction here
+ * that could lose someone their funds: an interactive shell writes that line to
+ * `~/.zsh_history` in plaintext, where it stays indefinitely, is read by anything
+ * that reads history, is synced by some dotfile setups, and is visible to `ps` while
+ * the process runs. A seed phrase is not a password you can rotate.
+ *
+ * `scripts/.env.local` is matched by `.env*.local` in .gitignore, so it cannot be
+ * committed, and the loader below refuses to read it if its permissions let anyone
+ * else on the machine see it.
+ *
+ * Your key is read from there and never printed, written, or sent anywhere but the
+ * signer. Nothing here logs it, not even on failure.
  *
  * Two habits carried over from the Arc launch:
  *
@@ -19,7 +30,7 @@
  *    works through. The block at the end is the complete set.
  */
 
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -71,13 +82,63 @@ console.log(`  rest: ${endpoints.rest}`);
 
 // ---------------------------------------------------------------- the key --
 
+/**
+ * Loads `scripts/.env.local` into the environment, if it exists.
+ *
+ * Written out rather than taking a dependency: this script signs transactions, and a
+ * package added for the convenience of reading a text file is one more thing with
+ * access to the process that holds a seed phrase.
+ *
+ * Anything already in the environment wins, so a CI secret is not overwritten by a
+ * file someone left behind locally.
+ */
+function loadEnvFile() {
+  const envPath = join(HERE, '.env.local');
+  if (!existsSync(envPath)) return;
+
+  /*
+   * Refused if the file is group or world readable. A seed phrase sitting at 0644 is
+   * readable by every process and every other account on the machine, and the usual
+   * way that happens is a text editor or a copy that did not preserve the mode. The
+   * fix is one chmod, so it is worth stopping for.
+   */
+  const mode = statSync(envPath).mode & 0o777;
+  if (mode & 0o077) {
+    die(
+      `scripts/.env.local is readable by others (mode ${mode.toString(8)}).`,
+      'Run: chmod 600 scripts/.env.local',
+    );
+  }
+
+  for (const line of readFileSync(envPath, 'utf8').split('\n')) {
+    const t = line.trim();
+    if (t.length === 0 || t.startsWith('#')) continue;
+    const eq = t.indexOf('=');
+    if (eq < 1) continue;
+    const key = t.slice(0, eq).trim();
+    // Surrounding quotes are stripped, because a mnemonic has spaces in it and
+    // everyone quotes it. Left in, the first word would carry a leading quote and
+    // the derived address would simply be a different, empty account.
+    let value = t.slice(eq + 1).trim();
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1);
+    }
+    if (process.env[key] === undefined) process.env[key] = value;
+  }
+}
+
+loadEnvFile();
+
 const mnemonic = process.env.INJ_MNEMONIC?.trim();
 const rawKey = process.env.INJ_PRIVATE_KEY?.trim();
 
 if (!mnemonic && !rawKey) {
   die(
     'No signing key found.',
-    'Set INJ_MNEMONIC="word word …" (or INJ_PRIVATE_KEY=0x…) in your shell and re-run.',
+    'Put INJ_MNEMONIC="word word …" (or INJ_PRIVATE_KEY=0x…) in scripts/.env.local, chmod 600 it, and re-run. Do not pass it on the command line: an interactive shell records that in ~/.zsh_history in plaintext.',
   );
 }
 
