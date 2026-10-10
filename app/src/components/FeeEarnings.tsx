@@ -6,6 +6,7 @@ import { fmt } from '@/lib/curve';
 import { NETWORK } from '@/lib/config';
 import { CREATOR_FEE_SHARE_BPS, PLATFORM_FEE_SHARE_BPS } from '@/lib/launchLimits';
 import type { WalletAccount } from '@/lib/wallet';
+import type { Quote } from '@/lib/chain';
 
 /**
  * What this launch has earned, and the button that pays it out.
@@ -33,6 +34,7 @@ export function FeeEarnings({
   creatorPaid,
   platformPaid,
   feeBps,
+  quote,
 }: {
   curve: string;
   creator: string;
@@ -42,6 +44,13 @@ export function FeeEarnings({
   creatorPaid: bigint;
   platformPaid: bigint;
   feeBps: bigint;
+  /**
+   * THIS launch's quote, not the network's. Every figure in this panel is money the
+   * curve holds, and it holds whatever the launch is priced in: rendering a
+   * 6-decimal balance scaled as 18 and labelled INJ is not an approximation, it is a
+   * different number wearing the wrong name.
+   */
+  quote: Quote;
 }) {
   const [account, setAccount] = useState<WalletAccount | null>(null);
   const [busy, setBusy] = useState(false);
@@ -84,7 +93,7 @@ export function FeeEarnings({
     <div className="card" style={{ marginTop: 'var(--space-4)' }}>
       <h2>Fees earned</h2>
       <p className="note">
-        Every trade pays {Number(feeBps) / 100}% in {NETWORK.quoteSymbol}.{' '}
+        Every trade pays {Number(feeBps) / 100}% in {quote.label}.{' '}
         {CREATOR_FEE_SHARE_BPS / 100}% of that fee is the creator&rsquo;s and{' '}
         {PLATFORM_FEE_SHARE_BPS / 100}% runs this launchpad. The split was set when the
         launch was created and cannot be changed.
@@ -94,13 +103,13 @@ export function FeeEarnings({
         <div className="metric-row">
           <span className="k">Creator&rsquo;s share, unclaimed</span>
           <span className="v mono">
-            {fmt(creatorOwed, 18, 6)} {NETWORK.quoteSymbol}
+            {fmt(creatorOwed, quote.decimals, 6)} {quote.label}
           </span>
         </div>
         <div className="metric-row">
           <span className="k">Launchpad&rsquo;s share, unclaimed</span>
           <span className="v mono">
-            {fmt(platformOwed, 18, 6)} {NETWORK.quoteSymbol}
+            {fmt(platformOwed, quote.decimals, 6)} {quote.label}
           </span>
         </div>
         {/*
@@ -111,7 +120,7 @@ export function FeeEarnings({
         <div className="metric-row">
           <span className="k">Held by the curve, owed out</span>
           <span className="v mono">
-            {fmt(total, 18, 6)} {NETWORK.quoteSymbol}
+            {fmt(total, quote.decimals, 6)} {quote.label}
           </span>
         </div>
       </div>
@@ -128,7 +137,7 @@ export function FeeEarnings({
         <div className="metric-row" style={{ marginTop: 'var(--space-3)' }}>
           <span className="k">Paid out so far, lifetime</span>
           <span className="v mono">
-            {fmt(paid, 18, 6)} {NETWORK.quoteSymbol}
+            {fmt(paid, quote.decimals, 6)} {quote.label}
           </span>
         </div>
       )}
@@ -154,7 +163,7 @@ export function FeeEarnings({
           </button>
           <p className="note">
             {isCreator
-              ? `This sends your ${fmt(creatorOwed, 18, 6)} ${NETWORK.quoteSymbol} to this wallet, and the launchpad's share to the launchpad.`
+              ? `This sends your ${fmt(creatorOwed, quote.decimals, 6)} ${quote.label} to this wallet, and the launchpad's share to the launchpad.`
               : 'This pays the creator and the launchpad, not you. You are paying the gas for it.'}
           </p>
         </div>

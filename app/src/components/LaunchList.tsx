@@ -39,7 +39,12 @@ const SORTS: Array<{ key: SortKey; label: string; hint: string }> = [
     hint: 'Spot price times total supply, largest first',
   },
   { key: 'progress', label: 'Closest to graduating', hint: 'Highest share of the target raised' },
-  { key: 'raised', label: 'Most raised', hint: `Largest amount of ${NETWORK.quoteSymbol} collected` },
+  /*
+   * The hints name no asset. These sorts can run across pairs, where "largest amount
+   * of INJ collected" is wrong for every launch not in INJ, and the figure each card
+   * shows already carries its own ticker.
+   */
+  { key: 'raised', label: 'Most raised', hint: 'Largest amount collected on the curve' },
   { key: 'newest', label: 'Newest', hint: 'Most recently created' },
   /*
    * The two activity sorts. They differ from the four above in one way that matters
@@ -49,7 +54,7 @@ const SORTS: Array<{ key: SortKey; label: string; hint: string }> = [
    * zero, because zero would be a claim about a launch nobody has measured.
    */
   { key: 'trades', label: 'Most traded', hint: 'Most buys and sells, lifetime' },
-  { key: 'volume', label: 'Most volume', hint: `Most ${NETWORK.quoteSymbol} traded in about 24h` },
+  { key: 'volume', label: 'Most volume', hint: 'Most traded in about 24h' },
 ];
 
 export function LaunchList({ rows }: { rows: LaunchRow[] }) {
@@ -284,6 +289,14 @@ export function LaunchList({ rows }: { rows: LaunchRow[] }) {
                     the contract refuses every buy.
                   */}
                 <div className="card-badges">
+                  {/*
+                      The pair, on every card and not only when the filter is off.
+                      A card's market cap is denominated in this asset, so without
+                      the badge two cards side by side in "All pairs" show numbers
+                      that cannot be compared and nothing says so. nearly.trade
+                      badges the pair for the same reason.
+                    */}
+                  <span className="chip chip-sm muted">{denomLabel(r.quoteDenom)}</span>
                   <span className="chip chip-sm">{feeLabel(BigInt(r.curve.feeBps))}</span>
                   <StatusChip graduated={r.graduated} rules={r.rules} />
                 </div>

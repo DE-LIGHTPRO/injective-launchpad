@@ -41,7 +41,14 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <main className="wrap">{children}</main>
         <footer className="wrap" style={{ padding: 'var(--space-8) var(--space-5)' }}>
           <p className="micro">
-            Bonding curve launches. The creator supplies tokens; buyers bring {NETWORK.quoteSymbol}.
+            {/*
+                No ticker. This is the site footer, under every launch including ones
+                priced in something else, and "buyers bring INJ" stopped being true the
+                day a second quote was allowlisted. The pair is on each card and each
+                launch page, which is where it belongs.
+              */}
+            Bonding curve launches. The creator supplies the tokens; buyers bring
+            whatever the pair is priced in.
           </p>
         </footer>
       </body>

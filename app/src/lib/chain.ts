@@ -527,3 +527,45 @@ export function denomLabel(denom: string): string {
   // A bare denom like "inj" is a ticker already.
   return denom.length <= 12 ? denom.toUpperCase() : `${denom.slice(0, 8)}…`;
 }
+
+/**
+ * A launch's quote asset: everything needed to render an amount in it.
+ *
+ * ONE OBJECT RATHER THAN TWO PROPS, deliberately. `denom` and `decimals` travel
+ * together through five components, and passing them separately is how one of them
+ * gets missed: a figure scaled correctly and labelled wrongly, or the reverse, looks
+ * plausible on screen either way. Bundled, a component either has the quote or it
+ * does not.
+ */
+export interface Quote {
+  denom: string;
+  decimals: number;
+  /** Short, readable form for putting beside a number. */
+  label: string;
+}
+
+/** The network's default quote, for surfaces that are about the platform. */
+export const DEFAULT_QUOTE: Quote = {
+  denom: NETWORK.quoteDenom,
+  decimals: NETWORK.quoteDecimals,
+  label: denomLabel(NETWORK.quoteDenom),
+};
+
+/**
+ * Resolve a launch's quote, including the decimals that scale every figure shown in
+ * it.
+ *
+ * The decimals come from the factory's allowlist, which is the same source the
+ * contract scaled the launch's curve with. Falling back to the network default is
+ * right for a factory that predates the allowlist, where every launch really was in
+ * the default quote.
+ */
+export async function resolveQuote(denom: string): Promise<Quote> {
+  const { quotes } = await listQuotes();
+  const found = quotes.find((q) => q.denom === denom);
+  return {
+    denom,
+    decimals: found?.decimals ?? NETWORK.quoteDecimals,
+    label: denomLabel(denom),
+  };
+}

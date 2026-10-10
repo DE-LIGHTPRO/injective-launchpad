@@ -2,7 +2,16 @@
 
 import { curvePoints, chartMarker, type CurveConfig, type CurveState } from '@/lib/curve';
 
-const ONE = 1_000_000_000_000_000_000n;
+/**
+ * The quote's unit, for turning base units into whole ones on the axis.
+ *
+ * WAS A CONSTANT 1e18, which is right only while every launch is priced in INJ.
+ * Injective's USDC is 6 decimals, so a USDC curve drew an axis running to
+ * 0.000000000085, labelled INJ, for a launch that graduates at 85 USDC.
+ */
+function unitFor(decimals: number): bigint {
+  return 10n ** BigInt(decimals);
+}
 
 /**
  * Price against INJ raised, drawn straight from the curve config so the shape
@@ -26,11 +35,18 @@ export function CurveChart({
   config,
   state,
   height = 180,
+  quoteLabel = 'INJ',
+  quoteDecimals = 18,
 }: {
   config: CurveConfig;
   state: CurveState;
   height?: number;
+  /** Ticker for the axis. Defaults to INJ, which is right for the default quote. */
+  quoteLabel?: string;
+  /** Decimals of that quote, which set the axis scale. */
+  quoteDecimals?: number;
 }) {
+  const ONE = unitFor(quoteDecimals);
   let points;
   try {
     points = curvePoints(config, ONE, 70);
@@ -109,10 +125,10 @@ export function CurveChart({
       <circle cx={hereX} cy={y(herePrice)} r="4" style={{ fill: 'var(--warn)' }} />
 
       <text x={pad.l} y={H - 5} style={{ fill: 'var(--text-faint)' }} fontSize="10" fontFamily="ui-monospace, Menlo, monospace">
-        0 INJ raised
+        0 {quoteLabel} raised
       </text>
       <text x={W - pad.r} y={H - 5} style={{ fill: 'var(--text-faint)' }} fontSize="10" textAnchor="end" fontFamily="ui-monospace, Menlo, monospace">
-        {maxX.toFixed(1)} INJ
+        {maxX.toFixed(1)} {quoteLabel}
       </text>
     </svg>
   );

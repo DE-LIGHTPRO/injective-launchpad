@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
-import { getLaunch, getLaunchDetail, symbolOf, short, ChainError } from '@/lib/chain';
+import { getLaunch, getLaunchDetail, resolveQuote, symbolOf, short, ChainError } from '@/lib/chain';
 import { TokenLogo } from '@/components/TokenLogo';
 import { visibleLinks } from '@/lib/tokenProfile';
 import { describeRules, hasAnyRule } from '@/lib/launchRules';
@@ -48,13 +48,19 @@ export async function generateMetadata({
     const detail = await getLaunchDetail(launch.curve);
     const sym = symbolOf(detail.denom);
     const pct = (graduationProgress(detail.config, detail.state) * 100).toFixed(1);
-    const raised = fmt(detail.state.injCollected, 18, 2);
-    const target = fmt(detail.config.graduationTarget, 18, 0);
+    /*
+     * The share card carries the same figures as the page, so it needs the same
+     * quote. This is the copy with the widest reach: it is what a link preview shows
+     * in a chat, where nobody can click through to check the units.
+     */
+    const q = await resolveQuote(detail.quoteDenom);
+    const raised = fmt(detail.state.injCollected, q.decimals, 2);
+    const target = fmt(detail.config.graduationTarget, q.decimals, 0);
 
     const state = detail.state.graduated
       ? 'Graduated'
-      : `${pct}% to graduation, ${raised} of ${target} ${NETWORK.quoteSymbol} raised`;
-    const description = `${state}. One-sided bonding curve on Injective: the creator supplies tokens, buyers bring ${NETWORK.quoteSymbol}.`;
+      : `${pct}% to graduation, ${raised} of ${target} ${q.label} raised`;
+    const description = `${state}. One-sided bonding curve on Injective: the creator supplies tokens, buyers bring ${q.label}.`;
 
     /*
      * The creator's image is NOT used as the preview card.
@@ -131,6 +137,17 @@ export default async function LaunchPage({ params }: { params: Promise<{ id: str
    * reader's, and a launch that says it opens at a time nobody's clock agrees with is
    * worse than one that says UTC plainly.
    */
+
+  /*
+   * THIS launch's quote, resolved once and handed to every panel that renders money.
+   *
+   * The decimals come from the factory's allowlist, the same source the contract
+   * scaled this launch's curve with. Every figure below, market cap, price, reserve,
+   * fees, fills, trades, is denominated in it: they were all rendered with
+   * `NETWORK.quoteSymbol` and scaled as 18 decimals, so a USDC-paired launch showed
+   * numbers a trillion times too large under the wrong ticker.
+   */
+  const quote = await resolveQuote(detail.quoteDenom);
   const totalSupply = detail.config.curveSupply + detail.lpReserve;
   const nowSeconds = Math.floor(Date.now() / 1000);
 
@@ -215,13 +232,13 @@ export default async function LaunchPage({ params }: { params: Promise<{ id: str
         <div>
           <span className="k">Market cap</span>
           <span className="v mono">
-            {compact(marketCap(detail.config, detail.state, totalSupply))} {NETWORK.quoteSymbol}
+            {compact(marketCap(detail.config, detail.state, totalSupply), quote.decimals)} {quote.label}
           </span>
         </div>
         <div>
           <span className="k">Price</span>
           <span className="v mono">
-            {fmt(price, 18, 10)} {NETWORK.quoteSymbol}
+            {fmt(price, quote.decimals, 10)} {quote.label}
           </span>
         </div>
         <div>
@@ -232,7 +249,7 @@ export default async function LaunchPage({ params }: { params: Promise<{ id: str
             */}
           <span className="k">Curve reserve</span>
           <span className="v mono">
-            {fmt(detail.state.injCollected, 18, 2)} {NETWORK.quoteSymbol}
+            {fmt(detail.state.injCollected, quote.decimals, 2)} {quote.label}
           </span>
         </div>
         <div>
@@ -283,13 +300,19 @@ export default async function LaunchPage({ params }: { params: Promise<{ id: str
         creatorPaid={detail.creatorPaid}
         platformPaid={detail.platformPaid}
         feeBps={detail.config.feeBps}
+        quote={quote}
       />
 
       <div className="cols" style={{ marginTop: 'var(--space-5)' }}>
         <div>
           <div className="card">
             <h2>Price curve</h2>
-            <CurveChart config={detail.config} state={detail.state} />
+            <CurveChart
+              config={detail.config}
+              state={detail.state}
+              quoteLabel={quote.label}
+              quoteDecimals={quote.decimals}
+            />
             <div className="bar" style={{ marginTop: 'var(--space-2)' }}>
               <i style={{ width: `${Math.min(100, progress * 100).toFixed(1)}%` }} />
             </div>
@@ -304,25 +327,25 @@ export default async function LaunchPage({ params }: { params: Promise<{ id: str
             <div className="metric-row">
               <span className="k">Spot price</span>
               <span className="v mono">
-                {fmt(price, 18, 10)} {NETWORK.quoteSymbol} / {symbol}
+                {fmt(price, quote.decimals, 10)} {quote.label} / {symbol}
               </span>
             </div>
             <div className="metric-row">
               <span className="k">Raised</span>
               <span className="v mono">
-                {fmt(detail.state.injCollected, 18, 3)} {NETWORK.quoteSymbol}
+                {fmt(detail.state.injCollected, quote.decimals, 3)} {quote.label}
               </span>
             </div>
             <div className="metric-row">
               <span className="k">Graduates at</span>
               <span className="v mono">
-                {fmt(detail.config.graduationTarget, 18, 0)} {NETWORK.quoteSymbol}
+                {fmt(detail.config.graduationTarget, quote.decimals, 0)} {quote.label}
               </span>
             </div>
             <div className="metric-row">
               <span className="k">Curve ceiling</span>
               <span className="v mono">
-                {fmt(ceiling, 18, 2)} {NETWORK.quoteSymbol}
+                {fmt(ceiling, quote.decimals, 2)} {quote.label}
               </span>
             </div>
             <div className="metric-row">
@@ -360,6 +383,7 @@ export default async function LaunchPage({ params }: { params: Promise<{ id: str
 
         <TradePanel
           curve={launch.curve}
+          quoteAsset={quote}
           config={detail.config}
           state={detail.state}
           symbol={symbol}
@@ -369,6 +393,7 @@ export default async function LaunchPage({ params }: { params: Promise<{ id: str
         />
 
       <Trades
+        quote={quote}
         curve={launch.curve}
         denom={launch.denom}
         totalSupply={(detail.config.curveSupply + detail.lpReserve).toString()}

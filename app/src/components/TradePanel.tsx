@@ -19,6 +19,7 @@ import { isDemoMode } from '@/lib/demo';
 import { buyingOpenAt, feeBpsAt, secondsUntilBaseFee, NO_RULES, type LaunchRules } from '@/lib/launchRules';
 import { useConnectedAccount } from '@/lib/walletStore';
 import { denomBalance } from '@/lib/wallet';
+import type { Quote } from '@/lib/chain';
 
 type Side = 'buy' | 'sell';
 
@@ -58,6 +59,7 @@ export function TradePanel({
   symbol,
   denom,
   curve,
+  quoteAsset,
   tradingClosed,
   rules = NO_RULES,
 }: {
@@ -66,6 +68,14 @@ export function TradePanel({
   symbol: string;
   /** The curve contract a trade is sent to. */
   curve: string;
+  /**
+   * THIS launch's quote: what a buy spends and a sell receives.
+   *
+   * Named `quoteAsset` rather than `quote` because this panel already has a `quote`:
+   * the memo holding the priced trade. Two different meanings of the word one scope
+   * apart is how the wrong one gets read.
+   */
+  quoteAsset: Quote;
   /** The launched token's denom, so the panel can read what the account holds. */
   denom: string;
   tradingClosed: boolean;
@@ -98,7 +108,7 @@ export function TradePanel({
     }
     let live = true;
     void Promise.all([
-      denomBalance(account.address, NETWORK.quoteDenom),
+      denomBalance(account.address, quoteAsset.denom),
       denomBalance(account.address, denom),
     ]).then(([q, t]) => {
       // Guarded, because switching launches while a read is in flight would otherwise
@@ -212,7 +222,7 @@ export function TradePanel({
     setTradeError(null);
     setTxHash(null);
     try {
-      const raw = parseAmount(input);
+      const raw = parseAmount(input, side === 'buy' ? quoteAsset.decimals : 18);
       const { broadcastExecute, GAS } = await import('@/lib/broadcast');
       const { txHash } = await broadcastExecute({
         contract: curve,
@@ -225,7 +235,7 @@ export function TradePanel({
          * payment by attachment on both sides, so neither needs an allowance and
          * neither can be spent without the trade happening in the same transaction.
          */
-        funds: [{ denom: side === 'buy' ? NETWORK.quoteDenom : denom, amount: raw.toString() }],
+        funds: [{ denom: side === 'buy' ? quoteAsset.denom : denom, amount: raw.toString() }],
         sender: account.address,
         wallet: account.provider,
         gas: GAS.trade,
@@ -315,7 +325,7 @@ export function TradePanel({
     );
   }
 
-  const unit = side === 'buy' ? NETWORK.quoteSymbol : symbol;
+  const unit = side === 'buy' ? quoteAsset.label : symbol;
 
   return (
     <div className="card">
@@ -338,7 +348,7 @@ export function TradePanel({
                     "not read" rather than "0". An unreachable LCD showing zero on a
                     sell screen tells a holder their position is gone.
                   */}
-                {held === null ? 'balance not read' : `${fmt(held, 18, held === 0n ? 0 : 4)} ${unit}`}
+                {held === null ? 'balance not read' : `${fmt(held, side === 'buy' ? quoteAsset.decimals : 18, held === 0n ? 0 : 4)} ${unit}`}
               </span>
               {held !== null && held > 0n && (
                 /*
@@ -392,7 +402,7 @@ export function TradePanel({
         <div className="quick-amounts">
           {[1, 5, 10, 50].map((v) => (
             <button key={v} type="button" onClick={() => setInput(String(v))}>
-              {v} {NETWORK.quoteSymbol}
+              {v} {quoteAsset.label}
             </button>
           ))}
         </div>
@@ -413,7 +423,7 @@ export function TradePanel({
             <span className="v mono">
               {quote.side === 'buy'
                 ? `${fmt(quote.tokensOut, 18, 2)} ${symbol}`
-                : `${fmt(quote.injOut, 18, 6)} ${NETWORK.quoteSymbol}`}
+                : `${fmt(quote.injOut, quoteAsset.decimals, 6)} ${quoteAsset.label}`}
             </span>
           </div>
           <div className="metric-row">
@@ -423,10 +433,10 @@ export function TradePanel({
             <span className={premiumBps > 0 && quote.side === 'buy' ? 'v mono warn-text' : 'v mono'}>
               {fmt(
                 quote.side === 'buy' ? quote.fee + (quote.earlyFeePremium ?? 0n) : quote.fee,
-                18,
+                quoteAsset.decimals,
                 6,
               )}{' '}
-              {NETWORK.quoteSymbol}
+              {quoteAsset.label}
             </span>
           </div>
           {premiumBps > 0 && quote.side === 'buy' && decaySecondsLeft !== null && (
@@ -488,14 +498,14 @@ export function TradePanel({
             <span className="v mono">
               {quote.side === 'buy'
                 ? `${fmt(minOut, 18, 2)} ${symbol}`
-                : `${fmt(minOut, 18, 6)} ${NETWORK.quoteSymbol}`}
+                : `${fmt(minOut, quoteAsset.decimals, 6)} ${quoteAsset.label}`}
             </span>
           </div>
           {quote.side === 'buy' && quote.refund > 0n && (
             <div className="metric-row">
               <span className="k warn-text">Refunded · curve full</span>
               <span className="v mono warn-text">
-                {fmt(quote.refund, 18, 6)} {NETWORK.quoteSymbol}
+                {fmt(quote.refund, quoteAsset.decimals, 6)} {quoteAsset.label}
               </span>
             </div>
           )}

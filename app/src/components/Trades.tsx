@@ -1,4 +1,4 @@
-import { listTrades, short, symbolOf, type Trade } from '@/lib/chain';
+import { listTrades, short, symbolOf, type Quote, type Trade } from '@/lib/chain';
 import { firstBlockShare } from '@/lib/creatorHolding';
 import { fmt } from '@/lib/curve';
 import { NETWORK } from '@/lib/config';
@@ -29,11 +29,18 @@ export async function Trades({
   curve,
   denom,
   totalSupply,
+  quote,
 }: {
   curve: string;
   denom: string;
   /** Base units as a string, for the opening-concentration figure. */
   totalSupply?: string;
+  /**
+   * THIS launch's quote. `buildSeries` takes the decimals because a fill price is
+   * quote over tokens, so a 6-decimal quote read as 18 puts every point on the chart
+   * out by a factor of a trillion.
+   */
+  quote: Quote;
 }) {
   if (isDemoMode()) {
     return (
@@ -78,7 +85,7 @@ export async function Trades({
   const opening = totalSupply ? firstBlockShare(trades, BigInt(totalSupply)) : null;
   const openingPct = opening?.share != null ? opening.share * 100 : null;
 
-  const series = buildSeries(trades, NETWORK.quoteDecimals);
+  const series = buildSeries(trades, quote.decimals);
   /*
    * Height for the 24h window, read here rather than passed in. `null` on failure,
    * which `volumeWithin` turns into "not measured" rather than zero: a day with no
@@ -128,7 +135,7 @@ export async function Trades({
           </svg>
           <div className="spark-foot mono">
             <span>{series.low.toPrecision(3)}</span>
-            <span>{series.high.toPrecision(3)} {NETWORK.quoteSymbol} per {sym}</span>
+            <span>{series.high.toPrecision(3)} {quote.label} per {sym}</span>
           </div>
         </div>
       )}
@@ -152,7 +159,7 @@ export async function Trades({
           <div className="metric-row">
             <span className="k">Highest fill</span>
             <span className="v mono">
-              {series.high > 0 ? `${series.high.toPrecision(4)} ${NETWORK.quoteSymbol}` : 'not priced'}
+              {series.high > 0 ? `${series.high.toPrecision(4)} ${quote.label}` : 'not priced'}
             </span>
           </div>
           <div className="metric-row">
@@ -160,7 +167,7 @@ export async function Trades({
             <span className="v mono">
               {vol24 === null
                 ? 'not measured'
-                : `${volPartial ? 'at least ' : ''}${compact(vol24, NETWORK.quoteDecimals, 4)} ${NETWORK.quoteSymbol}`}
+                : `${volPartial ? 'at least ' : ''}${compact(vol24, quote.decimals, 4)} ${quote.label}`}
             </span>
           </div>
           <div className="metric-row">
@@ -189,14 +196,14 @@ export async function Trades({
               <span className="mono" style={{ fontSize: 'var(--text-sm)', minWidth: 0 }}>
                 {t.kind === 'buy' && t.injIn !== null && (
                   <>
-                    {fmt(t.injIn, NETWORK.quoteDecimals, 4)} {NETWORK.quoteSymbol}
+                    {fmt(t.injIn, quote.decimals, 4)} {quote.label}
                     {t.tokens !== null && <> for {fmt(t.tokens, 18, 0)} {sym}</>}
                   </>
                 )}
                 {t.kind === 'sell' && t.tokens !== null && (
                   <>
                     {fmt(t.tokens, 18, 0)} {sym}
-                    {t.injOut !== null && <> for {fmt(t.injOut, NETWORK.quoteDecimals, 4)} {NETWORK.quoteSymbol}</>}
+                    {t.injOut !== null && <> for {fmt(t.injOut, quote.decimals, 4)} {quote.label}</>}
                   </>
                 )}
                 {t.kind === 'graduate' && <>liquidity migrated</>}
