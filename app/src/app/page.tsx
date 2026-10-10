@@ -4,6 +4,9 @@ import type { LaunchRules } from '@/lib/launchRules';
 import Link from 'next/link';
 import { listLaunches, getLaunchDetail, symbolOf, short, currentHeight, type Launch } from '@/lib/chain';
 import { TradeTicker } from '@/components/TradeTicker';
+import { HowItWorks } from '@/components/HowItWorks';
+import { CurveExplorer } from '@/components/CurveExplorer';
+import { ChainStatus } from '@/components/ChainStatus';
 import { graduationProgress, fmt, type CurveConfig } from '@/lib/curve';
 import { isDeployed, isDevBuild, NETWORK } from '@/lib/config';
 import { isDemoMode } from '@/lib/demo';
@@ -11,22 +14,6 @@ import { DemoBanner } from '@/components/DemoBanner';
 import { LaunchList, type LaunchRow } from '@/components/LaunchList';
 
 export const dynamic = 'force-dynamic';
-
-/*
- * The shape the create form starts from, so the empty state shows what this product
- * actually makes rather than an invented flourish. Kept beside the page that draws it
- * rather than imported from the form, because the form's defaults are a creator's
- * starting point and may reasonably change without this illustration following.
- */
-const ONE_TOKEN = 10n ** 18n;
-const DEFAULT_SHAPE = {
-  virtualInj: 30n * ONE_TOKEN,
-  virtualTokens: 1_073_000_000n * ONE_TOKEN,
-  curveSupply: 800_000_000n * ONE_TOKEN,
-  graduationTarget: 85n * ONE_TOKEN,
-  feeBps: 100n,
-};
-const FRESH = { injCollected: 0n, tokensSold: 0n, graduated: false };
 
 interface Row {
   launch: Launch;
@@ -158,29 +145,46 @@ export default async function Home() {
         </div>
       )}
 
+      {/*
+          The empty state of a live launchpad is, right now, the entire front page,
+          and a bordered box reading "no launches yet" is a dead end: it reports a
+          fact and offers nothing on the one screen where the action is obvious.
+
+          It draws no curve. The explorer below is the same shape and can be moved
+          along, so a static copy above it was the same picture twice with the worse
+          one first. The message and the action stay; the explaining is done by the
+          thing you can touch.
+        */}
       {!error && rows.length === 0 && (
-        /*
-         * The empty state of a live launchpad with nothing on it is, right now, the
-         * entire front page. A bordered box reading "no launches yet" is a dead end:
-         * it reports a fact and offers nothing, on the one screen where the only
-         * useful action is obvious.
-         *
-         * The curve is drawn at the real default shape a launch gets, so someone
-         * arriving sees what the product makes before they have anything to look at.
-         */
-        <div className="empty-hero" style={{ marginTop: 'var(--space-5)' }}>
-          <CurveGlyph config={DEFAULT_SHAPE} state={FRESH} height={120} showMarker={false} />
+        <div className="empty-hero empty-hero-compact" style={{ marginTop: 'var(--space-5)' }}>
           <h2>Nothing has launched yet</h2>
           <p className="note">
-            Every token here starts on a curve like this one. The creator supplies the
-            tokens, buyers bring {NETWORK.quoteSymbol}, and the price rises along the
-            curve until it graduates to a pool.
+            Every token here starts on a curve. The creator supplies the tokens,
+            buyers bring {NETWORK.quoteSymbol}, and the price rises along it until the
+            launch graduates to a pool. Move the handle below to see how.
           </p>
           <Link href="/create" className="go empty-cta">
             Create the first launch
           </Link>
         </div>
       )}
+
+      {/*
+          Always rendered, not only while the board is empty.
+          
+          These are the reasons to use this rather than another launchpad, and a
+          differentiator that disappears the moment the product has content is one
+          nobody reads. With nothing launched it is also the only thing on the page
+          worth a visitor's time.
+        */}
+      {/*
+          The explorer goes above the explainer: moving the handle once teaches a
+          bonding curve faster than the three steps under it, and someone who
+          understands it from the handle can skip the prose.
+        */}
+      <CurveExplorer />
+      <HowItWorks />
+      <ChainStatus height={height} />
 
       {rows.length > 0 && (
         <>

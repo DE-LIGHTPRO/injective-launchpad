@@ -952,6 +952,140 @@ button.ghost { background: transparent; border: 1px solid var(--line); color: va
   color: var(--text-dim);
 }
 
+/* The curve explorer: the one thing on this page nobody else has. */
+.explorer {
+  margin-top: var(--space-6);
+  padding: var(--space-5);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+  background: var(--glass-fill);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  box-shadow: var(--glass-shadow);
+}
+.explorer-head h2 { margin-bottom: var(--space-2); }
+.explorer-head .note { margin: 0 0 var(--space-4); max-width: 42rem; }
+
+.explorer-svg {
+  display: block;
+  width: 100%;
+  /* `grab` rather than `pointer`: the whole plot is draggable, not clickable, and the
+     cursor is the only affordance saying so before someone tries. */
+  cursor: grab;
+  touch-action: none;
+  border-radius: var(--radius-md);
+  background: var(--glass-well);
+}
+.explorer-svg:active { cursor: grabbing; }
+.explorer-svg:focus-visible { outline: none; box-shadow: var(--ring); }
+.explorer-axis { fill: var(--text-faint); font-size: 10px; font-family: ui-monospace, Menlo, monospace; }
+
+.explorer-read {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(9rem, 100%), 1fr));
+  gap: var(--space-4);
+  margin-top: var(--space-4);
+}
+.explorer-read .k {
+  display: block;
+  font-size: var(--text-micro);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+.explorer-read .v {
+  display: block;
+  font-size: var(--text-lg);
+  font-weight: 620;
+  margin-top: 2px;
+  word-break: break-all;
+}
+.explorer-hint { margin-top: var(--space-4); }
+
+/* The explainer, which carries the page when there is nothing on the board. */
+.explain { margin-top: var(--space-7); }
+.explain > h2 { margin-bottom: var(--space-2); }
+.explain > .note { max-width: 46rem; margin-bottom: var(--space-5); }
+
+.steps {
+  list-style: none;
+  margin: var(--space-5) 0 0;
+  padding: 0;
+  display: grid;
+  gap: 1px;
+  /* `min()` so the track can shrink below its floor on a phone instead of forcing
+     the grid wider than the viewport. */
+  grid-template-columns: repeat(auto-fit, minmax(min(17rem, 100%), 1fr));
+  background: var(--glass-border);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+.steps li {
+  display: flex;
+  gap: var(--space-3);
+  padding: var(--space-5);
+  background: var(--glass-fill);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  min-width: 0;
+}
+.step-n {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-pill);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--text-micro);
+  font-weight: 650;
+  color: var(--accent);
+  border: 1px solid var(--accent-deep);
+  background: var(--accent-wash);
+}
+.steps strong { display: block; margin-bottom: var(--space-1); font-weight: 600; }
+.steps .note { margin: 0; }
+
+.guarantees {
+  display: grid;
+  gap: var(--space-4);
+  grid-template-columns: repeat(auto-fit, minmax(min(17rem, 100%), 1fr));
+}
+.guarantees > div {
+  padding: var(--space-4) var(--space-5);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  background: var(--glass-fill);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  min-width: 0;
+}
+.guarantees strong { display: block; margin-bottom: var(--space-2); font-weight: 600; }
+.guarantees .note { margin: 0; }
+
+/* What this site is pointed at, which an empty board cannot otherwise prove. */
+.chain-status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-5);
+  margin-top: var(--space-7);
+  padding: var(--space-4) var(--space-5);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+  background: var(--glass-well);
+}
+.chain-status .k {
+  display: block;
+  font-size: var(--text-micro);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+.chain-status .v { font-size: var(--text-sm); color: var(--text-dim); }
+.chain-status a { color: var(--accent); text-decoration: none; }
+.chain-status a:hover { text-decoration: underline; }
+
 /* The ticker: what is happening right now, across the board. */
 .ticker {
   margin-top: var(--space-5);
@@ -1130,6 +1264,9 @@ button.ghost { background: transparent; border: 1px solid var(--line); color: va
   opacity: 0.9;
 }
 .empty-hero h2 { margin-bottom: var(--space-2); }
+/* Without a curve of its own this is a message and a button, so it does not need
+   the vertical space a hero illustration was filling. */
+.empty-hero-compact { padding: var(--space-6) var(--space-5); }
 .empty-hero .note { max-width: 34rem; margin: 0 auto; }
 .empty-cta {
   display: inline-block;

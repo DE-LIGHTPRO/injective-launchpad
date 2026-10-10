@@ -124,3 +124,12 @@ export function compact(raw: bigint, decimals = 18, maxFrac = 2): string {
   if (abs > 0 && abs < 1) return whole.toFixed(4);
   return whole.toFixed(maxFrac);
 }
+
+/**
+ * Mirrors `MAX_EARLY_FEE_BPS` in the curve contract.
+ *
+ * Exported so the landing copy quotes the enforced number rather than a figure
+ * someone typed into a sentence. A marketing page claiming a ceiling the contract
+ * does not have is the kind of thing nobody checks until it is wrong.
+ */
+export const MAX_EARLY_FEE_PCT = 20;
