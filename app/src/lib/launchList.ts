@@ -63,6 +63,13 @@ export interface LaunchRow {
   tokensSold: string;
   /** Spot price times total supply, base units as a string. The board's headline. */
   marketCap: string;
+  /**
+   * The curve CONTRACT address, which is a different thing from `curve` above: that
+   * is the shape, this is where it lives. Named apart on purpose, because the board
+   * needs the address to query a launch's activity and the two would otherwise be one
+   * keystroke from each other.
+   */
+  curveAddress: string;
   /** Unix seconds the curve opened, or null when the contract predates the field. */
   openedAt: number | null;
   /** Fees accrued to creator and platform, base units. Feeds the totals bar. */

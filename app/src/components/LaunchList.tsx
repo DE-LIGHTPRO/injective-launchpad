@@ -11,6 +11,7 @@ import { addressName } from '@/lib/addressName';
 import { fmt } from '@/lib/curve';
 import { NETWORK } from '@/lib/config';
 import { selectLaunches, type LaunchRow, type SortKey } from '@/lib/launchList';
+import { activityForAll, tradesLabel, type LaunchActivity } from '@/lib/launchActivity';
 
 export type { LaunchRow };
 
@@ -41,6 +42,31 @@ const SORTS: Array<{ key: SortKey; label: string; hint: string }> = [
 ];
 
 export function LaunchList({ rows }: { rows: LaunchRow[] }) {
+  /*
+   * Trade counts, fetched AFTER the board renders and never blocking it.
+   *
+   * Two count-only tx searches per launch: `pagination.limit=1` returns the `total`
+   * and no transaction bodies, so this is cheap, but it is still N requests and the
+   * board is the page's reason to exist. It arrives late and the cards reflow by one
+   * row rather than the page waiting on it.
+   *
+   * `null` for a launch whose count failed, which renders as "trades unavailable"
+   * rather than "0 trades": zero is a real and common answer on a new board, so a
+   * failed read showing zero is indistinguishable from a launch nobody has touched.
+   */
+  const [activity, setActivity] = useState<Record<string, LaunchActivity | null>>({});
+  const curveKey = rows.map((r) => r.curveAddress).join(',');
+  useEffect(() => {
+    const curves = curveKey ? curveKey.split(',') : [];
+    if (curves.length === 0) return;
+    let live = true;
+    void activityForAll(curves).then((a) => {
+      if (live) setActivity(a);
+    });
+    return () => {
+      live = false;
+    };
+  }, [curveKey]);
   /*
    * One clock for the whole board, taken on mount rather than per card.
    *
@@ -250,6 +276,17 @@ export function LaunchList({ rows }: { rows: LaunchRow[] }) {
                   <span className="k">Creator</span>
                   <span className="v mono">{short(r.creator)}</span>
                 </div>
+                {/*
+                    Rendered only once the count has landed. A placeholder row that
+                    later becomes a number makes the whole card twitch; an absent row
+                    that appears does it once, in one place.
+                  */}
+                {r.curveAddress in activity && (
+                  <div className="metric-row">
+                    <span className="k">Activity</span>
+                    <span className="v mono">{tradesLabel(activity[r.curveAddress])}</span>
+                  </div>
+                )}
               </div>
             </Link>
           ))}

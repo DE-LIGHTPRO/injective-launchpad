@@ -28,6 +28,7 @@ const row = (
 ): LaunchRow => ({
   id,
   denom: `factory/inj1pad/${sym}`,
+  curveAddress: `inj1curve${id}`,
   creator,
   // Selection has no opinion about identity, so the fixture carries none.
   profile: EMPTY_PROFILE,

@@ -83,6 +83,7 @@ function toRow(r: Row): LaunchRow {
   return {
     id: r.launch.id,
     denom: r.launch.denom,
+    curveAddress: r.launch.curve,
     creator: r.launch.creator,
     // Already normalised by `parseProfile` at the chain boundary. Plain strings and
     // nulls, so it crosses the server-component boundary without the bigint problem
