@@ -1,0 +1,19 @@
+# What Vercel must not upload.
+#
+# WHY THIS EXISTS. `vercel --prod` failed with "Request body too large" and the cause
+# was never diagnosed, so production was deployed by whatever happened to work. The
+# repo carries 1.9 GB of Rust build artifacts in `target/` plus half a gigabyte each of
+# `node_modules` and `.next`. None of it is input to a Next.js build; all of it was
+# being packed into the upload.
+#
+# The contracts' SOURCE stays: it is what `execution-wiring.test.ts` reads to check the
+# app's mirrored constants against the factory's, so excluding it would break the build.
+target/
+node_modules/
+.next/
+scripts/node_modules/
+
+# Never, under any circumstances. These hold a seed phrase.
+.env.local
+.env*.local
+*.wasm
