@@ -1,6 +1,6 @@
 import { getLcdUrl, NETWORK } from './config.ts';
 import { isDemoMode } from './demo.ts';
-import type { Trade } from './chain.ts';
+import { listTrades, currentHeight, type Trade } from './chain.ts';
 
 /**
  * How busy a launch is, from what this chain will actually answer.
@@ -135,10 +135,41 @@ export function volumeWithin(
   let total = 0n;
   for (const t of trades) {
     if (t.height < floor) continue;
-    const q = t.kind === 'buy' ? t.injIn : t.kind === 'sell' ? t.injOut : null;
-    if (q !== null && q > 0n) total += q;
+    total += quoteOf(t) ?? 0n;
   }
   return total;
+}
+
+/** Quote that moved in a trade, or null for anything that is not one. */
+function quoteOf(t: Trade): bigint | null {
+  const q = t.kind === 'buy' ? t.injIn : t.kind === 'sell' ? t.injOut : null;
+  return q !== null && q > 0n ? q : null;
+}
+
+/**
+ * Effective price per whole token for each trade, oldest first.
+ *
+ * MEASURED FILLS, not a modelled curve. Every point is quote actually paid divided by
+ * tokens actually received, so the line is what people were charged rather than what
+ * the formula says they would be. The two agree on this contract, which is exactly why
+ * using the fills is safe and also why it is the better choice: if they ever diverge,
+ * a chart drawn from the formula would hide it and this one shows it.
+ *
+ * Returned as numbers because this feeds an SVG path and nothing else. That is a lossy
+ * conversion from 18-decimal bigints and it must never travel anywhere a quote or a
+ * balance is computed from it.
+ */
+export function priceSeries(trades: Trade[]): number[] {
+  const out: number[] = [];
+  // `listTrades` returns newest first; a chart reads left to right in time.
+  for (const t of [...trades].reverse()) {
+    const q = quoteOf(t);
+    if (q === null || t.tokens === null || t.tokens <= 0n) continue;
+    // Scaled through the token unit so an 18-decimal quote over an 18-decimal token
+    // amount lands on a price per WHOLE token rather than per base unit.
+    out.push(Number((q * 10n ** 18n) / t.tokens) / 1e18);
+  }
+  return out;
 }
 
 /**
@@ -176,3 +207,69 @@ export function tradesLabel(a: LaunchActivity | null): string {
 }
 
 export const QUOTE_SYMBOL = NETWORK.quoteSymbol;
+
+/** How many trades one enrichment pass reads. Bounds both the series and the sum. */
+export const ENRICH_TRADE_LIMIT = 40;
+
+export interface LaunchEnrichment {
+  activity: LaunchActivity | null;
+  /** Quote traded in about 24h, or null when unknown. */
+  volume24h: bigint | null;
+  /** True when the sum is a floor rather than a total. */
+  volumePartial: boolean;
+  /** Effective prices from real fills, oldest first. Empty when nothing has traded. */
+  series: number[];
+  traders: number;
+}
+
+/**
+ * Everything the board shows about a launch's activity, in one pass.
+ *
+ * THREE REQUESTS PER LAUNCH, AND THAT IS THE DESIGN CONSTRAINT. Two count-only tx
+ * searches for the lifetime trade total, and one page of trades that serves the
+ * sparkline, the 24h sum and the trader count together. Fetching trades twice, once
+ * for the chart and once for volume, would have been the obvious shape and would have
+ * doubled the cost of the page's main surface for no new information.
+ *
+ * There is no indexer behind this, so the board is N-heavy by construction. The
+ * mitigation is that this runs AFTER the board paints, and that `Promise.allSettled`
+ * means one unreachable curve costs that card its numbers rather than the page its
+ * content.
+ */
+export async function enrichLaunch(
+  curve: string,
+  height: number | null,
+): Promise<LaunchEnrichment> {
+  const [act, trades] = await Promise.all([
+    activityFor(curve).catch(() => null),
+    listTrades(curve, ENRICH_TRADE_LIMIT).catch(() => [] as Trade[]),
+  ]);
+  return {
+    activity: act,
+    volume24h: volumeWithin(trades, height, BLOCKS_PER_DAY),
+    volumePartial: volumeIsPartial(trades, ENRICH_TRADE_LIMIT, height, BLOCKS_PER_DAY),
+    series: priceSeries(trades),
+    traders: uniqueTraders(trades),
+  };
+}
+
+/**
+ * Enrich several launches.
+ *
+ * The height is read ONCE and shared. Reading it per launch would put each card's 24h
+ * window at a slightly different instant, and two cards whose windows disagree is the
+ * sort of quiet inconsistency that makes a visitor distrust every number on the page.
+ */
+export async function enrichAll(
+  curves: string[],
+): Promise<Record<string, LaunchEnrichment>> {
+  const out: Record<string, LaunchEnrichment> = {};
+  if (curves.length === 0) return out;
+  const height = await currentHeight().catch(() => null);
+  const results = await Promise.allSettled(curves.map((c) => enrichLaunch(c, height)));
+  curves.forEach((c, i) => {
+    const r = results[i];
+    if (r.status === 'fulfilled') out[c] = r.value;
+  });
+  return out;
+}

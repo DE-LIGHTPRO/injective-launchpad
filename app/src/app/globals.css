@@ -1493,3 +1493,17 @@ header.top .brand { display: inline-flex; align-items: center; gap: var(--space-
   color: var(--text);
 }
 .logo-drop .note { margin: 0; }
+
+/*
+ * Card sparkline.
+ *
+ * Sized in the component rather than here, because the SVG needs the same numbers to
+ * build its path and two sources for one size is how a chart ends up clipped.
+ */
+.spark { display: block; flex: none; opacity: 0.9; }
+.card-spark {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  min-width: 0;
+}

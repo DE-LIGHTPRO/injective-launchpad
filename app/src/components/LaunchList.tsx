@@ -11,7 +11,8 @@ import { addressName } from '@/lib/addressName';
 import { fmt } from '@/lib/curve';
 import { NETWORK } from '@/lib/config';
 import { selectLaunches, type LaunchRow, type SortKey } from '@/lib/launchList';
-import { activityForAll, tradesLabel, type LaunchActivity } from '@/lib/launchActivity';
+import { enrichAll, tradesLabel, type LaunchEnrichment } from '@/lib/launchActivity';
+import { Sparkline } from './Sparkline';
 
 export type { LaunchRow };
 
@@ -54,13 +55,13 @@ export function LaunchList({ rows }: { rows: LaunchRow[] }) {
    * rather than "0 trades": zero is a real and common answer on a new board, so a
    * failed read showing zero is indistinguishable from a launch nobody has touched.
    */
-  const [activity, setActivity] = useState<Record<string, LaunchActivity | null>>({});
+  const [activity, setActivity] = useState<Record<string, LaunchEnrichment>>({});
   const curveKey = rows.map((r) => r.curveAddress).join(',');
   useEffect(() => {
     const curves = curveKey ? curveKey.split(',') : [];
     if (curves.length === 0) return;
     let live = true;
-    void activityForAll(curves).then((a) => {
+    void enrichAll(curves).then((a) => {
       if (live) setActivity(a);
     });
     return () => {
@@ -282,10 +283,44 @@ export function LaunchList({ rows }: { rows: LaunchRow[] }) {
                     that appears does it once, in one place.
                   */}
                 {r.curveAddress in activity && (
-                  <div className="metric-row">
-                    <span className="k">Activity</span>
-                    <span className="v mono">{tradesLabel(activity[r.curveAddress])}</span>
-                  </div>
+                  <>
+                    <div className="metric-row">
+                      <span className="k">Activity</span>
+                      <span className="v mono">
+                        {tradesLabel(activity[r.curveAddress].activity)}
+                      </span>
+                    </div>
+                    <div className="metric-row">
+                      <span className="k">Volume, about 24h</span>
+                      <span className="v mono">
+                        {(() => {
+                          const e = activity[r.curveAddress];
+                          /*
+                            * `null` is "the window is unknown", which happens when the
+                            * chain height could not be read. It is NOT zero: a day with
+                            * no trades and a day we could not measure look identical on
+                            * a card, and only one of them is a quiet market.
+                            */
+                          if (e.volume24h === null) return 'not measured';
+                          /*
+                            * "at least" when the page of trades read is full and its
+                            * oldest entry is still inside the window, because there may
+                            * be more beyond it and the sum is then a floor. Printing it
+                            * bare would understate a busy launch and read as exact.
+                            */
+                          return `${e.volumePartial ? 'at least ' : ''}${compact(e.volume24h, 18, 2)} ${NETWORK.quoteSymbol}`;
+                        })()}
+                      </span>
+                    </div>
+                    {activity[r.curveAddress].series.length >= 2 && (
+                      <div className="metric-row">
+                        <span className="k">Recent fills</span>
+                        <span className="card-spark">
+                          <Sparkline series={activity[r.curveAddress].series} />
+                        </span>
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
             </Link>

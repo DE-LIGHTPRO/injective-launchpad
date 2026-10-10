@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  priceSeries,
   uniqueTraders,
   volumeWithin,
   volumeIsPartial,
@@ -18,8 +19,8 @@ const t = (p: Partial<Trade>): Trade =>
     txHash: 'x',
     injIn: ONE,
     injOut: null,
-    tokensIn: null,
-    tokensOut: null,
+    tokens: 1000n * ONE,
+    fee: 0n,
     ...p,
   }) as Trade;
 
@@ -83,4 +84,38 @@ test('a failed count reads as unavailable, never as zero', () => {
   assert.equal(tradesLabel({ buys: 0, sells: 0, trades: 0 }), '0 trades');
   assert.equal(tradesLabel({ buys: 1, sells: 0, trades: 1 }), '1 trade');
   assert.equal(tradesLabel({ buys: 1200, sells: 671, trades: 1871 }), '1,871 trades');
+});
+
+test('the price line is built from fills, oldest first', () => {
+  /*
+   * `listTrades` returns newest first and a chart reads left to right in time, so the
+   * series is reversed. Getting this backwards draws every launch as its own mirror
+   * image, which looks like a plausible chart and is the exact opposite of the truth.
+   */
+  const trades = [
+    t({ height: 3, injIn: 3n * ONE, tokens: 1n * ONE }), // newest, price 3
+    t({ height: 2, injIn: 2n * ONE, tokens: 1n * ONE }),
+    t({ height: 1, injIn: 1n * ONE, tokens: 1n * ONE }), // oldest, price 1
+  ];
+  assert.deepEqual(priceSeries(trades), [1, 2, 3]);
+});
+
+test('a trade with no tokens is left out rather than priced as infinity', () => {
+  // Graduation emits no token amount. Dividing by it yields Infinity, which an SVG
+  // renders as a path that silently disappears rather than as an error.
+  const series = priceSeries([
+    t({ height: 2, kind: 'graduate' as Trade['kind'], injIn: null, tokens: null }),
+    t({ height: 1, injIn: 2n * ONE, tokens: 1n * ONE }),
+  ]);
+  assert.deepEqual(series, [2]);
+  assert.ok(series.every(Number.isFinite), 'a non-finite price reached the series');
+});
+
+test('a sell is priced the same way a buy is', () => {
+  // Both sides are quote over tokens. Reading only `injIn` would drop every sell and
+  // draw a line made of half the market.
+  assert.deepEqual(
+    priceSeries([t({ kind: 'sell', injIn: null, injOut: 5n * ONE, tokens: 1n * ONE })]),
+    [5],
+  );
 });
