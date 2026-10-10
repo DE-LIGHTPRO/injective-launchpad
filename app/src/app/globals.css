@@ -640,7 +640,13 @@ input.amount:focus { outline: none; border-color: var(--accent-deep); box-shadow
   /* Standalone links: breadcrumbs, and the explorer links in a metric row. */
   .note > a,
   .metric-row a,
-  .v > a {
+  .v > a,
+  /* The trade ticker's symbol link, measured at 19px on a phone. It is a
+     standalone link in a row, not a word inside a sentence, so the inline
+     exception in WCAG 2.5.8 does not cover it. */
+  .ticker-sym,
+  /* And the by-pair rows, which are links the same shape. */
+  .pairs-row {
     position: relative;
     /* Keeps short links wide enough too: "← launches" is 65px, but a two-glyph
        link would not be. */
@@ -650,7 +656,9 @@ input.amount:focus { outline: none; border-color: var(--accent-deep); box-shadow
 
   .note > a::after,
   .metric-row a::after,
-  .v > a::after {
+  .v > a::after,
+  .ticker-sym::after,
+  .pairs-row::after {
     content: '';
     position: absolute;
     /* Centred on the text and at least 24px tall, whatever the font size. */

@@ -121,3 +121,25 @@ test('the floor is the standard one, not a number someone liked', () => {
   // to argue with the standard rather than with a preference.
   assert.match(coarseBlock(), /height:\s*24px/);
 });
+
+test('every standalone link class is in the coarse-pointer block', () => {
+  /*
+   * WHY THIS IS A LIST AND NOT A MEASUREMENT. The hit area comes from an `::after`,
+   * so `getBoundingClientRect()` on the anchor reports the text box and calls a
+   * correct 44px target a broken 21px one. I made that exact mistake measuring the
+   * live site, after the stylesheet had written the warning down.
+   *
+   * What CAN be checked from source is that a class used as a standalone link is
+   * covered by the coarse-pointer rule at all. `.ticker-sym` was not, and rendered a
+   * 19px target on a phone with no pseudo-element behind it, while the tests here
+   * stayed green because they checked the classes they already knew about.
+   */
+  const css = readFileSync(join(import.meta.dirname, '..', 'app', 'globals.css'), 'utf8');
+  const coarse = css.slice(css.indexOf('@media (pointer: coarse)'));
+  for (const cls of ['.ticker-sym', '.pairs-row', '.note > a', '.metric-row a']) {
+    assert.ok(
+      coarse.includes(cls),
+      `${cls} is a standalone link and is not sized for a coarse pointer`,
+    );
+  }
+});
