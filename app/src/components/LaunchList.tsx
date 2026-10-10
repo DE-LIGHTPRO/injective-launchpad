@@ -7,6 +7,7 @@ import { TokenLogo } from './TokenLogo';
 import { StatusChip } from './StatusChip';
 import { CurveGlyph } from './CurveGlyph';
 import { ageLabel, feeLabel, compact } from '@/lib/boardMetrics';
+import { addressName } from '@/lib/addressName';
 import { fmt } from '@/lib/curve';
 import { NETWORK } from '@/lib/config';
 import { selectLaunches, type LaunchRow, type SortKey } from '@/lib/launchList';
@@ -164,7 +165,15 @@ export function LaunchList({ rows }: { rows: LaunchRow[] }) {
                         no extra query and cannot drift from what the fee uses.
                       */}
                     <div className="card-by">
-                      by {short(r.creator, 5)}
+                      {/*
+                          A readable name, with the address still in the title. The
+                          name is derived and nobody has claimed it, so it is a label
+                          rather than a handle: a visitor can use it to notice the
+                          same creator twice on one board, which is a judgement the
+                          data supports, and cannot use it to identify anyone, which
+                          is one it does not.
+                        */}
+                      by <span title={r.creator}>{addressName(r.creator)}</span>
                       {ageLabel(r.openedAt, nowSeconds) && (
                         <> · {ageLabel(r.openedAt, nowSeconds)}</>
                       )}

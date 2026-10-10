@@ -272,3 +272,26 @@ test('the opening fee says where the money goes', () => {
   assert.match(text, /not to the creator/, 'the copy does not rule out the creator');
   assert.match(text, /sells are not affected/, 'the copy does not say this is buys only');
 });
+
+test('the opening fee says no wallet is exempt, which is a claim Pons cannot make', () => {
+  /*
+   * ponsfamily.com ships the same mechanism with a creator whitelist, and discloses
+   * per card that "the creator exempted 32 wallets from the launch snipe tax, so they
+   * could buy untaxed at the open". Disclosing it is honest; it is also a worse
+   * product, because the fee exists to make the opening expensive and an exemption
+   * hands that exact advantage to whoever the creator picks.
+   *
+   * There is no exemption in this contract and no field to add one, so the copy can
+   * say so flatly. Pinned here because the sentence is only true while that stays
+   * true: anyone adding a whitelist has to fail this test and delete the claim on
+   * purpose rather than leave it standing.
+   */
+  const { lines } = describeRules(
+    { maxPerWallet: null, tradeStart: null, earlyFee: { startBps: 1_000, seconds: 600 }, openedAt: 1 },
+    (v) => `${v}`,
+    (s) => `${s}`,
+  );
+  const text = lines.join(' ').toLowerCase();
+  assert.match(text, /no wallet is exempt/, 'the guarantee is gone');
+  assert.match(text, /including the creator/, 'the creator is not named as covered');
+});

@@ -6,6 +6,7 @@ import { TokenLogo } from '@/components/TokenLogo';
 import { visibleLinks } from '@/lib/tokenProfile';
 import { describeRules, hasAnyRule } from '@/lib/launchRules';
 import { marketCap, compact, feeLabel, ageLabel } from '@/lib/boardMetrics';
+import { addressName } from '@/lib/addressName';
 import { StatusChip } from '@/components/StatusChip';
 import { CreatorPosition } from '@/components/CreatorPosition';
 import { CopyButton } from '@/components/CopyButton';

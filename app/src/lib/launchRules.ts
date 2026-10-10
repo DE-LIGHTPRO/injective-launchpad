@@ -251,8 +251,21 @@ export function describeRules(
      * receives it reads as the creator taking more, which is the opposite of what
      * this does and the reason anyone would object to it.
      */
+    /*
+     * "No wallet is exempt" is a deliberate contrast with how this is usually built.
+     *
+     * ponsfamily.com has the same mechanism and lets a creator WHITELIST wallets out
+     * of it, then discloses on each card that "the creator exempted 32 wallets from
+     * the launch snipe tax, so they could buy untaxed at the open". Disclosing it is
+     * honest and it is still a worse product: the fee exists to make the opening
+     * expensive, and an exemption hands exactly that advantage to whoever the creator
+     * chooses, which is the thing a buyer was worried about in the first place.
+     *
+     * There is no exemption here and no way to add one, so this can be said flatly.
+     * It is a stronger claim than a disclosure and it costs nothing to keep.
+     */
     lines.push(
-      `Buys in the first ${window} pay up to ${(rules.earlyFee.startBps / 100).toFixed(2)}%, falling to the curve's own fee. The extra goes into the pool at graduation, not to the creator. Sells are not affected.`,
+      `Buys in the first ${window} pay up to ${(rules.earlyFee.startBps / 100).toFixed(2)}%, falling to the curve's own fee. No wallet is exempt, including the creator's. The extra goes into the pool at graduation, not to the creator. Sells are not affected.`,
     );
   }
 
