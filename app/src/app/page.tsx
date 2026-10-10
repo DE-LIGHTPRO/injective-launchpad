@@ -2,7 +2,8 @@ import { CurveGlyph } from '@/components/CurveGlyph';
 import { marketCap, boardTotals, compact } from '@/lib/boardMetrics';
 import type { LaunchRules } from '@/lib/launchRules';
 import Link from 'next/link';
-import { listLaunches, getLaunchDetail, symbolOf, short, type Launch } from '@/lib/chain';
+import { listLaunches, getLaunchDetail, symbolOf, short, currentHeight, type Launch } from '@/lib/chain';
+import { TradeTicker } from '@/components/TradeTicker';
 import { graduationProgress, fmt, type CurveConfig } from '@/lib/curve';
 import { isDeployed, isDevBuild, NETWORK } from '@/lib/config';
 import { isDemoMode } from '@/lib/demo';
@@ -136,6 +137,9 @@ export default async function Home() {
   }
 
   const { rows, error, errorDetail } = await loadRows();
+  // Read alongside the rows rather than inside the ticker, so one slow call does not
+  // serialise behind another.
+  const height = await currentHeight();
 
   return (
     <>
@@ -180,6 +184,20 @@ export default async function Home() {
 
       {rows.length > 0 && (
         <>
+          {/*
+              The ticker sits above the totals: what is happening now reads before
+              what has happened in aggregate, and it renders nothing at all when
+              there are no trades rather than reserving space for the absence.
+            */}
+          <TradeTicker
+            launches={rows.map((r) => ({
+              id: r.launch.id,
+              curve: r.launch.curve,
+              denom: r.launch.denom,
+            }))}
+            currentHeight={height}
+          />
+
           {/*
               Totals summed from the rows already on screen, not from a second query.
               A totals bar with its own data source is the classic place for a page to

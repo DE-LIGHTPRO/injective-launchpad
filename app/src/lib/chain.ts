@@ -21,7 +21,7 @@ function openedAtSeconds(raw: unknown): number | null {
   }
 }
 import { NETWORK, getLcdUrl, getFactoryAddress } from './config.ts';
-import { isDemoMode, demoLaunches, demoDetail, demoDetailByCurve } from './demo.ts';
+import { isDemoMode, demoLaunches, demoDetail, demoDetailByCurve, demoTrades, DEMO_HEIGHT } from './demo.ts';
 import type { CurveConfig, CurveState } from './curve.ts';
 
 /** Shape stored by the factory for each launch. */
@@ -325,6 +325,10 @@ function tradeFromAttrs(attrs: Array<{ key: string; value: string }>): Trade | n
 }
 
 export async function listTrades(curve: string, limit = 20): Promise<Trade[]> {
+  // Demo trades exist so the ticker and the fills chart can be looked at before a
+  // real launch exists. Without them those components render on nobody's machine.
+  if (isDemoMode()) return demoTrades(curve, limit);
+
   const q = encodeURIComponent(`wasm._contract_address='${curve}'`);
   const url = `${getLcdUrl()}/cosmos/tx/v1beta1/txs?query=${q}&limit=${limit}&order_by=ORDER_BY_DESC`;
 
@@ -411,4 +415,39 @@ export async function denomSupply(denom: string): Promise<bigint | null> {
   const raw = json.amount?.amount;
   if (typeof raw !== 'string' || !/^[0-9]+$/.test(raw)) return null;
   return BigInt(raw);
+}
+
+/**
+ * The chain's current block height, or null when it could not be read.
+ *
+ * Used only to turn a trade's height into "about 2m ago". `null` rather than a guess:
+ * without it the ticker shows no age at all, which is correct, where a fabricated
+ * "now" would make every trade look like it just happened.
+ */
+export async function currentHeight(): Promise<number | null> {
+  /*
+   * In demo mode this must come from the SAME clock the demo trades use.
+   *
+   * It did not, and the result was every row in the ticker reading "29112h": demo
+   * trades sit near a fixed height while this queried the live chain at tens of
+   * millions, so the difference was three years. The numbers were each plausible on
+   * their own and nonsense together, which is the shape of defect a demo exists to
+   * surface rather than to introduce.
+   */
+  if (isDemoMode()) return DEMO_HEIGHT;
+
+  try {
+    const res = await fetch(`${getLcdUrl()}/cosmos/base/tendermint/v1beta1/blocks/latest`, {
+      headers: { accept: 'application/json' },
+      // The ticker is decoration on a page that must render without it, so a slow
+      // node delays nothing: the age column is simply absent.
+      signal: AbortSignal.timeout(4_000),
+    });
+    if (!res.ok) return null;
+    const json = (await res.json()) as { block?: { header?: { height?: string } } };
+    const raw = json.block?.header?.height;
+    return typeof raw === 'string' && /^[0-9]+$/.test(raw) ? Number(raw) : null;
+  } catch {
+    return null;
+  }
 }

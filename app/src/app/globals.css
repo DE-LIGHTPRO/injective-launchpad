@@ -952,6 +952,61 @@ button.ghost { background: transparent; border: 1px solid var(--line); color: va
   color: var(--text-dim);
 }
 
+/* The ticker: what is happening right now, across the board. */
+.ticker {
+  margin-top: var(--space-5);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+  background: var(--glass-fill);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  overflow: hidden;
+}
+.ticker-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--glass-border);
+  flex-wrap: wrap;
+}
+.ticker-head .k {
+  font-size: var(--text-micro);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+.ticker-head .note { margin: 0; }
+.ticker ul { list-style: none; margin: 0; padding: 0; }
+.ticker li {
+  display: grid;
+  /*
+   * `minmax(0, …)` on every track. Without it a long symbol or a wide amount widens
+   * its column past the container and the whole page scrolls sideways, which is the
+   * failure a grid of unknown-width content produces by default.
+   */
+  grid-template-columns: 3.2rem minmax(0, 1fr) minmax(0, auto) minmax(0, 1fr) 2.5rem;
+  gap: var(--space-3);
+  align-items: baseline;
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--text-xs);
+}
+.ticker li + li { border-top: 1px solid var(--line-soft, var(--glass-border)); }
+.side-buy { color: var(--accent); text-transform: uppercase; font-size: var(--text-micro); letter-spacing: 0.08em; }
+.side-sell { color: var(--danger); text-transform: uppercase; font-size: var(--text-micro); letter-spacing: 0.08em; }
+.ticker-sym { font-weight: 620; color: var(--text); text-decoration: none; }
+.ticker-sym:hover { color: var(--accent); }
+.ticker-amt { color: var(--text-dim); text-align: right; }
+.ticker-who { color: var(--text-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ticker-age { color: var(--text-faint); text-align: right; }
+
+/* On a phone the trader and the age are the first things to go: side, symbol and
+   amount are what the row is for. */
+@media (max-width: 560px) {
+  .ticker li { grid-template-columns: 3.2rem minmax(0, 1fr) minmax(0, auto); }
+  .ticker-who, .ticker-age { display: none; }
+}
+
 /* ------------------------------------------------------------ board metrics -- */
 
 .card-by { font-size: var(--text-xs); color: var(--text-faint); margin-top: 2px; }

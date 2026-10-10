@@ -15,7 +15,16 @@
 import { EMPTY_PROFILE } from './tokenProfile.ts';
 import { NO_RULES } from './launchRules.ts';
 import { quoteBuy, type CurveConfig, type CurveState } from './curve.ts';
-import type { Launch, LaunchDetail } from './chain.ts';
+import type { Launch, LaunchDetail, Trade } from './chain.ts';
+
+/**
+ * The demo's block height, shared by the trades and by `currentHeight`.
+ *
+ * One constant, because two clocks is what produced a ticker reporting every trade
+ * as three years old: the trades sat near a fixed height while the height came from
+ * the live chain at tens of millions.
+ */
+export const DEMO_HEIGHT = 12_000_000;
 
 const ONE = 1_000_000_000_000_000_000n;
 const amt = (n: bigint) => n * ONE;
@@ -141,4 +150,55 @@ export function demoDetail(id: number): LaunchDetail | null {
 export function demoDetailByCurve(curveAddress: string): LaunchDetail | null {
   const launch = demoLaunches().find((l) => l.curve === curveAddress);
   return launch ? demoDetail(launch.id) : null;
+}
+
+/**
+ * Trades for a demo curve, so the ticker and the fills chart are visible locally.
+ *
+ * Without these the demo renders a board with no activity at all, which means the
+ * ticker never appears on any machine until a real launch exists. That is how a
+ * component ships unstyled or broken: nobody has looked at it, because nothing could
+ * make it render. The rules panel and the "not open yet" state needed the same
+ * treatment for the same reason.
+ *
+ * Derived from the curve address so a given launch always shows the same trades, and
+ * so two launches do not show identical feeds. Every figure stays inside the curve's
+ * own scale: a demo that renders implausible numbers trains the eye to ignore them.
+ */
+export function demoTrades(curveAddress: string, limit: number): Trade[] {
+  const detail = demoDetailByCurve(curveAddress);
+  if (!detail) return [];
+
+  // A stable per-curve seed, so the same launch shows the same history on every
+  // render rather than reshuffling on each page load.
+  let seed = 0;
+  for (const ch of curveAddress) seed = (seed * 31 + ch.charCodeAt(0)) >>> 0;
+  const next = () => {
+    seed = (seed * 1_103_515_245 + 12_345) >>> 0;
+    return seed / 0xffffffff;
+  };
+
+  const out: Trade[] = [];
+  /*
+   * Staggered per curve, so the four demo launches do not all show a trade in the
+   * same block and read as "0s" four times over. Not impossible on a real chain,
+   * just not what a feed looks like, and the demo exists to show what one looks like.
+   */
+  const base = DEMO_HEIGHT - Math.floor(next() * 30);
+  for (let i = 0; i < limit; i += 1) {
+    const r = next();
+    const buy = r > 0.35;
+    const quote = BigInt(Math.max(1, Math.round(r * 4 * 1e18)));
+    out.push({
+      kind: buy ? 'buy' : 'sell',
+      who: `inj1demo${Math.floor(next() * 1e6)}trader00000000000000000x`,
+      injIn: buy ? quote : null,
+      injOut: buy ? null : quote,
+      tokens: BigInt(Math.round(next() * 5_000_000 * 1e18)),
+      fee: quote / 100n,
+      height: base - i * (2 + Math.floor(next() * 40)),
+      txHash: `DEMO${curveAddress.slice(-6).toUpperCase()}${String(i).padStart(3, '0')}`,
+    });
+  }
+  return out;
 }
