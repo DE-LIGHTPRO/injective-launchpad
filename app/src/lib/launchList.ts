@@ -84,6 +84,18 @@ export interface LaunchRow {
    * keystroke from each other.
    */
   curveAddress: string;
+  /**
+   * What this launch is priced in, and the decimals of it.
+   *
+   * CARRIED PER ROW, not read from the network config, and that distinction is the
+   * whole reason multi-quote is safe on this board. Every figure on a card, market
+   * cap, reserve, volume, is denominated in THIS launch's quote: a card showed
+   * `NETWORK.quoteSymbol` from a constant, so a USDC-paired launch rendered its
+   * amounts labelled INJ, which is not an approximation, it is a different number
+   * wearing the wrong name.
+   */
+  quoteDenom: string;
+  quoteDecimals: number;
   /** Unix seconds the curve opened, or null when the contract predates the field. */
   openedAt: number | null;
   /** Fees accrued to creator and platform, base units. Feeds the totals bar. */
@@ -91,6 +103,16 @@ export interface LaunchRow {
 }
 
 export interface Selection {
+  /**
+   * Show only launches priced in this quote, or `null` for all of them.
+   *
+   * Filtering is what keeps the board's arithmetic honest rather than being a
+   * convenience. Totals sum base units and a market-cap sort compares them, and
+   * neither is meaningful across quotes: 18-decimal INJ added to 6-decimal USDC is
+   * wrong by twelve orders of magnitude, and there is no price oracle here to convert
+   * with. So the board shows one quote at a time by default.
+   */
+  quote?: string | null;
   q: string;
   sort: SortKey;
   hideGraduated: boolean;
@@ -120,6 +142,7 @@ export function selectLaunches(
 ): LaunchRow[] {
   const out = rows.filter((r) => {
     if (sel.hideGraduated && r.graduated) return false;
+    if (sel.quote != null && r.quoteDenom !== sel.quote) return false;
     return matches(r, sel.q);
   });
 

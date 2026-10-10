@@ -1,9 +1,10 @@
 import { CurveGlyph } from '@/components/CurveGlyph';
 import { marketCap, boardTotals, compact } from '@/lib/boardMetrics';
 import { KingOfTheHill } from '@/components/KingOfTheHill';
+import { denomLabel } from '@/lib/chain';
 import type { LaunchRules } from '@/lib/launchRules';
 import Link from 'next/link';
-import { listLaunches, getLaunchDetail, symbolOf, short, currentHeight, type Launch } from '@/lib/chain';
+import { listLaunches, getLaunchDetail, listQuotes, symbolOf, short, currentHeight, type Launch } from '@/lib/chain';
 import { TradeTicker } from '@/components/TradeTicker';
 import { HowItWorks } from '@/components/HowItWorks';
 import { CurveExplorer } from '@/components/CurveExplorer';
@@ -28,11 +29,24 @@ interface Row {
   marketCap: bigint;
   feesAccrued: bigint;
   creatorPaid: bigint;
+  quoteDenom: string;
+  quoteDecimals: number;
 }
 
 async function loadRows(): Promise<{ rows: Row[]; error?: string; errorDetail?: string }> {
   try {
     const launches = await listLaunches();
+    /*
+     * The decimals of every allowlisted quote, read once from the factory.
+     *
+     * The same source the contract scaled each curve with. Deriving them per launch,
+     * or keeping a table in the app, would be a second copy that could disagree with
+     * the chain, and the disagreement would render as a reserve out by orders of
+     * magnitude rather than as an error.
+     */
+    const { quotes } = await listQuotes();
+    const quoteDecimals: Record<string, number> = {};
+    for (const q of quotes) quoteDecimals[q.denom] = q.decimals;
     const rows = await Promise.all(
       launches.map(async (launch) => {
         const d = await getLaunchDetail(launch.curve);
@@ -61,6 +75,13 @@ async function loadRows(): Promise<{ rows: Row[]; error?: string; errorDetail?: 
            * decides on, and nearly.trade puts it on their homepage for that reason.
            */
           creatorPaid: d.creatorPaid,
+          quoteDenom: d.quoteDenom,
+          /*
+           * Decimals of THIS launch's quote. `getLaunchDetail` does not report them,
+           * so they are resolved from the allowlist the factory publishes: the same
+           * source the contract scaled the curve with, rather than a second copy.
+           */
+          quoteDecimals: quoteDecimals[d.quoteDenom] ?? NETWORK.quoteDecimals,
         };
       }),
     );
@@ -84,6 +105,8 @@ function toRow(r: Row): LaunchRow {
     id: r.launch.id,
     denom: r.launch.denom,
     curveAddress: r.launch.curve,
+    quoteDenom: r.quoteDenom,
+    quoteDecimals: r.quoteDecimals,
     creator: r.launch.creator,
     // Already normalised by `parseProfile` at the chain boundary. Plain strings and
     // nulls, so it crosses the server-component boundary without the bigint problem
@@ -220,59 +243,85 @@ export default async function Home() {
               different number trusts neither figure afterwards.
             */}
           {(() => {
-            const t = boardTotals(
-              rows.map((r) => ({
-                raised: r.raised,
-                feesAccrued: r.feesAccrued,
-                graduated: r.graduated,
-                creatorPaid: r.creatorPaid,
-              })),
-            );
-            return (
-              <div className="totals">
-                <div>
-                  <span className="v mono">{t.launches}</span>
-                  <span className="k">Launches</span>
+            /*
+             * GROUPED BY QUOTE, because a total is a sum of base units and base units
+             * of different quotes are different things. One INJ launch and one USDC
+             * launch summed together add 18-decimal units to 6-decimal units and the
+             * answer is wrong by twelve orders of magnitude. There is no price oracle
+             * here to convert with, so the honest form is one row per quote rather
+             * than one number that spans them.
+             *
+             * With a single quote this renders exactly as it did before.
+             */
+            const byQuote = new Map<string, { decimals: number; rows: typeof rows }>();
+            for (const r of rows) {
+              const g = byQuote.get(r.quoteDenom) ?? { decimals: r.quoteDecimals, rows: [] };
+              g.rows.push(r);
+              byQuote.set(r.quoteDenom, g);
+            }
+            return [...byQuote.entries()].map(([quote, g]) => {
+              const t = boardTotals(
+                g.rows.map((r) => ({
+                  raised: r.raised,
+                  feesAccrued: r.feesAccrued,
+                  graduated: r.graduated,
+                  creatorPaid: r.creatorPaid,
+                })),
+              );
+              return (
+                <div className="totals" key={quote}>
+                  <div>
+                    <span className="v mono">{t.launches}</span>
+                    <span className="k">
+                      {byQuote.size > 1 ? `Launches in ${denomLabel(quote)}` : 'Launches'}
+                    </span>
+                  </div>
+                  <div>
+                    {/*
+                        "In curve reserves", not "volume". A sell reduces the reserve,
+                        so this falls when people exit where volume never would.
+                      */}
+                    <span className="v mono">
+                      {compact(t.raised, g.decimals)} {denomLabel(quote)}
+                    </span>
+                    <span className="k">In curve reserves</span>
+                  </div>
+                  <div>
+                    <span className="v mono">
+                      {compact(t.feesAccrued, g.decimals, 4)} {denomLabel(quote)}
+                    </span>
+                    <span className="k">Fees unclaimed</span>
+                  </div>
+                  <div>
+                    <span className="v mono">
+                      {compact(t.paidToCreators, g.decimals, 4)} {denomLabel(quote)}
+                    </span>
+                    <span className="k">Paid to creators</span>
+                  </div>
+                  <div>
+                    <span className="v mono">{t.graduated}</span>
+                    <span className="k">Graduated</span>
+                  </div>
                 </div>
-                <div>
-                  {/*
-                      "In curve reserves", not "volume". A sell reduces the reserve, so
-                      this falls when people exit where volume never would. Lifetime
-                      volume needs every trade ever, which is a log scan this chain's
-                      query limits make unreliable, so it is left out rather than
-                      approximated by a number that means something else.
-                    */}
-                  <span className="v mono">
-                    {compact(t.raised)} {NETWORK.quoteSymbol}
-                  </span>
-                  <span className="k">In curve reserves</span>
-                </div>
-                <div>
-                  <span className="v mono">
-                    {compact(t.feesAccrued, 18, 4)} {NETWORK.quoteSymbol}
-                  </span>
-                  <span className="k">Fees unclaimed</span>
-                </div>
-                <div>
-                  {/*
-                      Counted on chain as it is paid out, never derived. A claim zeroes
-                      `creator_owed`, so this is unanswerable from state unless the
-                      contract keeps its own running total, which it now does.
-                    */}
-                  <span className="v mono">
-                    {compact(t.paidToCreators, 18, 4)} {NETWORK.quoteSymbol}
-                  </span>
-                  <span className="k">Paid to creators</span>
-                </div>
-                <div>
-                  <span className="v mono">{t.graduated}</span>
-                  <span className="k">Graduated</span>
-                </div>
-              </div>
-            );
+              );
+            });
           })()}
 
-          <KingOfTheHill rows={rows.map(toRow)} nowSeconds={Math.floor(Date.now() / 1000)} />
+          {(() => {
+            /*
+             * ONE QUOTE, the one with the most launches. Ranking by market cap across
+             * quotes compares base units of different assets, which without a price
+             * oracle is not a ranking at all. Picking the largest group keeps the
+             * strip about the busiest market rather than whichever quote sorted first.
+             */
+            const counts = new Map<string, number>();
+            for (const r of rows) counts.set(r.quoteDenom, (counts.get(r.quoteDenom) ?? 0) + 1);
+            const biggest = [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
+            const forHill = rows.filter((r) => r.quoteDenom === biggest).map(toRow);
+            return (
+              <KingOfTheHill rows={forHill} nowSeconds={Math.floor(Date.now() / 1000)} />
+            );
+          })()}
 
           <div style={{ marginTop: 'var(--space-5)' }}>
             <LaunchList rows={rows.map(toRow)} />

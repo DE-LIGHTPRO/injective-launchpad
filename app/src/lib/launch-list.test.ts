@@ -29,6 +29,8 @@ const row = (
   id,
   denom: `factory/inj1pad/${sym}`,
   curveAddress: `inj1curve${id}`,
+  quoteDenom: 'inj',
+  quoteDecimals: 18,
   creator,
   // Selection has no opinion about identity, so the fixture carries none.
   profile: EMPTY_PROFILE,
@@ -216,4 +218,28 @@ test('volume compares as bigint, so 18 decimals do not tie', () => {
   };
   const out = selectLaunches(rows, { q: '', sort: 'volume', hideGraduated: false }, activity);
   assert.deepEqual(out.map((r) => r.id), [2, 1], 'the larger volume did not sort first');
+});
+
+test('the pair filter shows one quote at a time', () => {
+  /*
+   * Filtering is what keeps the board's arithmetic honest, not a convenience. Totals
+   * sum base units and a market-cap sort compares them, and neither means anything
+   * across quotes: 18-decimal INJ added to 6-decimal USDC is wrong by twelve orders
+   * of magnitude, and there is no price oracle here to convert with.
+   */
+  const inj = { ...row(1, 'A', 10n, 0.1), quoteDenom: 'inj', quoteDecimals: 18 };
+  const usdc = { ...row(2, 'B', 20n, 0.2), quoteDenom: 'erc20:0xUSDC', quoteDecimals: 6 };
+  const rows = [inj, usdc];
+
+  assert.deepEqual(
+    selectLaunches(rows, { q: '', sort: 'newest', hideGraduated: false, quote: 'inj' }).map((r) => r.id),
+    [1],
+  );
+  assert.deepEqual(
+    selectLaunches(rows, { q: '', sort: 'newest', hideGraduated: false, quote: 'erc20:0xUSDC' }).map((r) => r.id),
+    [2],
+  );
+  // `null` and absent both mean every pair, so an existing caller is unaffected.
+  assert.equal(selectLaunches(rows, { q: '', sort: 'newest', hideGraduated: false, quote: null }).length, 2);
+  assert.equal(selectLaunches(rows, { q: '', sort: 'newest', hideGraduated: false }).length, 2);
 });

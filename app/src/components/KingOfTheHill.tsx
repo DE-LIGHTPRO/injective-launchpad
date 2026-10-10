@@ -4,6 +4,7 @@ import { CurveGlyph } from './CurveGlyph';
 import { symbolOf } from '@/lib/chain';
 import { compact, ageLabel } from '@/lib/boardMetrics';
 import { NETWORK } from '@/lib/config';
+import { denomLabel } from '@/lib/chain';
 import type { LaunchRow } from '@/lib/launchList';
 
 /**
@@ -28,6 +29,12 @@ import type { LaunchRow } from '@/lib/launchList';
  * NO EXTRA QUERIES. Every figure comes from rows the board has already loaded, so this
  * strip cannot disagree with the cards below it and costs nothing to render. That is
  * the same rule the totals bar follows and for the same reason.
+ *
+ * ONE QUOTE ONLY. It ranks by market cap, and a market cap is denominated in the
+ * launch's quote asset, so ranking an INJ launch against a USDC one compares base
+ * units of different things: without a price oracle, and there is none here, that
+ * comparison has no meaning. The caller passes rows already filtered to one quote,
+ * which the board does by default.
  *
  * It renders nothing below three launches. With one or two, "top 3" is the whole board
  * with a crown on it, which tells a visitor nothing and makes an empty launchpad look
@@ -71,7 +78,7 @@ export function KingOfTheHill({ rows, nowSeconds }: { rows: LaunchRow[]; nowSeco
           </div>
           <div className="hill-cap">
             <span className="v mono">
-              {compact(BigInt(king.marketCap))} {NETWORK.quoteSymbol}
+              {compact(BigInt(king.marketCap), king.quoteDecimals)} {denomLabel(king.quoteDenom)}
             </span>
             <span className="k">market cap</span>
           </div>
@@ -99,7 +106,7 @@ export function KingOfTheHill({ rows, nowSeconds }: { rows: LaunchRow[]; nowSeco
               <TokenLogo profile={r.profile} symbol={symbolOf(r.denom)} size={28} />
               <strong>{symbolOf(r.denom)}</strong>
               <span className="v mono">
-                {compact(BigInt(r.marketCap))} {NETWORK.quoteSymbol}
+                {compact(BigInt(r.marketCap), r.quoteDecimals)} {denomLabel(r.quoteDenom)}
               </span>
             </Link>
           ))}

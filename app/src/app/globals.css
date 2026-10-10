@@ -1513,3 +1513,11 @@ header.top .brand { display: inline-flex; align-items: center; gap: var(--space-
   justify-content: flex-end;
   min-width: 0;
 }
+
+/*
+ * The pair filter, which only appears when more than one quote is in use.
+ * Wraps rather than scrolling: a pair hidden behind an unadvertised scrollbar is a
+ * pair nobody discovers.
+ */
+.pair-filter { flex-wrap: wrap; margin-bottom: var(--space-3); }
+.pair-filter .hint { margin-left: var(--space-1); color: var(--text-faint); }

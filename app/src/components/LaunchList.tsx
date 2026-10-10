@@ -13,6 +13,7 @@ import { NETWORK } from '@/lib/config';
 import { selectLaunches, type ActivityIndex, type LaunchRow, type SortKey } from '@/lib/launchList';
 import { enrichAll, tradesLabel, type LaunchEnrichment } from '@/lib/launchActivity';
 import { Sparkline } from './Sparkline';
+import { denomLabel } from '@/lib/chain';
 
 export type { LaunchRow };
 
@@ -64,6 +65,20 @@ export function LaunchList({ rows }: { rows: LaunchRow[] }) {
    * rather than "0 trades": zero is a real and common answer on a new board, so a
    * failed read showing zero is indistinguishable from a launch nobody has touched.
    */
+  /*
+   * Which quote the board is showing, `null` for all of them.
+   *
+   * Derived from the rows rather than from the factory's allowlist: a quote an
+   * operator allowlisted but nobody has launched in is a filter option that returns
+   * an empty board, which reads as a broken filter rather than as an unused pair.
+   */
+  const quotesPresent = useMemo(() => {
+    const seen = new Map<string, number>();
+    for (const r of rows) seen.set(r.quoteDenom, (seen.get(r.quoteDenom) ?? 0) + 1);
+    return [...seen.entries()].sort((a, b) => b[1] - a[1]);
+  }, [rows]);
+  const [quote, setQuote] = useState<string | null>(null);
+
   const [activity, setActivity] = useState<Record<string, LaunchEnrichment>>({});
 
   /*
@@ -119,11 +134,11 @@ export function LaunchList({ rows }: { rows: LaunchRow[] }) {
 
   // One implementation, in `lib/launchList.ts`, where the tests can reach it.
   const shown = useMemo(
-    () => selectLaunches(rows, { q, sort, hideGraduated }, activityIndex),
+    () => selectLaunches(rows, { q, sort, hideGraduated, quote }, activityIndex),
     // `activityIndex` IS a dependency. Leaving it out compiles and looks right, and
     // the board would simply never re-sort when the numbers land: picking "Most
     // traded" would rank by data that arrived a second later and never be applied.
-    [rows, q, sort, hideGraduated, activityIndex],
+    [rows, q, sort, hideGraduated, quote, activityIndex],
   );
 
   const active = SORTS.find((s) => s.key === sort);
@@ -168,6 +183,34 @@ export function LaunchList({ rows }: { rows: LaunchRow[] }) {
           <span>Hide graduated</span>
         </label>
       </div>
+
+      {/*
+          PAIRED WITH, and it renders only when more than one quote is actually in
+          use. With a single quote it is a filter whose every option shows the same
+          board, which is a control that does nothing.
+
+          It filters rather than converts, because converting would need a price for
+          each quote and there is no oracle here. Within one pair every figure on the
+          board is comparable; across pairs they are base units of different assets,
+          which is why the totals above group by quote rather than summing.
+        */}
+      {quotesPresent.length > 1 && (
+        <div className="segmented pair-filter" role="group" aria-label="Paired with">
+          <button type="button" aria-pressed={quote === null} onClick={() => setQuote(null)}>
+            All pairs
+          </button>
+          {quotesPresent.map(([denom, n]) => (
+            <button
+              key={denom}
+              type="button"
+              aria-pressed={quote === denom}
+              onClick={() => setQuote(denom)}
+            >
+              {denomLabel(denom)} <span className="hint">{n}</span>
+            </button>
+          ))}
+        </div>
+      )}
 
       {/*
           The count is stated rather than left for the reader to infer from an
@@ -263,7 +306,7 @@ export function LaunchList({ rows }: { rows: LaunchRow[] }) {
               <div className="card-mc">
                 <span className="mc-label">MC</span>
                 <span className="mc-value mono">
-                  {compact(BigInt(r.marketCap))} {NETWORK.quoteSymbol}
+                  {compact(BigInt(r.marketCap), r.quoteDecimals)} {denomLabel(r.quoteDenom)}
                 </span>
               </div>
 
@@ -292,8 +335,9 @@ export function LaunchList({ rows }: { rows: LaunchRow[] }) {
                 <div className="metric-row">
                   <span className="k">Raised</span>
                   <span className="v mono">
-                    {fmt(BigInt(r.raised), 18, 2)} / {fmt(BigInt(r.target), 18, 0)}{' '}
-                    {NETWORK.quoteSymbol}
+                    {fmt(BigInt(r.raised), r.quoteDecimals, 2)} /{' '}
+                    {fmt(BigInt(r.target), r.quoteDecimals, 0)}{' '}
+                    {denomLabel(r.quoteDenom)}
                   </span>
                 </div>
                 <div className="metric-row">
@@ -335,7 +379,7 @@ export function LaunchList({ rows }: { rows: LaunchRow[] }) {
                             * be more beyond it and the sum is then a floor. Printing it
                             * bare would understate a busy launch and read as exact.
                             */
-                          return `${e.volumePartial ? 'at least ' : ''}${compact(e.volume24h, 18, 2)} ${NETWORK.quoteSymbol}`;
+                          return `${e.volumePartial ? 'at least ' : ''}${compact(e.volume24h, r.quoteDecimals, 2)} ${denomLabel(r.quoteDenom)}`;
                         })()}
                       </span>
                     </div>
