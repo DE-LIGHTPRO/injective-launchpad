@@ -2,6 +2,7 @@
 
 import { useCallback, useMemo, useState } from 'react';
 import { ConnectWallet } from './ConnectWallet';
+import { LogoUpload } from './LogoUpload';
 import { CurveChart } from './CurveChart';
 import {
   planLaunch,
@@ -9,7 +10,15 @@ import {
   LaunchInputError,
   type LaunchPlan,
 } from '@/lib/createLaunch';
-import { parseAmount, fmt, maxCollectable, quoteBuy, type CurveConfig, type CurveState } from '@/lib/curve';
+import {
+  parseAmount,
+  fmt,
+  maxCollectable,
+  quoteBuy,
+  validate as validateCurve,
+  type CurveConfig,
+  type CurveState,
+} from '@/lib/curve';
 import { NETWORK, getFactoryAddress, isDeployed } from '@/lib/config';
 import {
   FIXED_TOTAL_SUPPLY,
@@ -94,6 +103,21 @@ export function CreateLaunch() {
   const built = useMemo((): { curve: CurveConfig; lpReserve: bigint } | { error: string } => {
     try {
       const total = FIXED_TOTAL_SUPPLY;
+      /*
+       * Blank is its own message. `parseAmount('')` is zero, and zero reaches the
+       * curve validator as a deliberate value, so an empty field would be reported
+       * as "the opening reserve must be above zero" when the user has simply not
+       * filled it in yet. Naming the field is what tells them where to look.
+       */
+      for (const [key, label] of [
+        ['virtualInj', 'opening reserve'],
+        ['target', 'graduation target'],
+        ['feeBps', 'trading fee'],
+        ['curveShare', 'share on the curve'],
+      ] as const) {
+        if (f[key].trim() === '') return { error: `Enter the ${label}.` };
+      }
+
       const sharePct = Number(f.curveShare);
       if (!Number.isFinite(sharePct) || sharePct <= 0 || sharePct >= 100) {
         return { error: 'The share on the curve is a percentage above 0 and below 100.' };
@@ -123,10 +147,26 @@ export function CreateLaunch() {
       const curve: CurveConfig = {
         virtualInj: parseAmount(f.virtualInj || '0'),
         virtualTokens,
-        curveSupply,
         graduationTarget: parseAmount(f.target || '0'),
+        curveSupply,
         feeBps: BigInt(Math.round(Number(f.feeBps) || 0)),
       };
+
+      /*
+       * VALIDATED HERE, not only at the Sign step.
+       *
+       * This memo used to build the config and hand it back unchecked, so clearing a
+       * required number left the form confidently describing a curve that cannot
+       * exist. Measured on the deployed build with Opening reserve emptied: the card
+       * rendered "On the curve 800,000,000", "Held back for liquidity 200,000,000"
+       * and "Curve ceiling 0 INJ" beside the chart's own "curve cannot be plotted
+       * with these parameters", with nothing anywhere naming the field at fault.
+       *
+       * The real refusal lived in `planLaunch`, which only runs once a wallet is
+       * connected, so before connecting there was no error at all. The contract would
+       * have refused it either way; the form just said nothing.
+       */
+      validateCurve(curve);
       return { curve, lpReserve };
     } catch (e) {
       return { error: (e as Error).message };
@@ -381,6 +421,13 @@ export function CreateLaunch() {
               guess which one, and these are permanent: a profile is immutable.
             */}
           {profileFieldError(f.image) && <p className="note err-text">{profileFieldError(f.image)}</p>}
+          {/*
+              Above the preview and below the field, because the field is still the
+              authority: an upload writes its `ipfs://` address into it, so what gets
+              launched is always the value shown, whether it was typed or pinned.
+              Renders nothing at all when the deployment has no pinning key.
+            */}
+          <LogoUpload onUploaded={set('image')} />
           {logoPreview && (
             <div className="logo-preview">
               {/*
@@ -518,6 +565,26 @@ export function CreateLaunch() {
           </div>
         </div>
       </div>
+
+      {'error' in built && (
+        /*
+          * The reason, where the curve would have been.
+          *
+          * `built.error` existed and was used only to HIDE this card and to block the
+          * plan. Nothing rendered it, so a bad number produced a form that silently
+          * dropped its most informative panel and offered no explanation: the curve
+          * simply vanished. Showing it here puts the sentence exactly where the
+          * missing thing was.
+          */
+        <div className="card">
+          <h2>The curve this makes</h2>
+          <p className="note err-text">{built.error}</p>
+          <p className="note">
+            Fix that and the shape appears here, drawn from the same maths the contract
+            charges.
+          </p>
+        </div>
+      )}
 
       {!('error' in built) && (
         <div className="card">

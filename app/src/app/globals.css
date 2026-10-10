@@ -1460,3 +1460,36 @@ header.top .brand { display: inline-flex; align-items: center; gap: var(--space-
 .hill-row:hover { border-color: var(--line-strong); }
 .hill-row strong { flex: 1; min-width: 0; }
 .hill-rank { color: var(--text-faint); font-size: var(--text-xs); }
+
+/*
+ * The logo drop zone.
+ *
+ * Only rendered when the deployment can actually pin, so there is no disabled state
+ * to style: a greyed-out upload would imply a version of the product where it works.
+ */
+.logo-drop-wrap { margin-top: var(--space-2); }
+.logo-drop {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  padding: var(--space-4);
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-md);
+  background: var(--glass-well);
+  color: var(--text-dim);
+  font-size: var(--text-sm);
+  text-align: center;
+  cursor: pointer;
+  /* A coarse pointer needs a real target, and this one is a box rather than an icon,
+     so height is the honest way to give it one. */
+  min-height: 72px;
+}
+.logo-drop:hover,
+.logo-drop:focus-visible,
+.logo-drop.over {
+  border-color: var(--accent-deep);
+  color: var(--text);
+}
+.logo-drop .note { margin: 0; }
