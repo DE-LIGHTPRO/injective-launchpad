@@ -10,7 +10,7 @@ import { ageLabel, feeLabel, compact } from '@/lib/boardMetrics';
 import { addressName } from '@/lib/addressName';
 import { fmt } from '@/lib/curve';
 import { NETWORK } from '@/lib/config';
-import { selectLaunches, type LaunchRow, type SortKey } from '@/lib/launchList';
+import { selectLaunches, type ActivityIndex, type LaunchRow, type SortKey } from '@/lib/launchList';
 import { enrichAll, tradesLabel, type LaunchEnrichment } from '@/lib/launchActivity';
 import { Sparkline } from './Sparkline';
 
@@ -40,6 +40,15 @@ const SORTS: Array<{ key: SortKey; label: string; hint: string }> = [
   { key: 'progress', label: 'Closest to graduating', hint: 'Highest share of the target raised' },
   { key: 'raised', label: 'Most raised', hint: `Largest amount of ${NETWORK.quoteSymbol} collected` },
   { key: 'newest', label: 'Newest', hint: 'Most recently created' },
+  /*
+   * The two activity sorts. They differ from the four above in one way that matters
+   * on screen: their numbers arrive after the board paints, so picking one can settle
+   * a moment later. The hint says what is being ranked rather than implying it is
+   * instant, and launches whose activity has not been read sort last rather than as
+   * zero, because zero would be a claim about a launch nobody has measured.
+   */
+  { key: 'trades', label: 'Most traded', hint: 'Most buys and sells, lifetime' },
+  { key: 'volume', label: 'Most volume', hint: `Most ${NETWORK.quoteSymbol} traded in about 24h` },
 ];
 
 export function LaunchList({ rows }: { rows: LaunchRow[] }) {
@@ -56,6 +65,21 @@ export function LaunchList({ rows }: { rows: LaunchRow[] }) {
    * failed read showing zero is indistinguishable from a launch nobody has touched.
    */
   const [activity, setActivity] = useState<Record<string, LaunchEnrichment>>({});
+
+  /*
+   * The shape the selector sorts on, derived rather than stored.
+   *
+   * Narrowed to the two fields a sort reads, so the selector cannot accidentally
+   * start depending on the chart series or the trader count, which are presentation
+   * and would make a sort order change for a reason nobody could see.
+   */
+  const activityIndex = useMemo<ActivityIndex>(() => {
+    const out: ActivityIndex = {};
+    for (const [curve, e] of Object.entries(activity)) {
+      out[curve] = { trades: e.activity?.trades ?? null, volume24h: e.volume24h };
+    }
+    return out;
+  }, [activity]);
   const curveKey = rows.map((r) => r.curveAddress).join(',');
   useEffect(() => {
     const curves = curveKey ? curveKey.split(',') : [];
@@ -95,8 +119,11 @@ export function LaunchList({ rows }: { rows: LaunchRow[] }) {
 
   // One implementation, in `lib/launchList.ts`, where the tests can reach it.
   const shown = useMemo(
-    () => selectLaunches(rows, { q, sort, hideGraduated }),
-    [rows, q, sort, hideGraduated],
+    () => selectLaunches(rows, { q, sort, hideGraduated }, activityIndex),
+    // `activityIndex` IS a dependency. Leaving it out compiles and looks right, and
+    // the board would simply never re-sort when the numbers land: picking "Most
+    // traded" would rank by data that arrived a second later and never be applied.
+    [rows, q, sort, hideGraduated, activityIndex],
   );
 
   const active = SORTS.find((s) => s.key === sort);

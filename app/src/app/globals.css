@@ -1500,7 +1500,13 @@ header.top .brand { display: inline-flex; align-items: center; gap: var(--space-
  * Sized in the component rather than here, because the SVG needs the same numbers to
  * build its path and two sources for one size is how a chart ends up clipped.
  */
-.spark { display: block; flex: none; opacity: 0.9; }
+/*
+ * NOT `.spark`. That name was already taken by the launch page's fills chart
+ * container (above), and reusing it put a 0.9 opacity on that chart as a side effect.
+ * The class guard did not catch it, because it checks that a class EXISTS in the
+ * stylesheet, which `.spark` did; a collision looks identical to correct reuse.
+ */
+.sparkline { display: block; flex: none; opacity: 0.9; }
 .card-spark {
   display: flex;
   align-items: center;

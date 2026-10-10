@@ -1,6 +1,7 @@
 import { getLcdUrl, NETWORK } from './config.ts';
 import { isDemoMode } from './demo.ts';
 import { listTrades, currentHeight, type Trade } from './chain.ts';
+import { buildSeries } from './priceSeries.ts';
 
 /**
  * How busy a launch is, from what this chain will actually answer.
@@ -147,29 +148,18 @@ function quoteOf(t: Trade): bigint | null {
 }
 
 /**
- * Effective price per whole token for each trade, oldest first.
+ * Effective fill prices, oldest first, for a sparkline.
  *
- * MEASURED FILLS, not a modelled curve. Every point is quote actually paid divided by
- * tokens actually received, so the line is what people were charged rather than what
- * the formula says they would be. The two agree on this contract, which is exactly why
- * using the fills is safe and also why it is the better choice: if they ever diverge,
- * a chart drawn from the formula would hide it and this one shows it.
+ * DELEGATES to `priceSeries.ts`, which already owned this and owned it better: its
+ * `fillPrice` takes the quote's decimals, which this did not, and that is about to
+ * matter when a launch can be quoted in something other than an 18-decimal INJ.
  *
- * Returned as numbers because this feeds an SVG path and nothing else. That is a lossy
- * conversion from 18-decimal bigints and it must never travel anywhere a quote or a
- * balance is computed from it.
+ * I wrote a second copy here before looking, which is the two-sources-for-one-fact
+ * defect this project keeps finding, committed while adding a feature to find it. The
+ * duplicate is gone rather than left to drift.
  */
-export function priceSeries(trades: Trade[]): number[] {
-  const out: number[] = [];
-  // `listTrades` returns newest first; a chart reads left to right in time.
-  for (const t of [...trades].reverse()) {
-    const q = quoteOf(t);
-    if (q === null || t.tokens === null || t.tokens <= 0n) continue;
-    // Scaled through the token unit so an 18-decimal quote over an 18-decimal token
-    // amount lands on a price per WHOLE token rather than per base unit.
-    out.push(Number((q * 10n ** 18n) / t.tokens) / 1e18);
-  }
-  return out;
+export function priceSeries(trades: Trade[], quoteDecimals = 18): number[] {
+  return buildSeries(trades, quoteDecimals).points.map((p) => p.price);
 }
 
 /**
@@ -201,8 +191,20 @@ export function volumeIsPartial(
 }
 
 /** Compact trade count: 1,871 reads better than 1871 on a dense card. */
-export function tradesLabel(a: LaunchActivity | null): string {
-  if (a === null) return 'trades unavailable';
+export function tradesLabel(a: LaunchActivity | null | undefined): string {
+  /*
+   * `undefined` is accepted even though the type said it could not happen, and it did:
+   * changing this record's value shape while the dev server was running left the old
+   * shape in React state, so `.activity` read undefined and this threw straight into
+   * the error boundary, blanking the board.
+   *
+   * That particular cause was a hot-reload artifact and cannot occur in production.
+   * The reason to handle it anyway is the blast radius: the whole launch grid is
+   * inside one boundary, so a label helper throwing takes the page down. A function
+   * whose entire job is to turn a value into a short string should never be the thing
+   * that does that.
+   */
+  if (a === null || a === undefined) return 'trades unavailable';
   return `${a.trades.toLocaleString('en-US')} ${a.trades === 1 ? 'trade' : 'trades'}`;
 }
 

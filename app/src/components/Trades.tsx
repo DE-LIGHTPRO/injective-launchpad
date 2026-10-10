@@ -4,6 +4,14 @@ import { fmt } from '@/lib/curve';
 import { NETWORK } from '@/lib/config';
 import { isDemoMode } from '@/lib/demo';
 import { buildSeries, changeBps, pathFor } from '@/lib/priceSeries';
+import {
+  uniqueTraders,
+  volumeWithin,
+  volumeIsPartial,
+  BLOCKS_PER_DAY,
+} from '@/lib/launchActivity';
+import { currentHeight } from '@/lib/chain';
+import { compact } from '@/lib/boardMetrics';
 
 /**
  * Recent trades, read from transaction events.
@@ -71,6 +79,15 @@ export async function Trades({
   const openingPct = opening?.share != null ? opening.share * 100 : null;
 
   const series = buildSeries(trades, NETWORK.quoteDecimals);
+  /*
+   * Height for the 24h window, read here rather than passed in. `null` on failure,
+   * which `volumeWithin` turns into "not measured" rather than zero: a day with no
+   * trades and a day we could not measure must not read the same.
+   */
+  const height = await currentHeight().catch(() => null);
+  const vol24 = volumeWithin(trades, height, BLOCKS_PER_DAY);
+  const volPartial = volumeIsPartial(trades, trades.length, height, BLOCKS_PER_DAY);
+  const traders = uniqueTraders(trades);
   const change = changeBps(series);
   const path = pathFor(series, 560, 60, 3);
 
@@ -112,6 +129,43 @@ export async function Trades({
           <div className="spark-foot mono">
             <span>{series.low.toPrecision(3)}</span>
             <span>{series.high.toPrecision(3)} {NETWORK.quoteSymbol} per {sym}</span>
+          </div>
+        </div>
+      )}
+
+      {/*
+          The figures a launch page is read for, from the trades already fetched above
+          rather than from three more requests.
+
+          ATH is `series.high`, which is the highest FILL, not the highest spot price.
+          On a steep curve a large buy fills above spot, so this is the most anyone has
+          actually paid, which is the number a reader thinks "all time high" means.
+
+          TRADERS, never holders. `denom_owners` answers 501 Not Implemented on
+          Injective, and deriving holders from trade history would be wrong: a
+          tokenfactory denom is a bank denom, a bank send runs no contract code, so
+          every transfer off the curve is invisible here. Someone who bought and sold
+          out is counted below and holds nothing.
+        */}
+      {trades.length > 0 && (
+        <div style={{ marginBottom: 'var(--space-4)' }}>
+          <div className="metric-row">
+            <span className="k">Highest fill</span>
+            <span className="v mono">
+              {series.high > 0 ? `${series.high.toPrecision(4)} ${NETWORK.quoteSymbol}` : 'not priced'}
+            </span>
+          </div>
+          <div className="metric-row">
+            <span className="k">Volume, about 24h</span>
+            <span className="v mono">
+              {vol24 === null
+                ? 'not measured'
+                : `${volPartial ? 'at least ' : ''}${compact(vol24, NETWORK.quoteDecimals, 4)} ${NETWORK.quoteSymbol}`}
+            </span>
+          </div>
+          <div className="metric-row">
+            <span className="k">Traders, not holders</span>
+            <span className="v mono">{traders.toLocaleString('en-US')}</span>
           </div>
         </div>
       )}

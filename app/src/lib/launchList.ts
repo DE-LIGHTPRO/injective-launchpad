@@ -31,7 +31,21 @@ import { symbolOf } from './chain.ts';
  *            history per launch there is no earlier price to compare against, and a
  *            "gainers" tab ordered by something else is worse than no tab.
  */
-export type SortKey = 'marketCap' | 'progress' | 'raised' | 'newest';
+export type SortKey = 'marketCap' | 'progress' | 'raised' | 'newest' | 'trades' | 'volume';
+
+/**
+ * Activity a row can be sorted by, when it has been read.
+ *
+ * SEPARATE FROM `LaunchRow` on purpose. A row is server-rendered and these numbers
+ * are not: they arrive after the board paints, from a different source, at a
+ * different time. Folding them into the row would make a field that is sometimes
+ * absent for reasons the row itself cannot explain, and every consumer would have to
+ * know which fields those were. Passing them beside it keeps "what the chain said
+ * about this launch" and "what we have managed to measure so far" apart.
+ */
+export interface ActivityIndex {
+  [curveAddress: string]: { trades: number | null; volume24h: bigint | null } | undefined;
+}
 
 export interface LaunchRow {
   id: number;
@@ -99,7 +113,11 @@ export function matches(row: LaunchRow, q: string): boolean {
   );
 }
 
-export function selectLaunches(rows: readonly LaunchRow[], sel: Selection): LaunchRow[] {
+export function selectLaunches(
+  rows: readonly LaunchRow[],
+  sel: Selection,
+  activity: ActivityIndex = {},
+): LaunchRow[] {
   const out = rows.filter((r) => {
     if (sel.hideGraduated && r.graduated) return false;
     return matches(r, sel.q);
@@ -125,6 +143,28 @@ export function selectLaunches(rows: readonly LaunchRow[], sel: Selection): Laun
       const y = BigInt(b.raised);
       return x > y ? -1 : x < y ? 1 : 0;
     }
+    /*
+     * Activity sorts, which differ from the others in one way that matters: the
+     * numbers may not have arrived. A launch whose activity is unread sorts LAST,
+     * in its existing relative order, rather than being treated as zero.
+     *
+     * Zero would be a claim. On a board where most launches genuinely have no trades
+     * yet, "unread" and "untraded" would be indistinguishable, and the unread ones
+     * would be scattered through the zeros as though they had been measured.
+     */
+    if (sel.sort === 'trades' || sel.sort === 'volume') {
+      const x = activity[a.curveAddress];
+      const y = activity[b.curveAddress];
+      const xv = sel.sort === 'trades' ? (x?.trades ?? null) : (x?.volume24h ?? null);
+      const yv = sel.sort === 'trades' ? (y?.trades ?? null) : (y?.volume24h ?? null);
+      if (xv === null && yv === null) return 0;
+      if (xv === null) return 1;
+      if (yv === null) return -1;
+      // Volume is bigint and trades is number; both compare correctly this way, and
+      // neither is converted, so an 18-decimal volume keeps its low digits.
+      return xv > yv ? -1 : xv < yv ? 1 : 0;
+    }
+
     return b.progress - a.progress;
   });
 }

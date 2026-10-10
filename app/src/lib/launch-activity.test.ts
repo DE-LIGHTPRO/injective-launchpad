@@ -81,6 +81,13 @@ test('a failed count reads as unavailable, never as zero', () => {
   // Zero is a real and common answer on a new board. A failed read rendering as
   // "0 trades" is indistinguishable from a launch nobody has touched.
   assert.equal(tradesLabel(null), 'trades unavailable');
+  /*
+   * And `undefined`, which the type said could not happen and which happened: the
+   * whole launch grid sits inside one error boundary, so a label helper that throws
+   * blanks the board. Nothing that turns a value into a short string should be able
+   * to do that.
+   */
+  assert.equal(tradesLabel(undefined), 'trades unavailable');
   assert.equal(tradesLabel({ buys: 0, sells: 0, trades: 0 }), '0 trades');
   assert.equal(tradesLabel({ buys: 1, sells: 0, trades: 1 }), '1 trade');
   assert.equal(tradesLabel({ buys: 1200, sells: 671, trades: 1871 }), '1,871 trades');

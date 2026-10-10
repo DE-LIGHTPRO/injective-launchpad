@@ -168,3 +168,52 @@ test('the filter and the search compose rather than override', () => {
     1,
   );
 });
+
+test('activity sorts put unread launches last, never as zero', () => {
+  /*
+   * The numbers these sort on arrive after the board paints. A launch whose activity
+   * has not been read must not be treated as zero: on a board where most launches
+   * genuinely have no trades yet, "unread" and "untraded" would be indistinguishable
+   * and the unread ones would be scattered through the zeros as though measured.
+   */
+  const rows = [row(1, 'A', 10n, 0.1), row(2, 'B', 20n, 0.2), row(3, 'C', 30n, 0.3)];
+  const activity = {
+    inj1curve1: { trades: 5, volume24h: 100n },
+    // curve2 deliberately absent: not read yet.
+    inj1curve3: { trades: 0, volume24h: 0n },
+  };
+
+  const byTrades = selectLaunches(rows, { q: '', sort: 'trades', hideGraduated: false }, activity);
+  assert.deepEqual(
+    byTrades.map((r) => r.id),
+    [1, 3, 2],
+    'the unread launch did not sort last behind the one measured at zero',
+  );
+
+  const byVolume = selectLaunches(rows, { q: '', sort: 'volume', hideGraduated: false }, activity);
+  assert.deepEqual(byVolume.map((r) => r.id), [1, 3, 2]);
+});
+
+test('an empty activity index leaves the order alone rather than throwing', () => {
+  // The board renders before any of this has been read, and that first paint must
+  // not depend on a fetch that has not happened.
+  const rows = [row(1, 'A', 10n, 0.1), row(2, 'B', 20n, 0.2)];
+  const out = selectLaunches(rows, { q: '', sort: 'trades', hideGraduated: false });
+  assert.equal(out.length, 2);
+});
+
+test('volume compares as bigint, so 18 decimals do not tie', () => {
+  /*
+   * Two volumes differing by one base unit. Through Number they are equal, because
+   * 2^53 is about 9e15 and these are 1e18 apart at the top, so the low digits are
+   * gone before any comparison happens.
+   */
+  const rows = [row(1, 'A', 10n, 0.1), row(2, 'B', 20n, 0.2)];
+  const big = 10n ** 24n;
+  const activity = {
+    inj1curve1: { trades: 1, volume24h: big },
+    inj1curve2: { trades: 1, volume24h: big + 1n },
+  };
+  const out = selectLaunches(rows, { q: '', sort: 'volume', hideGraduated: false }, activity);
+  assert.deepEqual(out.map((r) => r.id), [2, 1], 'the larger volume did not sort first');
+});
