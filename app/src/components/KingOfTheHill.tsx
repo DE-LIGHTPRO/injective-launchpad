@@ -15,12 +15,15 @@ import type { LaunchRow } from '@/lib/launchList';
  * also the one competitive mechanic a bonding curve gives you for free, because
  * position on the curve is public and objective.
  *
- * BY MARKET CAP, and the choice matters. Theirs ranks by market cap too, but the
- * tempting alternative here is "closest to graduating", which is progress along the
- * curve. That would rank a launch with a deliberately tiny graduation target above a
- * launch that has raised ten times more, and the first is easier to fake than the
- * second: a creator picks their own target. Market cap is derived from the price the
- * curve is actually charging, which no parameter choice can inflate.
+ * BY MARKET CAP, as theirs is. The argument for it used to be that the alternative,
+ * "closest to graduating", was gameable: a creator picked their own graduation target,
+ * so a deliberately tiny one would outrank a launch that had raised ten times more.
+ *
+ * That is no longer true. The curve is policy and every launch graduates at the same
+ * target, so progress is now a fair ranking too. Market cap stays because it is the
+ * more useful of the two, not because the other one can be faked. Noting the change
+ * rather than leaving the old reasoning in place: a justification that has quietly
+ * stopped applying is how the next person inherits a constraint nobody has.
  *
  * NO EXTRA QUERIES. Every figure comes from rows the board has already loaded, so this
  * strip cannot disagree with the cards below it and costs nothing to render. That is

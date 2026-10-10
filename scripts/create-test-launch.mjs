@@ -127,20 +127,13 @@ const msgs = [
     msg: {
       create_launch: {
         denom,
-        lp_reserve: LP_RESERVE.toString(),
         /*
-         * No `creator_fee_share_bps`. It used to be sent here and the factory now
-         * refuses it: the split is policy (70/30) written by the contract, and
-         * `cw_serde` denies unknown fields, so leaving this in fails the execute
-         * AFTER the 1 INJ denom-creation fee has been charged in the same tx.
+         * The curve is no longer sent. Its shape is policy written by the factory,
+         * so the only number left here is the fee; `cw_serde` denies unknown fields,
+         * so leaving `curve` or `lp_reserve` in fails the execute AFTER the 1 INJ
+         * denom-creation fee has been charged in the same transaction.
          */
-        curve: {
-          virtual_inj: (30n * ONE).toString(),
-          virtual_tokens: (1_073_000_000n * ONE).toString(),
-          curve_supply: CURVE_SUPPLY.toString(),
-          graduation_target: (85n * ONE).toString(),
-          fee_bps: 100,
-        },
+        fee_bps: 100,
         ...(openingBuy > 0n ? { initial_buy: openingBuy.toString() } : {}),
       },
     },

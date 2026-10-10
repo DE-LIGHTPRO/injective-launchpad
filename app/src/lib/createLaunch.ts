@@ -208,18 +208,12 @@ export function planLaunch(input: LaunchInput): LaunchPlan {
   const seed = seedAmount(input.curve, input.lpReserve);
 
   /*
-   * `curve` goes on the wire as decimal strings, because that is how
-   * `CurveConfigStored` deserialises Uint128 and because JSON has no integer wide
-   * enough: 800,000,000 tokens at 18 decimals is 8e26, and a Number loses it.
+   * The curve is no longer sent. It used to go on the wire as decimal strings, since
+   * `CurveConfigStored` deserialises Uint128 that way and JSON has no integer wide
+   * enough for 8e26. The factory builds the shape from its own constants now, so the
+   * only number that crosses is the fee, and `curveMsg` went with it rather than
+   * being left as an unused local that `tsc` would not have complained about.
    */
-  const curveMsg = {
-    virtual_inj: input.curve.virtualInj.toString(),
-    virtual_tokens: input.curve.virtualTokens.toString(),
-    curve_supply: input.curve.curveSupply.toString(),
-    graduation_target: input.curve.graduationTarget.toString(),
-    fee_bps: Number(input.curve.feeBps),
-  };
-
   return {
     denom,
     seedAmount: seed,
@@ -284,8 +278,7 @@ export function planLaunch(input: LaunchInput): LaunchPlan {
               ...(input.initialBuy && input.initialBuy > 0n
                 ? { initial_buy: input.initialBuy.toString() }
                 : {}),
-              lp_reserve: input.lpReserve.toString(),
-              curve: curveMsg,
+              fee_bps: Number(input.curve.feeBps),
             },
           },
           /*

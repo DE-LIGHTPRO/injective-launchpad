@@ -84,3 +84,28 @@ export const MAX_INITIAL_BUY_BPS = 1_000;
 export function initialBuyCeiling(curveSupply: bigint): bigint {
   return (curveSupply * BigInt(MAX_INITIAL_BUY_BPS)) / 10_000n;
 }
+
+/**
+ * The curve every launch gets. Shape is policy; only the fee on it is chosen.
+ *
+ * Mirrors the `CURVE_*` constants in `contracts/factory/src/lib.rs`, where the
+ * reasoning lives: fixing the supply alone did not make the board comparable, because
+ * market cap is the spot price times the supply and the price came from a curve the
+ * creator shaped. nearly.trade does the same and says so on their form: "Every launch
+ * opens at the same price."
+ */
+export const FIXED_CURVE = {
+  virtualInj: 30_000_000_000_000_000_000n,
+  virtualTokens: 1_073_000_000_000_000_000_000_000_000n,
+  curveSupply: 800_000_000_000_000_000_000_000_000n,
+  graduationTarget: 85_000_000_000_000_000_000n,
+} as const;
+
+/** The reserve held back for the pool: whatever the fixed supply leaves over. */
+export const FIXED_LP_RESERVE = FIXED_TOTAL_SUPPLY - FIXED_CURVE.curveSupply;
+
+/** Whole-token and whole-quote forms, for copy that should not print 27 digits. */
+export const CURVE_SUPPLY_TOKENS = 800_000_000;
+export const LP_RESERVE_TOKENS = 200_000_000;
+export const OPENING_RESERVE_QUOTE = 30;
+export const GRADUATION_TARGET_QUOTE = 85;

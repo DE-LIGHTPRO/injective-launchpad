@@ -127,14 +127,18 @@ test('amounts travel as decimal strings, never as numbers', () => {
   assert.ok(json.includes('"1000000000000000000000000000"'), 'the seed is not a string in the payload');
   assert.ok(!/"amount":\s*\d/.test(json.replace(/"amount":\s*"/g, '')), 'an amount is a bare number');
 
-  const exec = byType(p, MSG_EXECUTE) as { msg: { create_launch: { curve: Record<string, unknown> } } };
-  const curve = exec.msg.create_launch.curve;
-  for (const k of ['virtual_inj', 'virtual_tokens', 'curve_supply', 'graduation_target']) {
-    assert.equal(typeof curve[k], 'string', `${k} must be a string`);
-  }
-  // fee_bps is a u16 on the contract and so is a number, deliberately.
-  assert.equal(typeof curve.fee_bps, 'number');
-  assert.equal(curve.fee_bps, 100);
+  /*
+   * The curve itself no longer crosses the wire: the factory builds it from its own
+   * constants, so the only number left on `create_launch` is the fee. The width
+   * hazard this test exists for therefore applies only to the SEED now, which is
+   * checked above and is the 1e27 that would have been destroyed by a Number.
+   */
+  const exec = byType(p, MSG_EXECUTE) as { msg: { create_launch: Record<string, unknown> } };
+  const cl = exec.msg.create_launch;
+  assert.ok(!('curve' in cl), 'the curve is being sent again; its shape is policy');
+  // `fee_bps` is a u16 on the contract and so is a number, deliberately.
+  assert.equal(typeof cl.fee_bps, 'number');
+  assert.equal(cl.fee_bps, 100);
 });
 
 test('the execute message names the keys the contract deserialises', () => {
@@ -150,13 +154,14 @@ test('the execute message names the keys the contract deserialises', () => {
   assert.deepEqual(
     Object.keys(exec.msg.create_launch).sort(),
     /*
-     * `creator_fee_share_bps` is deliberately NOT here. It used to be a field a
-     * creator set, capped at the whole fee, so the platform's share was something
-     * every rational creator would set to zero. The factory now writes its own
-     * constant, and this assertion is what fails if the field is ever reintroduced
-     * as an input.
+     * The whole list, and what is ABSENT from it is the point. `curve`,
+     * `lp_reserve` and `creator_fee_share_bps` were all caller input once. Each one
+     * let a creator change what a number on the board meant: the price curve, the
+     * tradable share of the supply, and whether the platform earned anything at all.
+     * The factory writes all three from its own constants now, and this assertion is
+     * what fails if any of them comes back as an input.
      */
-    ['curve', 'denom', 'lp_reserve'],
+    ['denom', 'fee_bps'],
   );
 });
 

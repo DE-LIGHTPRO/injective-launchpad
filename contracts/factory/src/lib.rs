@@ -30,8 +30,10 @@ use curve::state::{CurveConfigStored, LaunchRules};
 /// contract directly, and a launchpad whose supply guarantee lives in a React
 /// component does not have one.
 ///
-/// Only the TOTAL is fixed. How it splits between the curve and the reserve held back
-/// for the pool stays the creator's choice.
+/// It used to say the split between the curve and the pool reserve stayed the
+/// creator's choice. It no longer does: see `CURVE_SUPPLY` below. Fixing the supply
+/// alone did not deliver what it promised, because market cap is the spot price times
+/// the supply and the price came from a curve the creator shaped.
 pub const FIXED_TOTAL_SUPPLY: Uint128 = Uint128::new(1_000_000_000_000_000_000_000_000_000);
 
 /// The creator's share of every trading fee, in bps of the fee. The rest is the
@@ -60,6 +62,58 @@ pub const FIXED_TOTAL_SUPPLY: Uint128 = Uint128::new(1_000_000_000_000_000_000_0
 /// What a creator still chooses is `fee_bps` itself, so a launch with a 0 bps fee earns
 /// both sides nothing. That is their launch to make uneconomic.
 pub const CREATOR_FEE_SHARE_BPS: u16 = 7_000;
+
+/// The curve every launch gets. Shape is policy; only the fee on it is chosen.
+///
+/// WHY THE CREATOR DOES NOT PICK THIS. Fixing the supply was supposed to make market
+/// caps comparable across the board, and on its own it does not: market cap is the
+/// spot price times the supply, and the spot price comes from the curve. A creator who
+/// halved the opening reserve opened at a different price with the same supply, so the
+/// headline number on two cards still measured different things. Same for progress to
+/// graduation, which is a fraction of a target the creator also chose: `KingOfTheHill`
+/// already ranks by market cap rather than progress for exactly that reason.
+///
+/// So the curve is identical everywhere and the board's numbers finally mean one thing:
+///
+/// ```text
+/// virtual_inj        30 INJ    every launch opens at the same price
+/// virtual_tokens  1.073 B      sets how far the curve runs before its asymptote
+/// curve_supply      800 M      80% of the fixed supply is purchasable
+/// lp_reserve        200 M      the remaining 20%, held back to pair at graduation
+/// graduation_target  85 INJ    under the ~87.9 INJ this curve can collect
+/// ```
+///
+/// This is what nearly.trade does: their create form carries no curve parameters at
+/// all and states "Every launch opens at the same price". It is also three fewer
+/// decisions a creator has to get right about something they cannot change afterwards.
+///
+/// `fee_bps` is deliberately NOT here. It is a cost, disclosed per launch with its own
+/// badge on the card, and it does not make two launches incomparable the way a
+/// different price curve does.
+pub const CURVE_VIRTUAL_INJ: u128 = 30_000_000_000_000_000_000;
+pub const CURVE_VIRTUAL_TOKENS: u128 = 1_073_000_000_000_000_000_000_000_000;
+pub const CURVE_SUPPLY: u128 = 800_000_000_000_000_000_000_000_000;
+pub const CURVE_GRADUATION_TARGET: u128 = 85_000_000_000_000_000_000;
+
+/// The reserve held back for the pool: whatever the fixed supply leaves over.
+///
+/// Derived rather than declared, so the two can never be written to disagree. It was a
+/// parameter the caller sent, which the factory then had to check summed to the fixed
+/// total; there is nothing left to check.
+pub fn lp_reserve() -> Uint128 {
+    FIXED_TOTAL_SUPPLY.checked_sub(Uint128::new(CURVE_SUPPLY)).unwrap()
+}
+
+/// The one curve, built from the constants above.
+pub fn fixed_curve(fee_bps: u16) -> CurveConfigStored {
+    CurveConfigStored {
+        virtual_inj: Uint128::new(CURVE_VIRTUAL_INJ),
+        virtual_tokens: Uint128::new(CURVE_VIRTUAL_TOKENS),
+        curve_supply: Uint128::new(CURVE_SUPPLY),
+        graduation_target: Uint128::new(CURVE_GRADUATION_TARGET),
+        fee_bps,
+    }
+}
 
 /// The most of the curve's supply a creator may take in their own opening buy, in bps.
 ///
@@ -333,8 +387,9 @@ pub enum ExecuteMsg {
     /// curve contract, so the factory never holds launch funds itself.
     CreateLaunch {
         denom: String,
-        lp_reserve: Uint128,
-        curve: CurveConfigStored,
+        /// The trading fee, in bps. The only number about the curve a creator picks:
+        /// its shape is `fixed_curve()` and is identical on every launch.
+        fee_bps: u16,
         /// Optional, and absent is a perfectly good answer: a token with no links is
         /// honest, where a token with a broken one is not.
         #[serde(default)]
@@ -414,8 +469,7 @@ pub fn execute(
     match msg {
         ExecuteMsg::CreateLaunch {
             denom,
-            lp_reserve,
-            curve,
+            fee_bps,
             profile,
             rules,
             initial_buy,
@@ -424,8 +478,7 @@ pub fn execute(
             env,
             info,
             denom,
-            lp_reserve,
-            curve,
+            fee_bps,
             profile,
             rules,
             initial_buy,
@@ -459,8 +512,7 @@ fn create_launch(
     env: Env,
     info: MessageInfo,
     denom: String,
-    lp_reserve: Uint128,
-    curve: CurveConfigStored,
+    fee_bps: u16,
     profile: TokenProfile,
     rules: LaunchRules,
     initial_buy: Option<Uint128>,
@@ -475,10 +527,33 @@ fn create_launch(
         return Err(FactoryError::DenomTaken { denom });
     }
 
-    // Validate the curve here as well as in the child. Failing early means a
-    // bad launch never consumes a reply slot or an id.
+    /*
+     * The curve is BUILT, not received. Its shape is the same on every launch, which
+     * is what makes two cards on the board comparable, so there is no caller input
+     * left to validate here beyond the fee.
+     *
+     * Still validated, because the constants are hand-written and a typo in one of
+     * them would otherwise produce a factory that happily instantiates curves nobody
+     * can trade. The child validates again on instantiate.
+     */
+    let curve = fixed_curve(fee_bps);
+    let lp_reserve = lp_reserve();
     let parsed: CurveConfig = (&curve).into();
     parsed.validate()?;
+
+    /*
+     * Belt and braces on the one thing the constants could get wrong silently: if
+     * `CURVE_SUPPLY` were ever edited without `FIXED_TOTAL_SUPPLY`, `lp_reserve()`
+     * absorbs the difference and nothing looks wrong. This is the assertion that the
+     * seed a creator attaches is the whole supply and none of it goes missing.
+     */
+    let required = curve.curve_supply.checked_add(lp_reserve)?;
+    if required != FIXED_TOTAL_SUPPLY {
+        return Err(FactoryError::BadTotalSupply {
+            expected: FIXED_TOTAL_SUPPLY,
+            got: required,
+        });
+    }
 
     /*
      * The opening buy, measured in supply rather than in quote.
@@ -509,19 +584,6 @@ fn create_launch(
                 max: ceiling,
             });
         }
-    }
-
-    let required = curve.curve_supply.checked_add(lp_reserve)?;
-    if required != FIXED_TOTAL_SUPPLY {
-        /*
-         * Refused rather than clamped. Clamping would silently launch a token with a
-         * different split than the creator asked for, and the split between the curve
-         * and the LP reserve is theirs to choose: only the TOTAL is fixed.
-         */
-        return Err(FactoryError::BadTotalSupply {
-            expected: FIXED_TOTAL_SUPPLY,
-            got: required,
-        });
     }
 
     /*

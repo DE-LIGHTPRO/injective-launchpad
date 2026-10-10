@@ -27,6 +27,12 @@ import {
   PLATFORM_FEE_SHARE_BPS,
   MAX_INITIAL_BUY_BPS,
   initialBuyCeiling,
+  FIXED_CURVE,
+  FIXED_LP_RESERVE,
+  CURVE_SUPPLY_TOKENS,
+  LP_RESERVE_TOKENS,
+  OPENING_RESERVE_QUOTE,
+  GRADUATION_TARGET_QUOTE,
 } from '@/lib/launchLimits';
 import type { WalletAccount } from '@/lib/wallet';
 import { profileForChain, profileFieldError, imageSrc } from '@/lib/tokenProfile';
@@ -75,9 +81,6 @@ const DEFAULTS = {
   openingFeePct: '',
   openingFeeMins: '10',
   initialBuy: '',
-  curveShare: '80',
-  target: '85',
-  virtualInj: '30',
   feeBps: '100',
 };
 
@@ -101,76 +104,35 @@ export function CreateLaunch() {
    * shape nobody intended.
    */
   const built = useMemo((): { curve: CurveConfig; lpReserve: bigint } | { error: string } => {
+    /*
+     * The curve is POLICY, not input. It used to be derived from four numbers the
+     * creator typed, and fixing the supply was supposed to make market caps
+     * comparable across the board. On its own it did not: market cap is the spot
+     * price times the supply, and the spot price comes from the curve, so two cards
+     * showing the same supply still measured different things if one creator had
+     * halved the opening reserve.
+     *
+     * Same for progress to graduation, which was a fraction of a target the creator
+     * also chose. `KingOfTheHill` already ranks by market cap rather than progress
+     * for exactly that reason, and that workaround is no longer needed.
+     *
+     * The fee stays a choice: it is a cost, badged per card, and it does not make two
+     * launches incomparable the way a different price curve does.
+     */
+    if (f.feeBps.trim() === '') return { error: 'Enter the trading fee.' };
+    const feeBps = Number(f.feeBps);
+    if (!Number.isInteger(feeBps) || feeBps < 0 || feeBps > 1_000) {
+      return { error: 'The trading fee is a whole number of basis points, 0 to 1000.' };
+    }
+    const curve: CurveConfig = { ...FIXED_CURVE, feeBps: BigInt(feeBps) };
     try {
-      const total = FIXED_TOTAL_SUPPLY;
-      /*
-       * Blank is its own message. `parseAmount('')` is zero, and zero reaches the
-       * curve validator as a deliberate value, so an empty field would be reported
-       * as "the opening reserve must be above zero" when the user has simply not
-       * filled it in yet. Naming the field is what tells them where to look.
-       */
-      for (const [key, label] of [
-        ['virtualInj', 'opening reserve'],
-        ['target', 'graduation target'],
-        ['feeBps', 'trading fee'],
-        ['curveShare', 'share on the curve'],
-      ] as const) {
-        if (f[key].trim() === '') return { error: `Enter the ${label}.` };
-      }
-
-      const sharePct = Number(f.curveShare);
-      if (!Number.isFinite(sharePct) || sharePct <= 0 || sharePct >= 100) {
-        return { error: 'The share on the curve is a percentage above 0 and below 100.' };
-      }
-
-      // Integer arithmetic throughout: a percentage of 1e27 through a float
-      // loses the low digits of the supply.
-      const curveSupply = (total * BigInt(Math.round(sharePct * 100))) / 10_000n;
-      /*
-       * The REMAINDER, never a second percentage. The factory refuses any total but
-       * exactly 1e27 base units, so a reserve computed as its own share of the supply
-       * would be refused on chain for a rounding error of one base unit at some
-       * percentages, and the form would look correct while doing it.
-       */
-      const lpReserve = total - curveSupply;
-      if (curveSupply <= 0n || lpReserve <= 0n) {
-        return { error: 'That split leaves nothing on one side.' };
-      }
-
-      /*
-       * `virtual_tokens` must exceed `curve_supply`, and the gap sets how far the
-       * curve runs before its asymptote. A fixed ratio keeps the shape sane
-       * whatever the supply, and the contract validates it again anyway.
-       */
-      const virtualTokens = (curveSupply * 13_413n) / 10_000n;
-
-      const curve: CurveConfig = {
-        virtualInj: parseAmount(f.virtualInj || '0'),
-        virtualTokens,
-        graduationTarget: parseAmount(f.target || '0'),
-        curveSupply,
-        feeBps: BigInt(Math.round(Number(f.feeBps) || 0)),
-      };
-
-      /*
-       * VALIDATED HERE, not only at the Sign step.
-       *
-       * This memo used to build the config and hand it back unchecked, so clearing a
-       * required number left the form confidently describing a curve that cannot
-       * exist. Measured on the deployed build with Opening reserve emptied: the card
-       * rendered "On the curve 800,000,000", "Held back for liquidity 200,000,000"
-       * and "Curve ceiling 0 INJ" beside the chart's own "curve cannot be plotted
-       * with these parameters", with nothing anywhere naming the field at fault.
-       *
-       * The real refusal lived in `planLaunch`, which only runs once a wallet is
-       * connected, so before connecting there was no error at all. The contract would
-       * have refused it either way; the form just said nothing.
-       */
+      // Still validated. The constants are hand-written, and a typo in one would
+      // otherwise draw a chart for a curve no launch can actually have.
       validateCurve(curve);
-      return { curve, lpReserve };
     } catch (e) {
       return { error: (e as Error).message };
     }
+    return { curve, lpReserve: FIXED_LP_RESERVE };
   }, [f]);
 
   const plan = useMemo((): { plan: LaunchPlan } | { error: string; field?: string } | null => {
@@ -509,30 +471,58 @@ export function CreateLaunch() {
               <span className="chip chip-sm muted">fixed</span>
             </div>
             <p className="note">
-              Every launch here has the same supply, so market caps on the board are
-              comparable. You choose how it splits, not how much there is.
+              Every launch here has the same supply and the same curve, so prices and
+              market caps on the board are directly comparable.
             </p>
           </div>
           <div className="field">
-            <label htmlFor="cl-share">
+            <span className="field-label">
               On the curve <span className="hint">% of supply</span>
-            </label>
-            <input id="cl-share" value={f.curveShare} onChange={(e) => set('curveShare')(e.target.value)} inputMode="decimal" />
+            </span>
+            <div className="fixed-value">
+              <span className="mono">{CURVE_SUPPLY_TOKENS.toLocaleString('en-US')}</span>
+              <span className="chip chip-sm muted">fixed</span>
+            </div>
+            <p className="note">
+              The other {LP_RESERVE_TOKENS.toLocaleString('en-US')} is held back and
+              paired against the {NETWORK.quoteSymbol} raised when the launch graduates.
+            </p>
           </div>
         </div>
 
+        {/*
+          * Stated, not entered. These were three inputs, and they are the reason a
+          * fixed supply alone did not make the board comparable: market cap is the
+          * spot price times the supply, and the price comes from the curve. A creator
+          * who halved the opening reserve opened at a different price with the same
+          * supply, so the headline figure on two cards measured different things.
+          */}
         <div className="field-row">
           <div className="field">
-            <label htmlFor="cl-target">
+            <span className="field-label">
               Graduates at <span className="hint">{NETWORK.quoteSymbol} raised</span>
-            </label>
-            <input id="cl-target" value={f.target} onChange={(e) => set('target')(e.target.value)} inputMode="decimal" />
+            </span>
+            <div className="fixed-value">
+              <span className="mono">
+                {GRADUATION_TARGET_QUOTE} {NETWORK.quoteSymbol}
+              </span>
+              <span className="chip chip-sm muted">fixed</span>
+            </div>
           </div>
           <div className="field">
-            <label htmlFor="cl-vinj">
+            <span className="field-label">
               Opening reserve <span className="hint">sets the starting price</span>
-            </label>
-            <input id="cl-vinj" value={f.virtualInj} onChange={(e) => set('virtualInj')(e.target.value)} inputMode="decimal" />
+            </span>
+            <div className="fixed-value">
+              <span className="mono">
+                {OPENING_RESERVE_QUOTE} {NETWORK.quoteSymbol}
+              </span>
+              <span className="chip chip-sm muted">fixed</span>
+            </div>
+            <p className="note">
+              Every launch opens at the same price, so being early on one is worth what
+              it is worth on any other.
+            </p>
           </div>
         </div>
 
