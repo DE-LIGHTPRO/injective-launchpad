@@ -36,6 +36,7 @@ const PER_LAUNCH = [
   'components/LaunchList.tsx',
   'components/KingOfTheHill.tsx',
   'components/CurveChart.tsx',
+  'components/PairPanels.tsx',
   'app/launch/[id]/page.tsx',
 ];
 
@@ -55,6 +56,26 @@ test('no per-launch figure is labelled with the network default quote', () => {
     offenders,
     [],
     "a launch's own amounts are being rendered in the network's default quote",
+  );
+});
+
+test('gas is a separate concept from the default quote', () => {
+  /*
+   * `NETWORK.quoteDenom` was doing double duty as "the default quote" and "what gas
+   * is paid in". They are the same denom on Injective, so code reserving gas reached
+   * for `quoteDenom` and was right by luck, and the guard above could not tell that
+   * use from a launch's amounts being mislabelled.
+   *
+   * Separating them is better than exempting the call: the code now says which it
+   * means, and the guard stays strict instead of growing a hole that the next
+   * genuine defect would fit through.
+   */
+  const cfg = readFileSync(join(SRC, 'lib/config.ts'), 'utf8');
+  assert.match(cfg, /gasDenom:\s*string/, 'gas has no name of its own');
+  const panel = readFileSync(join(SRC, 'components/TradePanel.tsx'), 'utf8');
+  assert.ok(
+    !/gasReserveFor\([^)]*quoteDenom\)/.test(panel),
+    'the gas reserve is reading the default quote again',
   );
 });
 

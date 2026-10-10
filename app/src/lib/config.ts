@@ -27,6 +27,17 @@ export interface NetworkConfig {
   lcd: string;
   explorer: string;
   quoteDenom: string;
+  /**
+   * What gas is paid in, which is NOT the same concept as the default quote even
+   * where it is the same denom.
+   *
+   * They were one field, and the collision showed up the moment a launch could be
+   * priced in something else: code reserving gas reached for `quoteDenom` and read
+   * correctly on Injective by luck, while the quote-labelling guard could not tell
+   * that use from a launch's amounts being mislabelled. Separate names, so each use
+   * says which it means.
+   */
+  gasDenom: string;
   quoteSymbol: string;
   quoteDecimals: number;
 }
@@ -38,6 +49,7 @@ export const NETWORKS: Record<NetworkName, NetworkConfig> = {
     lcd: 'https://testnet.sentry.lcd.injective.network',
     explorer: 'https://testnet.explorer.injective.network',
     quoteDenom: 'inj',
+    gasDenom: 'inj',
     quoteSymbol: 'INJ',
     quoteDecimals: 18,
   },
@@ -47,6 +59,7 @@ export const NETWORKS: Record<NetworkName, NetworkConfig> = {
     lcd: 'https://sentry.lcd.injective.network',
     explorer: 'https://explorer.injective.network',
     quoteDenom: 'inj',
+    gasDenom: 'inj',
     quoteSymbol: 'INJ',
     quoteDecimals: 18,
   },

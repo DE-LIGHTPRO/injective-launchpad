@@ -31,7 +31,20 @@ type Side = 'buy' | 'sell';
  * has approved it, which reads as the app being broken rather than as a balance being
  * exactly empty.
  */
-const GAS_RESERVE = 5n * 10n ** 16n;
+const GAS_RESERVE_INJ = 5n * 10n ** 16n;
+
+/**
+ * What Max leaves behind, and it is only ever left behind in the GAS token.
+ *
+ * Gas on Injective is paid in INJ whatever a launch is priced in, so a buy funded
+ * with USDC does not need USDC held back: reserving there would silently shave the
+ * user's order for no reason. Reserving the wrong AMOUNT would be worse. The literal
+ * is 18-decimal INJ, so applied to a 6-decimal quote it is 50,000,000,000 units, and
+ * Max on any realistic USDC balance would have resolved to zero.
+ */
+function gasReserveFor(quoteDenom: string, gasDenom: string): bigint {
+  return quoteDenom === gasDenom ? GAS_RESERVE_INJ : 0n;
+}
 
 /**
  * Base units to a plain decimal string, with nothing dropped.
@@ -170,10 +183,25 @@ export function TradePanel({
     return () => window.clearInterval(id);
   }, [decaySecondsLeft]);
 
+  /**
+   * The input, in base units of whatever side is being traded.
+   *
+   * A BUY'S INPUT IS QUOTE, a sell's is tokens, and they do not share decimals: the
+   * token is always 18 and the quote is whatever the launch is priced in. Parsing
+   * both at 18 was correct for exactly as long as every launch was INJ.
+   *
+   * It is derived once because the quote memo and the price-impact memo both parse
+   * the same box, and they had drifted: one parsed at 18 and the submit path at the
+   * quote's decimals, so on a 6-decimal pair the panel QUOTED one amount and would
+   * have signed a transaction for another, a trillion apart. The displayed number
+   * and the signed number must come from one place.
+   */
+  const inputDecimals = side === 'buy' ? quoteAsset.decimals : 18;
+
   const quote = useMemo(() => {
     if (!input.trim()) return null;
     try {
-      const raw = parseAmount(input);
+      const raw = parseAmount(input, inputDecimals);
       if (raw <= 0n) return null;
       /*
        * The premium comes off the top before the curve is quoted, exactly as the
@@ -202,7 +230,7 @@ export function TradePanel({
         error: e instanceof CurveError ? e.message : 'That amount could not be quoted.',
       } as const;
     }
-  }, [input, side, config, state, premiumBps]);
+  }, [input, side, config, state, premiumBps, inputDecimals]);
 
   /**
    * Send the trade.
@@ -222,7 +250,7 @@ export function TradePanel({
     setTradeError(null);
     setTxHash(null);
     try {
-      const raw = parseAmount(input, side === 'buy' ? quoteAsset.decimals : 18);
+      const raw = parseAmount(input, inputDecimals);
       const { broadcastExecute, GAS } = await import('@/lib/broadcast');
       const { txHash } = await broadcastExecute({
         contract: curve,
@@ -270,7 +298,7 @@ export function TradePanel({
   const impactBps = useMemo(() => {
     if (!quote?.ok) return null;
     try {
-      const raw = parseAmount(input || '0');
+      const raw = parseAmount(input || '0', inputDecimals);
       // Both sides, because the exit is where a holder is most exposed and it had
       // no disclosure at all: selling a quarter of a position on this shape pays
       // about 25% below spot, against the 1% fee shown beside it.
@@ -366,8 +394,16 @@ export function TradePanel({
                   className="max-btn"
                   onClick={() => {
                     const spendable =
-                      side === 'buy' ? (held > GAS_RESERVE ? held - GAS_RESERVE : 0n) : held;
-                    setInput(formatExact(spendable, 18));
+                      side === 'buy'
+                        ? (() => {
+                            const reserve = gasReserveFor(quoteAsset.denom, NETWORK.gasDenom);
+                            return held > reserve ? held - reserve : 0n;
+                          })()
+                        : held;
+                    // Formatted in the units of the side being traded, which is what
+                    // the box is then parsed as. Formatting at 18 and parsing at 6
+                    // puts Max a trillion out.
+                    setInput(formatExact(spendable, inputDecimals));
                   }}
                 >
                   Max
@@ -400,6 +436,10 @@ export function TradePanel({
         */}
       {side === 'buy' && (
         <div className="quick-amounts">
+          {/*
+              Presets in WHOLE units of the quote, so they read the same whatever the
+              pair is priced in. They were raw numbers beside a hardcoded INJ label.
+            */}
           {[1, 5, 10, 50].map((v) => (
             <button key={v} type="button" onClick={() => setInput(String(v))}>
               {v} {quoteAsset.label}

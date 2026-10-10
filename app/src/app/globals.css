@@ -1521,3 +1521,45 @@ header.top .brand { display: inline-flex; align-items: center; gap: var(--space-
  */
 .pair-filter { flex-wrap: wrap; margin-bottom: var(--space-3); }
 .pair-filter .hint { margin-left: var(--space-1); color: var(--text-faint); }
+
+/*
+ * By-pair panels. One per quote asset, because a market cap is denominated in the
+ * launch's quote and a single list spanning pairs ranks numbers that cannot be
+ * compared.
+ */
+.pairs { margin-top: var(--space-5); }
+.pairs-grid {
+  display: grid;
+  /* `min(..., 100%)` so a track can shrink below its floor rather than pushing the
+     page sideways on a narrow screen. */
+  grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr));
+  gap: var(--space-3);
+}
+.pairs-card {
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--line);
+  background: var(--glass-well);
+  min-width: 0;
+}
+.pairs-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding-bottom: var(--space-2);
+  margin-bottom: var(--space-1);
+  border-bottom: 1px solid var(--line);
+}
+.pairs-head .note { margin: 0; font-size: var(--text-micro); }
+.pairs-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) 0;
+  text-decoration: none;
+  color: inherit;
+  min-width: 0;
+}
+.pairs-row strong { flex: 1; min-width: 0; font-size: var(--text-sm); }
+.pairs-row:hover strong { color: var(--accent); }

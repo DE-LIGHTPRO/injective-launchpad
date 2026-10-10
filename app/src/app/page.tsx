@@ -1,6 +1,7 @@
 import { CurveGlyph } from '@/components/CurveGlyph';
 import { marketCap, boardTotals, compact } from '@/lib/boardMetrics';
 import { KingOfTheHill } from '@/components/KingOfTheHill';
+import { PairPanels } from '@/components/PairPanels';
 import { denomLabel } from '@/lib/chain';
 import type { LaunchRules } from '@/lib/launchRules';
 import Link from 'next/link';
@@ -322,6 +323,8 @@ export default async function Home() {
               <KingOfTheHill rows={forHill} nowSeconds={Math.floor(Date.now() / 1000)} />
             );
           })()}
+
+          <PairPanels rows={rows.map(toRow)} />
 
           <div style={{ marginTop: 'var(--space-5)' }}>
             <LaunchList rows={rows.map(toRow)} />
