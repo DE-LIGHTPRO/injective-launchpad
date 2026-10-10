@@ -434,6 +434,12 @@ const initMsg = {
   platform: process.env.INJ_PLATFORM_ADDRESS?.trim() || sender,
   migration_target: process.env.INJ_MIGRATION_TARGET?.trim() || sender,
   quote_denom: 'inj',
+  /*
+   * INJ is 18 decimals. Declared rather than assumed because this number scales the
+   * whole curve: Injective's USDC is 6, and an 18 against a 6-decimal quote sets the
+   * graduation target to 85 trillion, which nothing can reach.
+   */
+  quote_decimals: 18,
 };
 await assertPayable('platform fee recipient', initMsg.platform);
 await assertPayable('migration target', initMsg.migration_target);

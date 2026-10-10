@@ -90,10 +90,41 @@ pub const CREATOR_FEE_SHARE_BPS: u16 = 7_000;
 /// `fee_bps` is deliberately NOT here. It is a cost, disclosed per launch with its own
 /// badge on the card, and it does not make two launches incomparable the way a
 /// different price curve does.
-pub const CURVE_VIRTUAL_INJ: u128 = 30_000_000_000_000_000_000;
+/// WHOLE QUOTE UNITS, scaled to the quote's own decimals at launch.
+///
+/// These were base units at 18 decimals, which was correct only while every launch
+/// was quoted in INJ. Injective's USDC is **6 decimals** (measured on
+/// `denoms_metadata`, where most ERC20s are 18, USDC is 6 and some are 8), so the old
+/// constants against a USDC launch would have set the opening reserve to 30 TRILLION
+/// USDC and a graduation target of 85 trillion, which nothing could ever reach.
+///
+/// Scaling is exact rather than approximate, and that is worth stating because it is
+/// the reason this is safe at all. The curve is
+/// `tokens_out = vt - (vi * vt) / (vi + x)`, in which `vi` and `x` share units, so the
+/// ratio is dimensionless and the shape is invariant. Verified numerically: one whole
+/// quote unit buys 34,612,903,225,806,451,612,903,226 tokens at 18, 8 and 6 decimals
+/// alike. Getting it wrong instead puts 1 USDC at 35,766,666,666,666 tokens, out by
+/// twelve orders of magnitude.
+pub const CURVE_VIRTUAL_QUOTE_WHOLE: u128 = 30;
+pub const CURVE_GRADUATION_QUOTE_WHOLE: u128 = 85;
+
+/// Token-denominated, and therefore NOT scaled by the quote.
+///
+/// Every token this factory launches is 18 decimals, so these are identical on every
+/// launch whatever it is priced in. Keeping them in base units beside two constants
+/// that are in whole units is a trap, which is why both kinds say which they are in
+/// their names.
 pub const CURVE_VIRTUAL_TOKENS: u128 = 1_073_000_000_000_000_000_000_000_000;
 pub const CURVE_SUPPLY: u128 = 800_000_000_000_000_000_000_000_000;
-pub const CURVE_GRADUATION_TARGET: u128 = 85_000_000_000_000_000_000;
+
+/// The quote's decimals, raised to a multiplier.
+///
+/// Capped at 24 because `10^24` already exceeds any real denom and the next steps run
+/// into `u128`. A denom claiming more is refused when it is allowlisted, not here, so
+/// this cannot be reached with a bad value.
+fn quote_unit(decimals: u8) -> Uint128 {
+    Uint128::new(10u128.pow(decimals.min(24) as u32))
+}
 
 /// The reserve held back for the pool: whatever the fixed supply leaves over.
 ///
@@ -104,13 +135,18 @@ pub fn lp_reserve() -> Uint128 {
     FIXED_TOTAL_SUPPLY.checked_sub(Uint128::new(CURVE_SUPPLY)).unwrap()
 }
 
-/// The one curve, built from the constants above.
-pub fn fixed_curve(fee_bps: u16) -> CurveConfigStored {
+/// The one curve, in the quote asset's own units.
+///
+/// Only the two QUOTE-denominated figures scale. `virtual_tokens` and `curve_supply`
+/// are token amounts and every token this factory launches is 18 decimals, so they
+/// are the same on every launch whatever it is priced in.
+pub fn fixed_curve(fee_bps: u16, quote_decimals: u8) -> CurveConfigStored {
+    let unit = quote_unit(quote_decimals);
     CurveConfigStored {
-        virtual_inj: Uint128::new(CURVE_VIRTUAL_INJ),
+        virtual_inj: unit * Uint128::new(CURVE_VIRTUAL_QUOTE_WHOLE),
         virtual_tokens: Uint128::new(CURVE_VIRTUAL_TOKENS),
         curve_supply: Uint128::new(CURVE_SUPPLY),
-        graduation_target: Uint128::new(CURVE_GRADUATION_TARGET),
+        graduation_target: unit * Uint128::new(CURVE_GRADUATION_QUOTE_WHOLE),
         fee_bps,
     }
 }
@@ -201,6 +237,18 @@ pub enum FactoryError {
 
     #[error("token profile field `{field}` is invalid: {reason}")]
     BadProfile { field: String, reason: String },
+
+    #[error("quote asset `{denom}` is not allowed on this launchpad")]
+    QuoteNotAllowed { denom: String },
+
+    #[error("quote `{denom}` declares {decimals} decimals; the maximum is 24")]
+    BadQuoteDecimals { denom: String, decimals: u8 },
+
+    #[error("a quote denom cannot be empty")]
+    BadQuoteDenom,
+
+    #[error("`{denom}` is this factory's default quote and cannot be removed")]
+    CannotRemoveDefaultQuote { denom: String },
 
     #[error("unexpected funds attached: {denom}")]
     UnexpectedFunds { denom: String },
@@ -369,7 +417,26 @@ pub const CONFIG: Item<Config> = Item::new("config");
 pub const LAUNCHES: Map<u64, Launch> = Map::new("launches");
 pub const BY_DENOM: Map<&str, u64> = Map::new("by_denom");
 pub const NEXT_ID: Item<u64> = Item::new("next_id");
+
+/// Quote assets a launch may be priced in, and their decimals.
+///
+/// AN ALLOWLIST, NOT ANY DENOM, for two separate reasons and both matter.
+///
+/// The decimals are the correctness one. A quote's decimals set the scale of the
+/// curve, and nothing on chain reliably reports them for an arbitrary bank denom:
+/// `denoms_metadata` is optional and a tokenfactory denom often carries none. Reading
+/// them wrong does not fail, it produces a launch whose graduation target is off by
+/// orders of magnitude. So the admin records them once, per asset, deliberately.
+///
+/// The curation is the other. Any address can create a bank denom on Injective, so an
+/// open quote field means a launch priced in a worthless token the creator minted
+/// that morning, which would read on the board exactly like a real pair.
+pub const QUOTES: Map<&str, u8> = Map::new("quotes");
 const PENDING: Item<Pending> = Item::new("pending");
+
+fn default_quote_decimals() -> u8 {
+    18
+}
 
 #[cw_serde]
 pub struct InstantiateMsg {
@@ -378,6 +445,11 @@ pub struct InstantiateMsg {
     pub platform: String,
     pub migration_target: String,
     pub quote_denom: String,
+    /// Decimals of the default quote. INJ is 18; Injective's USDC is 6, which is the
+    /// reason this is asked for rather than assumed. Defaults to 18 so an existing
+    /// deployment script that does not send it still produces an INJ factory.
+    #[serde(default = "default_quote_decimals")]
+    pub quote_decimals: u8,
 }
 
 #[cw_serde]
@@ -388,8 +460,12 @@ pub enum ExecuteMsg {
     CreateLaunch {
         denom: String,
         /// The trading fee, in bps. The only number about the curve a creator picks:
-        /// its shape is `fixed_curve()` and is identical on every launch.
+        /// its shape is `fixed_curve()` and is identical on every launch in a quote.
         fee_bps: u16,
+        /// What buyers pay with. Must be allowlisted; absent means the factory's
+        /// default, which is what every launch before this field existed used.
+        #[serde(default)]
+        quote_denom: Option<String>,
         /// Optional, and absent is a perfectly good answer: a token with no links is
         /// honest, where a token with a broken one is not.
         #[serde(default)]
@@ -411,6 +487,16 @@ pub enum ExecuteMsg {
         #[serde(default)]
         initial_buy: Option<Uint128>,
     },
+    /// Allow a quote asset, recording the decimals the curve will be scaled to.
+    ///
+    /// Also used to correct one: a wrong decimals value is the single most damaging
+    /// thing in this contract's configuration, so it must be fixable without a
+    /// redeploy. Launches already created keep the curve they were given, because the
+    /// curve is stored on the child at instantiate and nothing here can reach it.
+    SetQuote { denom: String, decimals: u8 },
+    /// Stop new launches using a quote asset. Existing launches are untouched: their
+    /// curve and their reserve are on the curve contract and keep working.
+    RemoveQuote { denom: String },
     /// Point the factory at a new curve code id. Only affects future launches;
     /// existing ones are immutable by construction.
     SetCurveCodeId { code_id: u64 },
@@ -431,6 +517,26 @@ pub enum QueryMsg {
         start_after: Option<u64>,
         limit: Option<u32>,
     },
+    /// Quote assets a launch may be priced in, with their decimals.
+    ///
+    /// The create form needs this to decide whether to OFFER a choice at all: with
+    /// one allowlisted quote a picker is a control that does nothing, and with
+    /// several it is the difference between this launchpad and a single-pair one.
+    #[returns(QuotesResponse)]
+    Quotes {},
+}
+
+#[cw_serde]
+pub struct QuoteAsset {
+    pub denom: String,
+    pub decimals: u8,
+}
+
+#[cw_serde]
+pub struct QuotesResponse {
+    pub quotes: Vec<QuoteAsset>,
+    /// Which one a launch gets when it names none.
+    pub default_denom: String,
 }
 
 #[cw_serde]
@@ -452,9 +558,23 @@ pub fn instantiate(
             curve_code_id: msg.curve_code_id,
             platform: deps.api.addr_validate(&msg.platform)?,
             migration_target: deps.api.addr_validate(&msg.migration_target)?,
-            quote_denom: msg.quote_denom,
+            quote_denom: msg.quote_denom.clone(),
         },
     )?;
+    /*
+     * The default quote is allowlisted at birth, with the decimals the instantiator
+     * declares. Without this the allowlist is empty and `create_launch` refuses
+     * EVERY launch, including one that named no quote at all: a factory that
+     * instantiates cleanly and then rejects its own default is an outage that looks
+     * like a setting.
+     */
+    if msg.quote_decimals > 24 {
+        return Err(FactoryError::BadQuoteDecimals {
+            denom: msg.quote_denom,
+            decimals: msg.quote_decimals,
+        });
+    }
+    QUOTES.save(deps.storage, &msg.quote_denom, &msg.quote_decimals)?;
     NEXT_ID.save(deps.storage, &1u64)?;
     Ok(Response::new().add_attribute("action", "instantiate_factory"))
 }
@@ -470,6 +590,7 @@ pub fn execute(
         ExecuteMsg::CreateLaunch {
             denom,
             fee_bps,
+            quote_denom,
             profile,
             rules,
             initial_buy,
@@ -479,10 +600,52 @@ pub fn execute(
             info,
             denom,
             fee_bps,
+            quote_denom,
             profile,
             rules,
             initial_buy,
         ),
+        ExecuteMsg::SetQuote { denom, decimals } => {
+            let cfg = CONFIG.load(deps.storage)?;
+            if info.sender != cfg.admin {
+                return Err(FactoryError::Unauthorised);
+            }
+            /*
+             * Bounded, because this number scales the whole curve. 24 is already past
+             * any real denom and the next power overflows the multiplication; refusing
+             * here is the only place it can be caught, since `fixed_curve` runs on a
+             * value this has already accepted.
+             */
+            if decimals > 24 {
+                return Err(FactoryError::BadQuoteDecimals { denom, decimals });
+            }
+            if denom.trim().is_empty() {
+                return Err(FactoryError::BadQuoteDenom);
+            }
+            QUOTES.save(deps.storage, &denom, &decimals)?;
+            Ok(Response::new()
+                .add_attribute("action", "set_quote")
+                .add_attribute("denom", denom)
+                .add_attribute("decimals", decimals.to_string()))
+        }
+        ExecuteMsg::RemoveQuote { denom } => {
+            let cfg = CONFIG.load(deps.storage)?;
+            if info.sender != cfg.admin {
+                return Err(FactoryError::Unauthorised);
+            }
+            /*
+             * The factory's own default quote cannot be removed. Removing it would
+             * leave a factory that accepts no quote at all and whose `CreateLaunch`
+             * refuses everything, which looks like an outage rather than a setting.
+             */
+            if denom == cfg.quote_denom {
+                return Err(FactoryError::CannotRemoveDefaultQuote { denom });
+            }
+            QUOTES.remove(deps.storage, &denom);
+            Ok(Response::new()
+                .add_attribute("action", "remove_quote")
+                .add_attribute("denom", denom))
+        }
         ExecuteMsg::SetCurveCodeId { code_id } => {
             let mut cfg = CONFIG.load(deps.storage)?;
             if info.sender != cfg.admin {
@@ -513,6 +676,7 @@ fn create_launch(
     info: MessageInfo,
     denom: String,
     fee_bps: u16,
+    quote_denom: Option<String>,
     profile: TokenProfile,
     rules: LaunchRules,
     initial_buy: Option<Uint128>,
@@ -536,7 +700,21 @@ fn create_launch(
      * them would otherwise produce a factory that happily instantiates curves nobody
      * can trade. The child validates again on instantiate.
      */
-    let curve = fixed_curve(fee_bps);
+    /*
+     * The quote, and the decimals that scale the curve to it.
+     *
+     * Resolved from the allowlist rather than taken from the caller or read off the
+     * chain. `denoms_metadata` is optional on Injective and a tokenfactory denom
+     * usually carries none, so there is no reliable on-chain source; and a wrong
+     * value here does not fail, it produces a launch whose graduation target is out
+     * by orders of magnitude. The admin records it once, per asset.
+     */
+    let quote = quote_denom.unwrap_or_else(|| cfg.quote_denom.clone());
+    let quote_decimals = QUOTES
+        .may_load(deps.storage, &quote)?
+        .ok_or_else(|| FactoryError::QuoteNotAllowed { denom: quote.clone() })?;
+
+    let curve = fixed_curve(fee_bps, quote_decimals);
     let lp_reserve = lp_reserve();
     let parsed: CurveConfig = (&curve).into();
     parsed.validate()?;
@@ -609,7 +787,7 @@ fn create_launch(
     for coin in &info.funds {
         if coin.denom == denom {
             got_seed = got_seed.checked_add(coin.amount)?;
-        } else if coin.denom == cfg.quote_denom {
+        } else if coin.denom == quote {
             got_quote = got_quote.checked_add(coin.amount)?;
         } else {
             return Err(FactoryError::UnexpectedFunds {
@@ -648,7 +826,7 @@ fn create_launch(
             creator: info.sender.clone(),
             profile,
             initial_buy,
-            quote_denom: cfg.quote_denom.clone(),
+            quote_denom: quote.clone(),
         },
     )?;
 
@@ -662,7 +840,10 @@ fn create_launch(
     let init = CurveInstantiateMsg {
         rules,
         denom: denom.clone(),
-        quote_denom: cfg.quote_denom.clone(),
+        // The launch's quote, not the factory's default. Sending the default here
+        // would create a curve that prices in INJ while the funds check accepted
+        // USDC, and the mismatch would only surface at the first trade.
+        quote_denom: quote.clone(),
         creator: info.sender.to_string(),
         platform: cfg.platform.to_string(),
         migration_target: cfg.migration_target.to_string(),
@@ -780,6 +961,14 @@ fn instantiated_address(msg: &Reply) -> Option<String> {
 pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
         QueryMsg::Config {} => to_json_binary(&CONFIG.load(deps.storage)?),
+        QueryMsg::Quotes {} => {
+            let cfg = CONFIG.load(deps.storage)?;
+            let quotes = QUOTES
+                .range(deps.storage, None, None, cosmwasm_std::Order::Ascending)
+                .map(|r| r.map(|(denom, decimals)| QuoteAsset { denom, decimals }))
+                .collect::<Result<Vec<_>, _>>()?;
+            to_json_binary(&QuotesResponse { quotes, default_denom: cfg.quote_denom })
+        }
         QueryMsg::Launch { id } => to_json_binary(&LAUNCHES.load(deps.storage, id)?),
         QueryMsg::LaunchByDenom { denom } => {
             let id = BY_DENOM.load(deps.storage, &denom)?;

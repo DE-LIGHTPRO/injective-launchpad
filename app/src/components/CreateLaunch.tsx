@@ -1,8 +1,9 @@
 'use client';
 
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ConnectWallet } from './ConnectWallet';
 import { LogoUpload } from './LogoUpload';
+import { listQuotes, denomLabel, type QuoteAsset } from '@/lib/chain';
 import { CurveChart } from './CurveChart';
 import {
   planLaunch,
@@ -87,6 +88,28 @@ const DEFAULTS = {
 export function CreateLaunch() {
   const [f, setF] = useState(DEFAULTS);
   const [account, setAccount] = useState<WalletAccount | null>(null);
+
+  /*
+   * The quote assets this launchpad allows, read from the factory.
+   *
+   * `null` until the read lands, and the picker renders NOTHING in that state and
+   * nothing when there is only one. A select with a single option is a control that
+   * does nothing, and this launchpad ships with one quote; the picker is the feature
+   * that appears when an operator adds a second, not a permanent empty gesture.
+   */
+  const [quotes, setQuotes] = useState<{ quotes: QuoteAsset[]; defaultDenom: string } | null>(null);
+  const [quoteDenom, setQuoteDenom] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    void listQuotes().then((q) => {
+      if (!live) return;
+      setQuotes(q);
+      setQuoteDenom(q.defaultDenom);
+    });
+    return () => {
+      live = false;
+    };
+  }, []);
   const [confirmed, setConfirmed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<string | null>(null);
@@ -156,6 +179,7 @@ export function CreateLaunch() {
           }),
           curve: built.curve,
           lpReserve: built.lpReserve,
+          quoteDenom: quoteDenom ?? undefined,
           factory,
         }),
       };
@@ -533,6 +557,29 @@ export function CreateLaunch() {
             </label>
             <input id="cl-fee" value={f.feeBps} onChange={(e) => set('feeBps')(e.target.value)} inputMode="numeric" />
           </div>
+          {quotes !== null && quotes.quotes.length > 1 && (
+            <div className="field">
+              <label htmlFor="cl-quote">
+                Paired with <span className="hint">what buyers pay in</span>
+              </label>
+              <select
+                id="cl-quote"
+                value={quoteDenom ?? quotes.defaultDenom}
+                onChange={(e) => setQuoteDenom(e.target.value)}
+              >
+                {quotes.quotes.map((q) => (
+                  <option key={q.denom} value={q.denom}>
+                    {denomLabel(q.denom)}
+                  </option>
+                ))}
+              </select>
+              <p className="note">
+                The curve is the same shape in every pair, scaled to that
+                asset&rsquo;s own decimals. Launches in different pairs are not
+                directly comparable on the board.
+              </p>
+            </div>
+          )}
           <div className="field">
             {/*
               * Also not an input. It was one, capped at the whole fee, which made the

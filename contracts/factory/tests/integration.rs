@@ -9,7 +9,7 @@ use cosmwasm_std::{coin, coins, Addr, Empty, Uint128};
 use cw_multi_test::{App, AppBuilder, BankSudo, Contract, ContractWrapper, Executor, SudoMsg};
 
 use curve::msg::{ExecuteMsg as CurveExec, QueryMsg as CurveQuery};
-use curve::state::{CurveConfigStored, State as CurveState};
+use curve::state::State as CurveState;
 use factory::{Config, ExecuteMsg, InstantiateMsg, Launch, LaunchesResponse, QueryMsg};
 
 const QUOTE: &str = "inj";
@@ -21,16 +21,6 @@ fn one() -> Uint128 {
 fn amt(n: u128) -> Uint128 {
     Uint128::new(n) * one()
 }
-/// Mirrors the contract. A test that invented its own shape would be asserting
-/// against a curve no launch can have.
-fn lp_reserve() -> Uint128 {
-    factory::lp_reserve()
-}
-
-fn curve_cfg() -> CurveConfigStored {
-    factory::fixed_curve(100)
-}
-
 fn seed_total() -> Uint128 {
     factory::FIXED_TOTAL_SUPPLY
 }
@@ -107,6 +97,7 @@ fn setup() -> Fx {
                 platform: platform.to_string(),
                 migration_target: migration.to_string(),
                 quote_denom: QUOTE.into(),
+                quote_decimals: 18,
             },
             &[],
             "factory",
@@ -141,6 +132,7 @@ impl Fx {
                 &ExecuteMsg::CreateLaunch {
                     denom: denom.into(),
                     fee_bps: 100,
+                quote_denom: None,
                     profile,
                     rules,
                     initial_buy: None,
@@ -174,6 +166,7 @@ impl Fx {
                 &ExecuteMsg::CreateLaunch {
                     denom: denom.into(),
                     fee_bps,
+                    quote_denom: None,
                     profile: Default::default(),
                     rules: Default::default(),
                     initial_buy: None,
@@ -273,6 +266,7 @@ fn wrong_seed_amount_is_refused() {
             initial_buy: None,
             denom: TOKEN.into(),
             fee_bps: 100,
+                quote_denom: None,
         },
         &coins(amt(1).u128(), TOKEN), // nowhere near the required seed
     );
@@ -291,7 +285,7 @@ fn the_policy_curve_can_actually_reach_its_graduation_target() {
      * is stalled by design, with no caller to blame and nothing refusing it. So the
      * assertion is against the constants themselves.
      */
-    let curve: launchpad_math::CurveConfig = (&factory::fixed_curve(100)).into();
+    let curve: launchpad_math::CurveConfig = (&factory::fixed_curve(100, 18)).into();
     let ceiling = curve.max_collectable().expect("the policy curve cannot be priced");
     assert!(
         curve.graduation_target <= ceiling,
@@ -602,6 +596,7 @@ fn an_initial_buy_sends_the_tokens_to_the_creator_not_the_factory() {
             &ExecuteMsg::CreateLaunch {
                 denom: TOKEN.into(),
                 fee_bps: 100,
+                quote_denom: None,
                 profile: Default::default(),
                 rules: Default::default(),
                 initial_buy: Some(spend),
@@ -653,6 +648,7 @@ fn the_attached_quote_must_match_the_declared_initial_buy() {
             &ExecuteMsg::CreateLaunch {
                 denom: TOKEN.into(),
                 fee_bps: 100,
+                quote_denom: None,
                 profile: Default::default(),
                 rules: Default::default(),
                 initial_buy: Some(amt(5)),
@@ -675,6 +671,7 @@ fn a_launch_with_no_initial_buy_still_takes_exactly_the_seed() {
         &ExecuteMsg::CreateLaunch {
             denom: TOKEN.into(),
             fee_bps: 100,
+                quote_denom: None,
             profile: Default::default(),
             rules: Default::default(),
             initial_buy: None,
@@ -699,6 +696,7 @@ fn a_third_denom_is_refused_rather_than_kept() {
         &ExecuteMsg::CreateLaunch {
             denom: TOKEN.into(),
             fee_bps: 100,
+                quote_denom: None,
             profile: Default::default(),
             rules: Default::default(),
             initial_buy: None,
@@ -730,6 +728,7 @@ fn the_factory_refuses_a_bad_seed_itself_rather_than_leaving_it_to_the_curve() {
         &ExecuteMsg::CreateLaunch {
             denom: TOKEN.into(),
             fee_bps: 100,
+                quote_denom: None,
             profile: Default::default(),
             rules: Default::default(),
             initial_buy: None,
@@ -910,6 +909,7 @@ fn create_with_dev_buy(f: &mut Fx, denom: &str, spend: Uint128) -> Result<(), St
             &ExecuteMsg::CreateLaunch {
                 denom: denom.into(),
                 fee_bps: 100,
+                quote_denom: None,
                 profile: Default::default(),
                 rules: Default::default(),
                 initial_buy: Some(spend),
@@ -981,4 +981,237 @@ fn the_opening_buy_cap_is_a_share_of_the_curve_not_of_the_total_supply() {
         err.contains(&curve_basis.to_string()),
         "the refusal names a ceiling other than 10% of the curve supply: {err}"
     );
+}
+
+/*
+ * ---------------------------------------------------------------------------
+ * Quote assets.
+ *
+ * Injective's USDC is SIX decimals, measured on `denoms_metadata`, where most ERC20s
+ * are 18 and some are 8. The curve constants are whole quote units scaled at launch,
+ * and getting that scaling wrong does not fail loudly: it produces a launch whose
+ * opening reserve is 30 trillion USDC and whose graduation target can never be
+ * reached. These tests exist for that one number.
+ * ---------------------------------------------------------------------------
+ */
+
+const USDC: &str = "peggy0xUSDC";
+
+#[test]
+fn the_curve_shape_is_identical_at_every_quote_decimals() {
+    /*
+     * The property that makes scaling safe at all. The curve is
+     * `tokens_out = vt - (vi * vt) / (vi + x)`, in which `vi` and `x` share units, so
+     * the ratio is dimensionless. One whole quote unit must therefore buy the same
+     * number of tokens whatever the quote's decimals are.
+     *
+     * Asserted rather than assumed, because the whole multi-quote feature rests on it.
+     */
+    let mut outs = vec![];
+    for dec in [18u8, 8, 6] {
+        let cfg: launchpad_math::CurveConfig = (&factory::fixed_curve(100, dec)).into();
+        let one_whole = Uint128::new(10u128.pow(dec as u32));
+        let q = launchpad_math::quote_buy(
+            &cfg,
+            &launchpad_math::CurveState {
+                inj_collected: Uint128::zero(),
+                tokens_sold: Uint128::zero(),
+                graduated: false,
+            },
+            one_whole,
+        )
+        .expect("the policy curve could not be priced");
+        outs.push(q.tokens_out);
+    }
+    assert_eq!(outs[0], outs[1], "18 and 8 decimals priced differently");
+    assert_eq!(outs[1], outs[2], "8 and 6 decimals priced differently");
+}
+
+#[test]
+fn a_six_decimal_quote_scales_the_curve_rather_than_inheriting_eighteen() {
+    // The specific disaster: 18-decimal constants against a 6-decimal quote put the
+    // graduation target at 85 trillion USDC. It must be 85.
+    let c = factory::fixed_curve(100, 6);
+    assert_eq!(c.graduation_target, Uint128::new(85_000_000));
+    assert_eq!(c.virtual_inj, Uint128::new(30_000_000));
+    // Token amounts do NOT scale: every launched token is 18 decimals.
+    assert_eq!(c.curve_supply, amt(800_000_000));
+    assert_eq!(c.virtual_tokens, amt(1_073_000_000));
+}
+
+#[test]
+fn a_quote_nobody_allowlisted_is_refused() {
+    let mut f = setup();
+    let err = f
+        .app
+        .execute_contract(
+            f.creator.clone(),
+            f.factory.clone(),
+            &ExecuteMsg::CreateLaunch {
+                denom: TOKEN.into(),
+                fee_bps: 100,
+                quote_denom: Some(USDC.into()),
+                profile: Default::default(),
+                rules: Default::default(),
+                initial_buy: None,
+            },
+            &coins(seed_total().u128(), TOKEN),
+        )
+        .map_err(|e| format!("{e:#}"))
+        .expect_err("an unknown quote was accepted");
+    assert!(err.contains("is not allowed on this launchpad"), "unexpected: {err}");
+}
+
+#[test]
+fn an_allowlisted_quote_launches_with_its_own_scale() {
+    let mut f = setup();
+    let admin = f.admin.clone();
+    f.app
+        .execute_contract(
+            admin,
+            f.factory.clone(),
+            &ExecuteMsg::SetQuote { denom: USDC.into(), decimals: 6 },
+            &[],
+        )
+        .unwrap();
+
+    f.app
+        .execute_contract(
+            f.creator.clone(),
+            f.factory.clone(),
+            &ExecuteMsg::CreateLaunch {
+                denom: TOKEN.into(),
+                fee_bps: 100,
+                quote_denom: Some(USDC.into()),
+                profile: Default::default(),
+                rules: Default::default(),
+                initial_buy: None,
+            },
+            &coins(seed_total().u128(), TOKEN),
+        )
+        .unwrap();
+
+    let cfg = curve_config(&f, 1);
+    assert_eq!(cfg.quote_denom, USDC, "the curve was given the wrong quote");
+    assert_eq!(
+        cfg.curve.graduation_target,
+        Uint128::new(85_000_000),
+        "the curve kept 18-decimal constants against a 6-decimal quote"
+    );
+}
+
+#[test]
+fn only_the_admin_curates_quotes() {
+    let mut f = setup();
+    let creator = f.creator.clone();
+    let err = f
+        .app
+        .execute_contract(
+            creator,
+            f.factory.clone(),
+            &ExecuteMsg::SetQuote { denom: USDC.into(), decimals: 6 },
+            &[],
+        )
+        .map_err(|e| format!("{e:#}"))
+        .expect_err("anyone could allowlist a quote");
+    /*
+     * This matters more than an ordinary admin gate. Any address can create a bank
+     * denom on Injective, so an open quote field means a launch priced in a token the
+     * creator minted that morning, which reads on the board exactly like a real pair.
+     */
+    assert!(err.contains("nauthorised") || err.contains("nauthorized"), "unexpected: {err}");
+}
+
+#[test]
+fn absurd_decimals_are_refused_rather_than_silently_clamped() {
+    let mut f = setup();
+    let admin = f.admin.clone();
+    let err = f
+        .app
+        .execute_contract(
+            admin,
+            f.factory.clone(),
+            &ExecuteMsg::SetQuote { denom: USDC.into(), decimals: 40 },
+            &[],
+        )
+        .map_err(|e| format!("{e:#}"))
+        .expect_err("40 decimals was accepted");
+    // Clamping would be worse than refusing: a quote recorded at 40 and used at 24
+    // launches a curve priced 10^16 away from what the admin intended.
+    assert!(err.contains("maximum is 24"), "unexpected: {err}");
+}
+
+#[test]
+fn the_default_quote_cannot_be_removed() {
+    let mut f = setup();
+    let admin = f.admin.clone();
+    let err = f
+        .app
+        .execute_contract(
+            admin,
+            f.factory.clone(),
+            &ExecuteMsg::RemoveQuote { denom: QUOTE.into() },
+            &[],
+        )
+        .map_err(|e| format!("{e:#}"))
+        .expect_err("the default quote was removed");
+    // Removing it leaves a factory whose CreateLaunch refuses everything, including a
+    // launch that named no quote at all: an outage that looks like a setting.
+    assert!(err.contains("cannot be removed"), "unexpected: {err}");
+}
+
+#[test]
+fn the_quote_list_is_readable_and_names_its_default() {
+    /*
+     * The create form needs this to decide whether to OFFER a choice. With one
+     * allowlisted quote a picker is a control that does nothing; with several it is
+     * the difference between this and a single-pair launchpad. So the query must
+     * report both the list AND which one a launch gets when it names none, because
+     * the form cannot infer the default from the list alone.
+     */
+    let mut f = setup();
+    let admin = f.admin.clone();
+
+    let before: factory::QuotesResponse = f
+        .app
+        .wrap()
+        .query_wasm_smart(f.factory.clone(), &QueryMsg::Quotes {})
+        .unwrap();
+    assert_eq!(before.default_denom, QUOTE);
+    assert_eq!(before.quotes.len(), 1, "instantiate did not allowlist its own default");
+    assert_eq!(before.quotes[0].decimals, 18);
+
+    f.app
+        .execute_contract(
+            admin.clone(),
+            f.factory.clone(),
+            &ExecuteMsg::SetQuote { denom: USDC.into(), decimals: 6 },
+            &[],
+        )
+        .unwrap();
+
+    let after: factory::QuotesResponse = f
+        .app
+        .wrap()
+        .query_wasm_smart(f.factory.clone(), &QueryMsg::Quotes {})
+        .unwrap();
+    assert_eq!(after.quotes.len(), 2);
+    let usdc = after.quotes.iter().find(|q| q.denom == USDC).expect("USDC missing");
+    assert_eq!(usdc.decimals, 6, "the decimals that scale the curve were not stored");
+
+    // And removal takes it back out, so the form stops offering it.
+    f.app
+        .execute_contract(
+            admin,
+            f.factory.clone(),
+            &ExecuteMsg::RemoveQuote { denom: USDC.into() },
+            &[],
+        )
+        .unwrap();
+    let gone: factory::QuotesResponse = f
+        .app
+        .wrap()
+        .query_wasm_smart(f.factory.clone(), &QueryMsg::Quotes {})
+        .unwrap();
+    assert_eq!(gone.quotes.len(), 1);
 }

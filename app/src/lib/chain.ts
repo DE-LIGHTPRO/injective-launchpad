@@ -465,3 +465,65 @@ export async function currentHeight(): Promise<number | null> {
     return null;
   }
 }
+
+export interface QuoteAsset {
+  denom: string;
+  decimals: number;
+}
+
+/**
+ * Quote assets this launchpad allows, and which one is the default.
+ *
+ * Read from the factory rather than configured in the app. The decimals are what
+ * scale a launch's curve, so a second copy here could disagree with the contract and
+ * the disagreement would show up as a graduation target out by orders of magnitude
+ * rather than as an error.
+ *
+ * Returns the default alone when the query fails or the factory predates the
+ * allowlist. That is the safe degradation: the create form then offers no choice,
+ * which is what it did before this existed, rather than offering a quote the chain
+ * will refuse.
+ */
+export async function listQuotes(): Promise<{ quotes: QuoteAsset[]; defaultDenom: string }> {
+  const fallback = { quotes: [{ denom: NETWORK.quoteDenom, decimals: NETWORK.quoteDecimals }], defaultDenom: NETWORK.quoteDenom };
+  const factory = getFactoryAddress();
+  if (!factory || isDemoMode()) return fallback;
+  try {
+    const raw = await smartQuery<{
+      quotes?: Array<{ denom?: unknown; decimals?: unknown }>;
+      default_denom?: unknown;
+    }>(factory, { quotes: {} });
+    const quotes = (raw.quotes ?? [])
+      .filter((q) => typeof q.denom === 'string' && Number.isInteger(q.decimals))
+      .map((q) => ({ denom: q.denom as string, decimals: q.decimals as number }));
+    if (quotes.length === 0) return fallback;
+    return {
+      quotes,
+      defaultDenom: typeof raw.default_denom === 'string' ? raw.default_denom : quotes[0].denom,
+    };
+  } catch {
+    return fallback;
+  }
+}
+
+/**
+ * A denom, short enough to read.
+ *
+ * `symbolOf` handles `factory/<addr>/<SYMBOL>` and returns the tail, which is right
+ * for a launched token and wrong for everything else: against
+ * `erc20:0x05148C203a48103da989090CC882543eF8724f78` it returns the whole address,
+ * and uppercased in a select that is 42 unreadable characters.
+ *
+ * NO SYMBOL IS INVENTED. An ERC20 or IBC denom's ticker is not in the string, and
+ * guessing one from a registry the app does not have would be how a launchpad ends up
+ * labelling an arbitrary token "USDC". The address is shortened, which is honest and
+ * still identifies it.
+ */
+export function denomLabel(denom: string): string {
+  if (denom.startsWith('factory/')) return symbolOf(denom);
+  const hex = denom.match(/0x[0-9a-fA-F]{40}/)?.[0];
+  if (hex) return `${hex.slice(0, 6)}…${hex.slice(-4)}`;
+  if (denom.startsWith('ibc/')) return `IBC/${denom.slice(4, 10)}…`;
+  // A bare denom like "inj" is a ticker already.
+  return denom.length <= 12 ? denom.toUpperCase() : `${denom.slice(0, 8)}…`;
+}

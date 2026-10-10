@@ -94,6 +94,8 @@ export interface LaunchInput {
   initialBuy?: bigint;
   curve: CurveConfig;
   lpReserve: bigint;
+  /** What buyers pay in. Absent means the factory's default. */
+  quoteDenom?: string;
   factory: string;
 }
 
@@ -279,6 +281,13 @@ export function planLaunch(input: LaunchInput): LaunchPlan {
                 ? { initial_buy: input.initialBuy.toString() }
                 : {}),
               fee_bps: Number(input.curve.feeBps),
+              /*
+               * Omitted when it is the factory's default, so the common launch sends
+               * the same message it always did and an older factory still accepts it.
+               */
+              ...(input.quoteDenom && input.quoteDenom !== NETWORK.quoteDenom
+                ? { quote_denom: input.quoteDenom }
+                : {}),
             },
           },
           /*
@@ -293,7 +302,15 @@ export function planLaunch(input: LaunchInput): LaunchPlan {
           funds: [
             { denom, amount: seed.toString() },
             ...(input.initialBuy && input.initialBuy > 0n
-              ? [{ denom: NETWORK.quoteDenom, amount: input.initialBuy.toString() }]
+              ? [
+                  {
+                    // The LAUNCH's quote, not the network default: a dev buy on a
+                    // USDC-paired launch attaches USDC, and attaching INJ would be
+                    // refused by the factory's funds check as a third denom.
+                    denom: input.quoteDenom || NETWORK.quoteDenom,
+                    amount: input.initialBuy.toString(),
+                  },
+                ]
               : []),
           ],
         },
