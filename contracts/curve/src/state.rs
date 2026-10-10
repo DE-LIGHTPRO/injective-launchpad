@@ -92,6 +92,24 @@ pub struct State {
     pub platform_owed: Uint128,
     pub creator_owed: Uint128,
 
+    /// Lifetime totals actually PAID OUT, which `*_owed` cannot answer.
+    ///
+    /// A claim zeroes `creator_owed`, so the only figure the chain keeps is what is
+    /// currently unclaimed. "This launch has earned its creator X" is therefore
+    /// unanswerable from state after the first claim, and reconstructing it means
+    /// replaying every `claim_fees` event: possible for one launch, not for a board.
+    ///
+    /// nearly.trade puts "$146.6K PAID TO CREATORS" on its homepage, which is the
+    /// number that makes a creator want to launch somewhere. It has to be measured
+    /// rather than estimated, so it is counted here as it is paid.
+    ///
+    /// `#[serde(default)]` so a curve stored before this field existed still
+    /// deserialises, reading zero rather than failing every query against it.
+    #[serde(default)]
+    pub platform_paid: Uint128,
+    #[serde(default)]
+    pub creator_paid: Uint128,
+
     /// The opening-fee premium, held for the pool rather than for anyone.
     ///
     /// Kept out of `inj_collected` on purpose. That figure is one side of the curve's

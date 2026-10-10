@@ -473,6 +473,12 @@ a.card:focus-visible { border-color: var(--accent-deep); }
 }
 
 .field { display: block; margin-top: var(--space-4); }
+/*
+ * Used by TradePanel's two amount fields, both of which are inside a `.field`, so
+ * this rule does apply. A comment below used to claim nothing used it; I believed
+ * the comment, deleted the rule, and the class guard caught it in the same run.
+ * A note about reachability is not a measurement of it.
+ */
 .field .lbl {
   display: flex;
   justify-content: space-between;
@@ -811,19 +817,37 @@ button.ghost { background: transparent; border: 1px solid var(--line); color: va
 /*
  * The create form, which had no styling at all.
  *
- * `.field .lbl` existed and nothing used it; the JSX writes `<label>` with a
+ * The JSX writes `<label>` with a
  * `.hint` span. So every label and input on /create rendered at browser default:
  * white boxes, black borders, label and input on one line. It shipped that way
  * because I wrote the page and never opened it, which is the whole argument for
  * auditing the screen rather than the tree.
  */
-.field label {
+.field label,
+.field .field-label {
   display: block;
   font-size: var(--text-sm);
   font-weight: 540;
   color: var(--text-dim);
   margin-bottom: var(--space-2);
 }
+/*
+ * A value that is stated rather than entered.
+ *
+ * Deliberately NOT a disabled input. A greyed-out field implies a version of the
+ * form where the number can be changed, and for supply and the fee split there
+ * isn't one. This reads as a fact, at the same height as the inputs beside it so
+ * the row still lines up.
+ */
+.field .fixed-value {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 40px;
+  font-size: var(--text-lg);
+  color: var(--text);
+}
+
 .field .hint {
   font-weight: 400;
   color: var(--text-faint);
@@ -1363,3 +1387,76 @@ header.top .brand { display: inline-flex; align-items: center; gap: var(--space-
 @media (pointer: coarse) {
   .token-links a { min-height: 24px; }
 }
+
+/*
+ * King of the hill.
+ *
+ * A leader card and two runners-up. The leader is deliberately much larger rather
+ * than first-among-equals: the point of the strip is a focal point on a page that is
+ * otherwise a uniform grid of strangers' tokens, and three equal cards above a grid
+ * of equal cards is just more grid.
+ */
+.hill { margin-top: var(--space-5); }
+.hill-head { margin-bottom: var(--space-3); }
+.hill-head h2 { margin: 0 0 var(--space-1); }
+
+.hill-grid {
+  display: grid;
+  /* `min(..., 100%)` so the track can shrink below its floor on a narrow screen
+     rather than forcing the page sideways. */
+  grid-template-columns: minmax(min(320px, 100%), 2fr) minmax(min(220px, 100%), 1fr);
+  gap: var(--space-3);
+}
+@media (max-width: 720px) {
+  .hill-grid { grid-template-columns: 1fr; }
+}
+
+.hill-king {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: var(--space-3) var(--space-4);
+  padding: var(--space-4);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--glass-border-lit);
+  background: var(--glass-raised);
+  backdrop-filter: var(--glass-blur);
+  text-decoration: none;
+  color: inherit;
+  /* The child content holds its own width; without this the grid refuses to
+     shrink and the page scrolls sideways. */
+  min-width: 0;
+}
+.hill-king:hover { border-color: var(--accent-deep); }
+
+.hill-crown {
+  grid-column: 1 / -1;
+  font-size: var(--text-micro);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.hill-id { display: flex; align-items: center; gap: var(--space-3); min-width: 0; }
+.hill-id strong { display: block; font-size: var(--text-lg); }
+.hill-id .note { display: block; }
+.hill-cap { text-align: right; }
+.hill-cap .v { display: block; font-size: var(--text-lg); }
+.hill-cap .k { display: block; font-size: var(--text-micro); color: var(--text-faint); }
+.hill-king > svg { grid-column: 1 / -1; width: 100%; }
+
+.hill-rest { display: flex; flex-direction: column; gap: var(--space-2); }
+.hill-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--line);
+  background: var(--glass-well);
+  text-decoration: none;
+  color: inherit;
+  min-width: 0;
+}
+.hill-row:hover { border-color: var(--line-strong); }
+.hill-row strong { flex: 1; min-width: 0; }
+.hill-rank { color: var(--text-faint); font-size: var(--text-xs); }

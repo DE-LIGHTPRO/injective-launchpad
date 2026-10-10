@@ -18,6 +18,88 @@ use curve::msg::ExecuteMsg as CurveExecuteMsg;
 use curve::msg::InstantiateMsg as CurveInstantiateMsg;
 use curve::state::{CurveConfigStored, LaunchRules};
 
+/// Every launch has exactly this many tokens, and a creator cannot change it.
+///
+/// One billion at 18 decimals, the supply pump.fun, nearly.trade and ponsfamily.com
+/// all settle on. The reason they do is that a supply the creator picks is one more
+/// number a buyer must read before a price means anything: fixed, "market cap" and
+/// "1 INJ buys N tokens" are comparable across every launch on the board; variable,
+/// they are not, and the comparison a board exists to support quietly stops working.
+///
+/// ENFORCED HERE, not in the form. A form field is a suggestion: anyone can call this
+/// contract directly, and a launchpad whose supply guarantee lives in a React
+/// component does not have one.
+///
+/// Only the TOTAL is fixed. How it splits between the curve and the reserve held back
+/// for the pool stays the creator's choice.
+pub const FIXED_TOTAL_SUPPLY: Uint128 = Uint128::new(1_000_000_000_000_000_000_000_000_000);
+
+/// The creator's share of every trading fee, in bps of the fee. The rest is the
+/// platform's.
+///
+/// FIXED, NOT CHOSEN, and that is the correction. This was `creator_fee_share_bps` on
+/// `CreateLaunch`, a number the creator picked, capped only at 10_000 bps: the whole
+/// fee. A rational creator sets it to the maximum, so the cap was in practice the
+/// split, and the split was 100/0. The platform's share accrued on every trade and the
+/// amount it accrued was zero: a fee that was modelled, routed, claimable, and
+/// guaranteed to be empty.
+///
+/// Capping it lower was the first fix and it was still the wrong shape. Measured
+/// 10 Oct 2026, neither comparable launchpad lets a creator set this:
+///
+///   nearly.trade/launch, rendered: "1B supply. 70% of the 1% pool fee is yours",
+///   beside "RHEA POOL · 1% FEE" and "#2844 · 1B SUPPLY".
+///   ponsdotdev/pons-labs README: the curve fee plus hook fee is "split protocol /
+///   creator / buyback", read from `IPonsV2FeePolicy` and "snapshotted per launch",
+///   with guardrails "Curve fee <= 10%, creator tax <= 10%, total trade fee <= 20%".
+///
+/// Both treat the split as protocol policy snapshotted at launch, and both land on 70%
+/// to the creator. So this is 7_000: with the default 100 bps fee, 0.7% to the creator
+/// and 0.3% to us, on every trade, on every launch, with no launch able to opt out.
+///
+/// What a creator still chooses is `fee_bps` itself, so a launch with a 0 bps fee earns
+/// both sides nothing. That is their launch to make uneconomic.
+pub const CREATOR_FEE_SHARE_BPS: u16 = 7_000;
+
+/// The most of the curve's supply a creator may take in their own opening buy, in bps.
+///
+/// WHY A HARD CAP. `initial_buy` was unbounded. A creator could put in enough quote to
+/// take most of the curve at the opening price, in the same transaction that created
+/// the launch, before any other address could possibly see the token existed. The
+/// create form warned about the share and warned is all it did, so the one guarantee a
+/// launchpad exists to make was a sentence in a React component.
+///
+/// `max_per_wallet` does bind the creator when it is set, since the cap is charged to
+/// the RECIPIENT and the factory buys with the creator as recipient. But it is
+/// optional, and an optional protection is one that is absent exactly when it matters.
+///
+/// 10%, and NOT the 4% nearly.trade uses, because their number does not transfer.
+///
+/// Their create form reads "Optional. Max 4% of supply (approximately 42.9 NEAR)"
+/// against a launch that opens at a 1,000 NEAR FDV. Measured on this curve, 4% of
+/// supply costs under 1 INJ: the default shape has a 30 INJ opening reserve against an
+/// 85 INJ graduation target, so the first tokens are very cheap and the share moves
+/// fast. Copied literally, the cap would have refused almost every real opening buy
+/// while reading as though it matched the market.
+///
+/// Measured against the default curve, 10 Oct 2026:
+///
+/// ```text
+/// 0.5 INJ ->  2.18%      2.5 INJ -> 10.22%      8.5 INJ -> 29.38%
+/// 1.0 INJ ->  4.28%      3.0 INJ -> 12.08%       20 INJ -> 53.33%
+/// 2.0 INJ ->  8.30%      5.0 INJ -> 19.00%       40 INJ -> 76.31%
+/// ```
+///
+/// So the thing worth refusing is the controlling share, not the opening position: a
+/// creator holding a tenth of the curve is ordinary and is published on the launch
+/// page anyway, and one holding three quarters of it before anyone else has seen the
+/// token is the failure this cap exists for. 10% lands at roughly 2.45 INJ here.
+///
+/// The GUARANTEE is a share of supply, so it holds whatever curve a creator picks. The
+/// INJ figures above are a property of the default shape and move with it, which is
+/// exactly why the cap is not written in quote.
+pub const MAX_INITIAL_BUY_BPS: u128 = 1_000;
+
 /// Submessage id for the curve instantiate we are waiting on.
 const REPLY_INSTANTIATE_CURVE: u64 = 1;
 
@@ -53,16 +135,27 @@ pub enum FactoryError {
         got: Uint128,
     },
 
-    #[error("creator fee share is {got} bps, maximum is 10000")]
-    BadFeeShare { got: u16 },
-
     /// Names the field, because a form with four URL inputs and one rejection that
     /// says only "invalid" leaves the creator guessing which one.
+    /// States the ceiling in TOKENS, because that is the quantity being capped and a
+    /// creator who sees only "too large" has no idea what to reduce it to.
+    #[error("the opening buy takes {tokens} tokens; the most a creator may take is {max}")]
+    InitialBuyTooLarge {
+        tokens: cosmwasm_std::Uint128,
+        max: cosmwasm_std::Uint128,
+    },
+
     #[error("token profile field `{field}` is invalid: {reason}")]
     BadProfile { field: String, reason: String },
 
     #[error("unexpected funds attached: {denom}")]
     UnexpectedFunds { denom: String },
+
+    #[error("every launch has exactly {expected} tokens; this one declares {got}")]
+    BadTotalSupply {
+        expected: cosmwasm_std::Uint128,
+        got: cosmwasm_std::Uint128,
+    },
 
     #[error("initial buy is {expected} but {got} was attached")]
     BadInitialBuy {
@@ -241,7 +334,6 @@ pub enum ExecuteMsg {
     CreateLaunch {
         denom: String,
         lp_reserve: Uint128,
-        creator_fee_share_bps: u16,
         curve: CurveConfigStored,
         /// Optional, and absent is a perfectly good answer: a token with no links is
         /// honest, where a token with a broken one is not.
@@ -323,7 +415,6 @@ pub fn execute(
         ExecuteMsg::CreateLaunch {
             denom,
             lp_reserve,
-            creator_fee_share_bps,
             curve,
             profile,
             rules,
@@ -334,7 +425,6 @@ pub fn execute(
             info,
             denom,
             lp_reserve,
-            creator_fee_share_bps,
             curve,
             profile,
             rules,
@@ -370,7 +460,6 @@ fn create_launch(
     info: MessageInfo,
     denom: String,
     lp_reserve: Uint128,
-    creator_fee_share_bps: u16,
     curve: CurveConfigStored,
     profile: TokenProfile,
     rules: LaunchRules,
@@ -385,18 +474,55 @@ fn create_launch(
     if BY_DENOM.has(deps.storage, &denom) {
         return Err(FactoryError::DenomTaken { denom });
     }
-    if creator_fee_share_bps > 10_000 {
-        return Err(FactoryError::BadFeeShare {
-            got: creator_fee_share_bps,
-        });
-    }
 
     // Validate the curve here as well as in the child. Failing early means a
     // bad launch never consumes a reply slot or an id.
     let parsed: CurveConfig = (&curve).into();
     parsed.validate()?;
 
+    /*
+     * The opening buy, measured in supply rather than in quote.
+     *
+     * Quoted against a FRESH curve, which is what it will execute against: the reply
+     * handler spends it on a curve nobody has traded yet. Quoting it against anything
+     * else would let the cap pass here and the real buy take more.
+     */
+    if let Some(spend) = initial_buy.filter(|v| !v.is_zero()) {
+        let quote = launchpad_math::quote_buy(
+            &parsed,
+            &launchpad_math::CurveState {
+                inj_collected: Uint128::zero(),
+                tokens_sold: Uint128::zero(),
+                graduated: false,
+            },
+            spend,
+        )?;
+        // `multiply_ratio` rather than mul-then-div: it widens internally, so a
+        // supply near the Uint128 ceiling cannot overflow the intermediate, and it
+        // rounds DOWN, which tightens the cap rather than loosening it.
+        let ceiling = curve
+            .curve_supply
+            .multiply_ratio(MAX_INITIAL_BUY_BPS, 10_000u128);
+        if quote.tokens_out > ceiling {
+            return Err(FactoryError::InitialBuyTooLarge {
+                tokens: quote.tokens_out,
+                max: ceiling,
+            });
+        }
+    }
+
     let required = curve.curve_supply.checked_add(lp_reserve)?;
+    if required != FIXED_TOTAL_SUPPLY {
+        /*
+         * Refused rather than clamped. Clamping would silently launch a token with a
+         * different split than the creator asked for, and the split between the curve
+         * and the LP reserve is theirs to choose: only the TOTAL is fixed.
+         */
+        return Err(FactoryError::BadTotalSupply {
+            expected: FIXED_TOTAL_SUPPLY,
+            got: required,
+        });
+    }
 
     /*
      * TWO denoms may arrive now, and `must_pay` accepts exactly one.
@@ -479,7 +605,10 @@ fn create_launch(
         platform: cfg.platform.to_string(),
         migration_target: cfg.migration_target.to_string(),
         lp_reserve,
-        creator_fee_share_bps,
+        // Policy, not a parameter: the creator never had a say and the curve stores
+        // the figure it was launched under, so a later change to this constant does
+        // not re-price a launch that is already running.
+        creator_fee_share_bps: CREATOR_FEE_SHARE_BPS,
         curve,
     };
 

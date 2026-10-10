@@ -435,6 +435,44 @@ fn fees_survive_graduation_and_pay_out_correctly() {
         .unwrap();
     assert_eq!(f.balance(&f.creator, QUOTE), creator_owed);
     assert_eq!(f.balance(&f.platform, QUOTE), platform_owed);
+
+    /*
+     * And the lifetime counters, which are the only record of this once `*_owed` is
+     * zeroed. Without them "what has this launch paid its creator" is unanswerable
+     * from state after the first claim, and a board cannot add it up at all.
+     */
+    let after = f.state();
+    assert!(after.creator_owed.is_zero(), "owed was not cleared");
+    assert_eq!(after.creator_paid, creator_owed, "lifetime creator total is wrong");
+    assert_eq!(after.platform_paid, platform_owed, "lifetime platform total is wrong");
+}
+
+#[test]
+fn lifetime_paid_totals_accumulate_across_claims() {
+    let mut f = setup();
+    let alice = f.alice.clone();
+
+    // Claim once, trade again, claim again: a counter that merely copies the last
+    // claim rather than adding to it passes a single-claim test.
+    f.buy(&alice, amt(5)).unwrap();
+    f.app
+        .execute_contract(alice.clone(), f.addr.clone(), &ExecuteMsg::ClaimFees {}, &[])
+        .unwrap();
+    let first = f.state().creator_paid;
+    assert!(!first.is_zero(), "nothing recorded on the first claim");
+
+    f.buy(&alice, amt(5)).unwrap();
+    let owed_again = f.state().creator_owed;
+    assert!(!owed_again.is_zero());
+    f.app
+        .execute_contract(alice, f.addr.clone(), &ExecuteMsg::ClaimFees {}, &[])
+        .unwrap();
+
+    assert_eq!(
+        f.state().creator_paid,
+        first + owed_again,
+        "the second claim replaced the lifetime total instead of adding to it"
+    );
 }
 
 /// The whole point, stated as one test: no sequence of trades leaves the

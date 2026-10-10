@@ -141,18 +141,36 @@ interface InjectedSigner {
   getKey: (chainId: string) => Promise<{ pubKey: Uint8Array }>;
 }
 
+/** Gas limits per operation. See `signAndBroadcast` on why these are not simulated. */
+export const GAS = {
+  /** Four messages including two contract instantiates. */
+  launch: 3_000_000,
+  /** One execute with a bank send out. */
+  trade: 800_000,
+  /** One execute with up to two bank sends out. */
+  claim: 500_000,
+} as const;
+
 /**
- * Signs and broadcasts the launch, returning the transaction hash.
+ * Signs and broadcasts a prepared set of messages, returning the transaction hash.
  *
- * Gas is simulated and then multiplied, never guessed: a hardcoded limit is either too
- * low, and the launch fails after the user has signed, or absurdly high, and they pay
- * for it. The multiplier covers the difference between a simulation and the real run,
- * which differ because state moves between the two.
+ * GAS IS A FIXED LIMIT PER OPERATION, not a simulation. The comment here used to claim
+ * it was "simulated and then multiplied, never guessed", which was not what the code
+ * did: the limit was the literal 3000000 below, for every transaction. The claim was
+ * more careful than the implementation, which is the worse direction for a comment to
+ * be wrong in, because it stops the next reader from checking.
+ *
+ * Fixed limits are defensible here and simulation would be better. A limit is a
+ * ceiling, not a charge, so an over-estimate costs the user nothing on Injective's fee
+ * market; what it costs is the failure mode when a limit is too LOW, which is a
+ * transaction that fails after the user has already approved it. So the figures are set
+ * per operation rather than shared, and generously.
  */
-export async function broadcastLaunch(opts: {
-  plan: LaunchPlan;
+async function signAndBroadcast(opts: {
+  msgs: ReturnType<typeof composeMessages>;
   sender: string;
   wallet: unknown;
+  gas: number;
 }): Promise<{ txHash: string }> {
   const signer = opts.wallet as InjectedSigner;
   const offline = signer.getOfflineSigner?.(NETWORK.chainId);
@@ -164,7 +182,7 @@ export async function broadcastLaunch(opts: {
   }
 
   const key = await signer.getKey(NETWORK.chainId);
-  const msgs = composeMessages(opts.plan, opts.sender);
+  const msgs = opts.msgs;
 
   // Account number and sequence come from the chain, never from memory: a stale
   // sequence is rejected after the user has already approved the prompt.
@@ -184,7 +202,15 @@ export async function broadcastLaunch(opts: {
   const { txRaw, signDoc } = createTransaction({
     message: msgs,
     memo: '',
-    fee: { amount: [{ denom: 'inj', amount: '2000000000000000' }], gas: '3000000' },
+    /*
+     * The fee scales with the gas limit at Injective's 500000000 wei minimum gas
+     * price. It was a flat 0.002 INJ against a 3000000 limit whatever the
+     * operation, so a fee claim paid a launch's fee.
+     */
+    fee: {
+      amount: [{ denom: 'inj', amount: String(BigInt(opts.gas) * 500_000_000n) }],
+      gas: String(opts.gas),
+    },
     pubKey: Buffer.from(key.pubKey).toString('base64'),
     sequence: Number(base.sequence),
     accountNumber: Number(base.account_number),
@@ -231,4 +257,53 @@ export async function broadcastLaunch(opts: {
     if (e instanceof BroadcastError) throw e;
     throw new BroadcastError('broadcast', describeBroadcastFailure((e as Error).message ?? ''), (e as Error).message);
   }
+}
+
+/** Signs and broadcasts a launch. */
+export async function broadcastLaunch(opts: {
+  plan: LaunchPlan;
+  sender: string;
+  wallet: unknown;
+}): Promise<{ txHash: string }> {
+  return signAndBroadcast({
+    msgs: composeMessages(opts.plan, opts.sender),
+    sender: opts.sender,
+    wallet: opts.wallet,
+    gas: GAS.launch,
+  });
+}
+
+/**
+ * Signs and broadcasts one contract call.
+ *
+ * WHY THIS EXISTS. The signing path above was reachable only through a `LaunchPlan`, so
+ * the only transaction this app could send was a launch. Everything else was drawn and
+ * dead: the trade panel's button was literally `<button className="go" disabled>`, and
+ * fees accrued on chain with no way to claim them. The quotes were real, the arithmetic
+ * was checked against the contract unit for unit, and nothing could be executed.
+ */
+export async function broadcastExecute(opts: {
+  contract: string;
+  msg: Record<string, unknown>;
+  funds?: Array<{ denom: string; amount: string }>;
+  sender: string;
+  wallet: unknown;
+  gas?: number;
+}): Promise<{ txHash: string }> {
+  return signAndBroadcast({
+    msgs: composeMessages(
+      {
+        messages: [
+          {
+            typeUrl: MSG_EXECUTE,
+            value: { contract: opts.contract, msg: opts.msg, funds: opts.funds ?? [] },
+          },
+        ],
+      } as unknown as LaunchPlan,
+      opts.sender,
+    ),
+    sender: opts.sender,
+    wallet: opts.wallet,
+    gas: opts.gas ?? GAS.trade,
+  });
 }

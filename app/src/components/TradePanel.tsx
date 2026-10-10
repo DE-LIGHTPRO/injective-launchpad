@@ -57,12 +57,15 @@ export function TradePanel({
   state,
   symbol,
   denom,
+  curve,
   tradingClosed,
   rules = NO_RULES,
 }: {
   config: CurveConfig;
   state: CurveState;
   symbol: string;
+  /** The curve contract a trade is sent to. */
+  curve: string;
   /** The launched token's denom, so the panel can read what the account holds. */
   denom: string;
   tradingClosed: boolean;
@@ -112,6 +115,9 @@ export function TradePanel({
 
   const held = side === 'buy' ? quoteBal : tokenBal;
   const [slippagePct, setSlippagePct] = useState(1);
+  const [busy, setBusy] = useState(false);
+  const [txHash, setTxHash] = useState<string | null>(null);
+  const [tradeError, setTradeError] = useState<string | null>(null);
 
   /*
    * A launch that has not opened yet gets its own state, and this was missing.
@@ -187,6 +193,51 @@ export function TradePanel({
       } as const;
     }
   }, [input, side, config, state, premiumBps]);
+
+  /**
+   * Send the trade.
+   *
+   * WHY THIS WAS MISSING. The button read `<button className="go" disabled>` and there
+   * was no handler at all. Every quote on this panel was correct, asserted against the
+   * Rust unit for unit, and could not be acted on: the app could sign exactly one kind
+   * of transaction, a launch, because the signing path took a `LaunchPlan` and nothing
+   * else. Fees accrued to nobody because no trade could happen.
+   *
+   * `minOut` is sent as the contract's own `min_*` guard rather than being merely
+   * displayed, so the slippage figure above the button is the one enforced on chain.
+   */
+  async function submit() {
+    if (!account || !quote?.ok) return;
+    setBusy(true);
+    setTradeError(null);
+    setTxHash(null);
+    try {
+      const raw = parseAmount(input);
+      const { broadcastExecute, GAS } = await import('@/lib/broadcast');
+      const { txHash } = await broadcastExecute({
+        contract: curve,
+        msg:
+          side === 'buy'
+            ? { buy: { min_tokens_out: minOut.toString() } }
+            : { sell: { min_inj_out: minOut.toString() } },
+        /*
+         * A buy attaches quote, a sell attaches the token itself: this curve takes
+         * payment by attachment on both sides, so neither needs an allowance and
+         * neither can be spent without the trade happening in the same transaction.
+         */
+        funds: [{ denom: side === 'buy' ? NETWORK.quoteDenom : denom, amount: raw.toString() }],
+        sender: account.address,
+        wallet: account.provider,
+        gas: GAS.trade,
+      });
+      setTxHash(txHash);
+      setInput('');
+    } catch (e) {
+      setTradeError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
 
   /** Worst acceptable fill, sent as the contract's min_* guard. */
   const minOut = useMemo(() => {
@@ -471,9 +522,48 @@ export function TradePanel({
         </div>
       </div>
 
-      <button className="go" disabled>
-        {isDemoMode() ? 'Demo: trading disabled' : 'Connect wallet'}
-      </button>
+      {isDemoMode() ? (
+        <button className="go" disabled>
+          Demo: trading disabled
+        </button>
+      ) : !account ? (
+        <button className="go" disabled>
+          Connect wallet
+        </button>
+      ) : (
+        <button
+          className="go"
+          onClick={submit}
+          /*
+           * Disabled only for a reason the user can act on: nothing typed, a quote
+           * that failed, trading not open, or a signature already in flight. It is
+           * never disabled while a valid trade is sitting there unsigned, which is
+           * what the previous unconditional `disabled` amounted to.
+           */
+          disabled={busy || tradingClosed || !quote?.ok || minOut <= 0n}
+        >
+          {busy
+            ? 'Waiting for your wallet…'
+            : side === 'buy'
+              ? `Buy ${symbol}`
+              : `Sell ${symbol}`}
+        </button>
+      )}
+
+      {txHash && (
+        <p className="note" style={{ marginTop: 'var(--space-3)' }}>
+          Trade sent.{' '}
+          <a href={`${NETWORK.explorer}/transaction/${txHash}`} target="_blank" rel="noreferrer">
+            View the transaction
+          </a>
+          . Balances update when the page next reads the chain.
+        </p>
+      )}
+      {tradeError && (
+        <p className="note err-text" style={{ marginTop: 'var(--space-3)' }}>
+          {tradeError}
+        </p>
+      )}
 
       <p className="note">
         {isDemoMode()

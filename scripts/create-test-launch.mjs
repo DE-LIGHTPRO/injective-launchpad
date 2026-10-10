@@ -128,7 +128,12 @@ const msgs = [
       create_launch: {
         denom,
         lp_reserve: LP_RESERVE.toString(),
-        creator_fee_share_bps: 2000,
+        /*
+         * No `creator_fee_share_bps`. It used to be sent here and the factory now
+         * refuses it: the split is policy (70/30) written by the contract, and
+         * `cw_serde` denies unknown fields, so leaving this in fails the execute
+         * AFTER the 1 INJ denom-creation fee has been charged in the same tx.
+         */
         curve: {
           virtual_inj: (30n * ONE).toString(),
           virtual_tokens: (1_073_000_000n * ONE).toString(),

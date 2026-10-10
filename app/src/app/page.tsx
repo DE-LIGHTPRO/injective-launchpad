@@ -1,5 +1,6 @@
 import { CurveGlyph } from '@/components/CurveGlyph';
 import { marketCap, boardTotals, compact } from '@/lib/boardMetrics';
+import { KingOfTheHill } from '@/components/KingOfTheHill';
 import type { LaunchRules } from '@/lib/launchRules';
 import Link from 'next/link';
 import { listLaunches, getLaunchDetail, symbolOf, short, currentHeight, type Launch } from '@/lib/chain';
@@ -26,6 +27,7 @@ interface Row {
   tokensSold: bigint;
   marketCap: bigint;
   feesAccrued: bigint;
+  creatorPaid: bigint;
 }
 
 async function loadRows(): Promise<{ rows: Row[]; error?: string; errorDetail?: string }> {
@@ -51,6 +53,14 @@ async function loadRows(): Promise<{ rows: Row[]; error?: string; errorDetail?: 
            */
           marketCap: marketCap(d.config, d.state, d.config.curveSupply + d.lpReserve),
           feesAccrued: d.creatorOwed + d.platformOwed,
+          /*
+           * PAID, not owed. `feesAccrued` above is what is sitting unclaimed right
+           * now and falls back to zero the moment someone claims; this only ever
+           * rises. They answer different questions and a board needs the second one:
+           * "what has this launchpad handed to creators" is the number a creator
+           * decides on, and nearly.trade puts it on their homepage for that reason.
+           */
+          creatorPaid: d.creatorPaid,
         };
       }),
     );
@@ -210,7 +220,12 @@ export default async function Home() {
             */}
           {(() => {
             const t = boardTotals(
-              rows.map((r) => ({ raised: r.raised, feesAccrued: r.feesAccrued, graduated: r.graduated })),
+              rows.map((r) => ({
+                raised: r.raised,
+                feesAccrued: r.feesAccrued,
+                graduated: r.graduated,
+                creatorPaid: r.creatorPaid,
+              })),
             );
             return (
               <div className="totals">
@@ -235,7 +250,18 @@ export default async function Home() {
                   <span className="v mono">
                     {compact(t.feesAccrued, 18, 4)} {NETWORK.quoteSymbol}
                   </span>
-                  <span className="k">Fees accrued</span>
+                  <span className="k">Fees unclaimed</span>
+                </div>
+                <div>
+                  {/*
+                      Counted on chain as it is paid out, never derived. A claim zeroes
+                      `creator_owed`, so this is unanswerable from state unless the
+                      contract keeps its own running total, which it now does.
+                    */}
+                  <span className="v mono">
+                    {compact(t.paidToCreators, 18, 4)} {NETWORK.quoteSymbol}
+                  </span>
+                  <span className="k">Paid to creators</span>
                 </div>
                 <div>
                   <span className="v mono">{t.graduated}</span>
@@ -244,6 +270,8 @@ export default async function Home() {
               </div>
             );
           })()}
+
+          <KingOfTheHill rows={rows.map(toRow)} nowSeconds={Math.floor(Date.now() / 1000)} />
 
           <div style={{ marginTop: 'var(--space-5)' }}>
             <LaunchList rows={rows.map(toRow)} />

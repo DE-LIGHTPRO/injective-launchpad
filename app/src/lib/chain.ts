@@ -66,6 +66,9 @@ interface RawCurveState {
   migrated: boolean;
   platform_owed: string;
   creator_owed: string;
+  /** Optional: a curve deployed before lifetime counters existed omits them. */
+  platform_paid?: string;
+  creator_paid?: string;
 }
 
 export class ChainError extends Error {
@@ -193,6 +196,9 @@ export interface LaunchDetail {
   migrated: boolean;
   platformOwed: bigint;
   creatorOwed: bigint;
+  /** Lifetime paid out. Zero on a curve too old to have counted. */
+  platformPaid: bigint;
+  creatorPaid: bigint;
   /** Normalised; `NO_RULES` for a launch that has none. */
   rules: LaunchRules;
 }
@@ -235,6 +241,14 @@ export async function getLaunchDetail(curveAddress: string): Promise<LaunchDetai
     migrated: st.migrated,
     platformOwed: BigInt(st.platform_owed),
     creatorOwed: BigInt(st.creator_owed),
+    /*
+     * `?? '0'` rather than a throw: an older curve genuinely has no counter, and
+     * zero is the honest reading of "nothing recorded" for a lifetime total. It is
+     * NOT the honest reading for an owed balance, which is why only these two are
+     * treated this way.
+     */
+    platformPaid: BigInt(st.platform_paid ?? '0'),
+    creatorPaid: BigInt(st.creator_paid ?? '0'),
   };
 }
 

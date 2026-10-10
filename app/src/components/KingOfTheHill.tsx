@@ -1,0 +1,107 @@
+import Link from 'next/link';
+import { TokenLogo } from './TokenLogo';
+import { CurveGlyph } from './CurveGlyph';
+import { symbolOf } from '@/lib/chain';
+import { compact, ageLabel } from '@/lib/boardMetrics';
+import { NETWORK } from '@/lib/config';
+import type { LaunchRow } from '@/lib/launchList';
+
+/**
+ * The three largest launches, with the leader called out.
+ *
+ * Taken from nearly.trade, which runs a "King of the Hill" strip above its board and
+ * is right to: a launchpad board is a long list of strangers' tokens, and without a
+ * focal point a visitor has no idea which of them anyone is actually trading. It is
+ * also the one competitive mechanic a bonding curve gives you for free, because
+ * position on the curve is public and objective.
+ *
+ * BY MARKET CAP, and the choice matters. Theirs ranks by market cap too, but the
+ * tempting alternative here is "closest to graduating", which is progress along the
+ * curve. That would rank a launch with a deliberately tiny graduation target above a
+ * launch that has raised ten times more, and the first is easier to fake than the
+ * second: a creator picks their own target. Market cap is derived from the price the
+ * curve is actually charging, which no parameter choice can inflate.
+ *
+ * NO EXTRA QUERIES. Every figure comes from rows the board has already loaded, so this
+ * strip cannot disagree with the cards below it and costs nothing to render. That is
+ * the same rule the totals bar follows and for the same reason.
+ *
+ * It renders nothing below three launches. With one or two, "top 3" is the whole board
+ * with a crown on it, which tells a visitor nothing and makes an empty launchpad look
+ * like it is pretending.
+ */
+export function KingOfTheHill({ rows, nowSeconds }: { rows: LaunchRow[]; nowSeconds: number }) {
+  const top = [...rows]
+    .filter((r) => !r.graduated)
+    .sort((a, b) => (BigInt(b.marketCap) > BigInt(a.marketCap) ? 1 : -1))
+    .slice(0, 3);
+
+  if (top.length < 3) return null;
+
+  const [king, ...rest] = top;
+
+  return (
+    <section className="hill" aria-labelledby="hill-heading">
+      <div className="hill-head">
+        <h2 id="hill-heading">King of the hill</h2>
+        <p className="note">
+          The three largest launches still on their curve, by market cap. Updated every
+          time this page reads the chain.
+        </p>
+      </div>
+
+      <div className="hill-grid">
+        <Link href={`/launch/${king.id}`} className="hill-king">
+          <div className="hill-crown">Holds the hill</div>
+          <div className="hill-id">
+            <TokenLogo profile={king.profile} symbol={symbolOf(king.denom)} size={44} />
+            <div>
+              <strong>{symbolOf(king.denom)}</strong>
+              {/*
+                * Age rather than a creator handle. On a board where anyone can launch,
+                * how long something has survived is the more useful of the two, and
+                * `ageLabel` returns null rather than "just now" for a launch whose
+                * opening block is unknown.
+                */}
+              <span className="note">{ageLabel(king.openedAt, nowSeconds) ?? 'on the curve'}</span>
+            </div>
+          </div>
+          <div className="hill-cap">
+            <span className="v mono">
+              {compact(BigInt(king.marketCap))} {NETWORK.quoteSymbol}
+            </span>
+            <span className="k">market cap</span>
+          </div>
+          <CurveGlyph
+            config={{
+              virtualInj: BigInt(king.curve.virtualInj),
+              virtualTokens: BigInt(king.curve.virtualTokens),
+              curveSupply: BigInt(king.curve.curveSupply),
+              graduationTarget: BigInt(king.curve.graduationTarget),
+              feeBps: BigInt(king.curve.feeBps),
+            }}
+            state={{
+              injCollected: BigInt(king.raised),
+              tokensSold: BigInt(king.tokensSold),
+              graduated: king.graduated,
+            }}
+            height={40}
+          />
+        </Link>
+
+        <div className="hill-rest">
+          {rest.map((r, i) => (
+            <Link key={r.id} href={`/launch/${r.id}`} className="hill-row">
+              <span className="hill-rank mono">{i + 2}</span>
+              <TokenLogo profile={r.profile} symbol={symbolOf(r.denom)} size={28} />
+              <strong>{symbolOf(r.denom)}</strong>
+              <span className="v mono">
+                {compact(BigInt(r.marketCap))} {NETWORK.quoteSymbol}
+              </span>
+            </Link>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}

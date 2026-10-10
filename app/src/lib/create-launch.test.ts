@@ -29,6 +29,7 @@ import {
   MSG_EXECUTE,
   type LaunchInput,
 } from './createLaunch.ts';
+import { CREATOR_FEE_SHARE_BPS, PLATFORM_FEE_SHARE_BPS } from './launchLimits.ts';
 import type { CurveConfig } from './curve.ts';
 import type { LaunchPlan } from './createLaunch.ts';
 
@@ -68,7 +69,6 @@ const input = (over: Partial<LaunchInput> = {}): LaunchInput => ({
   symbol: 'KAIJU',
   curve: CURVE,
   lpReserve: LP,
-  creatorFeeShareBps: 2_000,
   factory: FACTORY,
   ...over,
 });
@@ -149,7 +149,14 @@ test('the execute message names the keys the contract deserialises', () => {
   assert.equal(exec.sender, CREATOR);
   assert.deepEqual(
     Object.keys(exec.msg.create_launch).sort(),
-    ['creator_fee_share_bps', 'curve', 'denom', 'lp_reserve'],
+    /*
+     * `creator_fee_share_bps` is deliberately NOT here. It used to be a field a
+     * creator set, capped at the whole fee, so the platform's share was something
+     * every rational creator would set to zero. The factory now writes its own
+     * constant, and this assertion is what fails if the field is ever reintroduced
+     * as an input.
+     */
+    ['curve', 'denom', 'lp_reserve'],
   );
 });
 
@@ -216,17 +223,21 @@ test('an unconnected wallet and a missing factory each say which is missing', ()
   );
 });
 
-test('a fee share outside the basis-point range is refused', () => {
-  for (const bps of [-1, 10_001, 1.5]) {
-    assert.throws(
-      () => validateLaunch(input({ creatorFeeShareBps: bps })),
-      (e: unknown) => e instanceof LaunchInputError && e.field === 'creatorFeeShareBps',
-      `${bps} was accepted`,
-    );
-  }
-  for (const bps of [0, 1, 2_000, 10_000]) {
-    assert.doesNotThrow(() => validateLaunch(input({ creatorFeeShareBps: bps })));
-  }
+test('the fee split is not something a launch can set', () => {
+  /*
+   * Replaces a test that checked the basis-point RANGE of a creator-set share. The
+   * range was never the problem: 10_000 was inside it, and 10_000 means the platform
+   * earns nothing on every trade of that launch. The field is gone, so what is worth
+   * asserting is that the plan carries no way to express it.
+   */
+  const plan = planLaunch(input());
+  const exec = byType(plan, MSG_EXECUTE) as { msg: { create_launch: Record<string, unknown> } };
+  assert.ok(
+    !('creator_fee_share_bps' in exec.msg.create_launch),
+    'the launch message can still set the fee split',
+  );
+  assert.equal(CREATOR_FEE_SHARE_BPS + PLATFORM_FEE_SHARE_BPS, 10_000, 'the split does not total the fee');
+  assert.equal(CREATOR_FEE_SHARE_BPS, 7_000, 'the creator share is not the measured 70%');
 });
 
 test('planning refuses rather than returning a plan that cannot execute', () => {

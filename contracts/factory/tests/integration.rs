@@ -6,7 +6,7 @@
 //! pattern, so it gets tested directly.
 
 use cosmwasm_std::{coin, coins, Addr, Empty, Uint128};
-use cw_multi_test::{App, AppBuilder, Contract, ContractWrapper, Executor};
+use cw_multi_test::{App, AppBuilder, BankSudo, Contract, ContractWrapper, Executor, SudoMsg};
 
 use curve::msg::{ExecuteMsg as CurveExec, QueryMsg as CurveQuery};
 use curve::state::{CurveConfigStored, State as CurveState};
@@ -60,6 +60,8 @@ struct Fx {
     admin: Addr,
     creator: Addr,
     buyer: Addr,
+    /// Carried so a test can assert the platform was PAID, not merely configured.
+    platform: Addr,
 }
 
 fn setup() -> Fx {
@@ -116,7 +118,7 @@ fn setup() -> Fx {
         )
         .unwrap();
 
-    Fx { app, factory, admin, creator, buyer }
+    Fx { app, factory, admin, creator, buyer, platform }
 }
 
 impl Fx {
@@ -143,7 +145,6 @@ impl Fx {
                 &ExecuteMsg::CreateLaunch {
                     denom: denom.into(),
                     lp_reserve: lp_reserve(),
-                    creator_fee_share_bps: 5_000,
                     curve: curve_cfg(),
                     profile,
                     rules,
@@ -243,7 +244,6 @@ fn wrong_seed_amount_is_refused() {
             initial_buy: None,
             denom: TOKEN.into(),
             lp_reserve: lp_reserve(),
-            creator_fee_share_bps: 0,
             curve: curve_cfg(),
         },
         &coins(amt(1).u128(), TOKEN), // nowhere near the required seed
@@ -268,7 +268,6 @@ fn an_unreachable_graduation_target_is_refused_at_creation() {
             initial_buy: None,
             denom: TOKEN.into(),
             lp_reserve: lp_reserve(),
-            creator_fee_share_bps: 0,
             curve: bad,
         },
         &coins(seed_total().u128(), TOKEN),
@@ -560,7 +559,10 @@ fn an_initial_buy_sends_the_tokens_to_the_creator_not_the_factory() {
      */
     let mut f = setup();
     let creator = f.creator.clone();
-    let spend = amt(5);
+    // 2 INJ takes 8.30% of supply on this curve, inside the 10% opening-buy cap.
+    // It was 5 INJ (19.00%), which the cap now refuses: this test is about WHERE the
+    // tokens land, not about how many, so it uses a legal amount.
+    let spend = amt(2);
 
     f.app
         .execute_contract(
@@ -569,7 +571,6 @@ fn an_initial_buy_sends_the_tokens_to_the_creator_not_the_factory() {
             &ExecuteMsg::CreateLaunch {
                 denom: TOKEN.into(),
                 lp_reserve: lp_reserve(),
-                creator_fee_share_bps: 5_000,
                 curve: curve_cfg(),
                 profile: Default::default(),
                 rules: Default::default(),
@@ -622,7 +623,6 @@ fn the_attached_quote_must_match_the_declared_initial_buy() {
             &ExecuteMsg::CreateLaunch {
                 denom: TOKEN.into(),
                 lp_reserve: lp_reserve(),
-                creator_fee_share_bps: 5_000,
                 curve: curve_cfg(),
                 profile: Default::default(),
                 rules: Default::default(),
@@ -646,7 +646,6 @@ fn a_launch_with_no_initial_buy_still_takes_exactly_the_seed() {
         &ExecuteMsg::CreateLaunch {
             denom: TOKEN.into(),
             lp_reserve: lp_reserve(),
-            creator_fee_share_bps: 5_000,
             curve: curve_cfg(),
             profile: Default::default(),
             rules: Default::default(),
@@ -672,7 +671,6 @@ fn a_third_denom_is_refused_rather_than_kept() {
         &ExecuteMsg::CreateLaunch {
             denom: TOKEN.into(),
             lp_reserve: lp_reserve(),
-            creator_fee_share_bps: 5_000,
             curve: curve_cfg(),
             profile: Default::default(),
             rules: Default::default(),
@@ -705,7 +703,6 @@ fn the_factory_refuses_a_bad_seed_itself_rather_than_leaving_it_to_the_curve() {
         &ExecuteMsg::CreateLaunch {
             denom: TOKEN.into(),
             lp_reserve: lp_reserve(),
-            creator_fee_share_bps: 5_000,
             curve: curve_cfg(),
             profile: Default::default(),
             rules: Default::default(),
@@ -717,5 +714,369 @@ fn the_factory_refuses_a_bad_seed_itself_rather_than_leaving_it_to_the_curve() {
     assert!(
         err.contains("seed") || err.contains("expected"),
         "the refusal does not name the seed: {err}"
+    );
+}
+
+/*
+ * ---------------------------------------------------------------------------
+ * The fixed supply, and the platform's floor on every fee.
+ *
+ * Both are the same kind of guarantee: a number a visitor is invited to compare
+ * across the whole board, which only means anything if a creator cannot set it.
+ * Both are therefore tested by trying to set them, not by reading them back.
+ * ---------------------------------------------------------------------------
+ */
+
+/// Create with an arbitrary split and total, so a test can aim at the guard
+/// rather than at the fixture.
+fn create_sized(
+    f: &mut Fx,
+    denom: &str,
+    curve_supply: Uint128,
+    lp: Uint128,
+) -> Result<(), String> {
+    let mut curve = curve_cfg();
+    curve.curve_supply = curve_supply;
+    // `virtual_tokens` must stay above `curve_supply` or the curve's own
+    // validation refuses first and the test proves nothing about this guard.
+    curve.virtual_tokens = curve_supply * Uint128::new(13_413) / Uint128::new(10_000);
+    let seed = curve_supply + lp;
+    f.app
+        .execute_contract(
+            f.creator.clone(),
+            f.factory.clone(),
+            &ExecuteMsg::CreateLaunch {
+                denom: denom.into(),
+                lp_reserve: lp,
+                curve,
+                profile: Default::default(),
+                rules: Default::default(),
+                initial_buy: None,
+            },
+            &coins(seed.u128(), denom),
+        )
+        .map(|_| ())
+        /*
+         * The ALTERNATE form, which is what carries the contract's own sentence.
+         * Plain `to_string()` on the error cw_multi_test returns gives only the
+         * outer "Error executing WasmMsg" frame, so an assertion written against
+         * it passes for every possible rejection and tests nothing.
+         */
+        .map_err(|e| format!("{e:#}"))
+}
+
+/// The curve contract's own config, which is where `lp_reserve` and the fee split
+/// actually live: `Launch` carries only what the factory indexes.
+fn curve_config(f: &Fx, id: u64) -> curve::state::Config {
+    let l = f.launch(id);
+    f.app
+        .wrap()
+        .query_wasm_smart(l.curve.clone(), &CurveQuery::Config {})
+        .unwrap()
+}
+
+#[test]
+fn total_supply_is_fixed_at_one_billion() {
+    let mut f = setup();
+    assert_eq!(
+        factory::FIXED_TOTAL_SUPPLY,
+        amt(1_000_000_000),
+        "the constant is not one billion at 18 decimals"
+    );
+    // The fixture's own 800M/200M split is the fixed total, so the happy path
+    // is the default one every other test in this file already exercises.
+    assert_eq!(seed_total(), factory::FIXED_TOTAL_SUPPLY);
+    create_sized(&mut f, TOKEN, amt(800_000_000), amt(200_000_000)).unwrap();
+}
+
+#[test]
+fn a_larger_total_is_refused() {
+    let mut f = setup();
+    /*
+     * Minted first, and this is not incidental. The creator is seeded with exactly
+     * the fixed supply, so attaching more than 1B fails in the BANK MODULE with
+     * "Cannot Sub" before the factory runs at all. The first version of this test
+     * passed on that error, which means it asserted the creator was poor rather
+     * than that the supply is fixed. Rule 48: a rejection is only evidence when it
+     * came from the thing being tested.
+     */
+    let creator = f.creator.clone();
+    f.app
+        .sudo(SudoMsg::Bank(BankSudo::Mint {
+            to_address: creator.to_string(),
+            amount: coins(amt(1_000_000_000).u128(), TOKEN),
+        }))
+        .unwrap();
+
+    let err = create_sized(&mut f, TOKEN, amt(800_000_000), amt(400_000_000))
+        .expect_err("1.2B was accepted");
+    assert!(
+        err.contains("exactly") && err.contains("tokens"),
+        "the refusal does not name the fixed supply: {err}"
+    );
+}
+
+#[test]
+fn a_smaller_total_is_refused() {
+    let mut f = setup();
+    /*
+     * The interesting direction. A creator who launches 10M tokens rather than 1B
+     * gets a token priced 100x higher per unit on the same curve, so every market
+     * cap on the board becomes incomparable, and nothing about the launch looks
+     * wrong on its own card.
+     */
+    let err = create_sized(&mut f, TOKEN, amt(8_000_000), amt(2_000_000))
+        .expect_err("10M was accepted");
+    assert!(
+        err.contains("exactly") && err.contains("tokens"),
+        "the refusal does not name the fixed supply: {err}"
+    );
+}
+
+#[test]
+fn off_by_one_base_unit_is_refused() {
+    let mut f = setup();
+    /*
+     * The guard is equality, not a tolerance, and this is what distinguishes it
+     * from a bounds check that would let a rounding error through. One base unit
+     * of 1e-18 of a token is economically nothing, which is the point: there is no
+     * threshold here to find.
+     */
+    let lp = lp_reserve() - Uint128::one();
+    let err = create_sized(&mut f, TOKEN, curve_cfg().curve_supply, lp)
+        .expect_err("one base unit short was accepted");
+    assert!(err.contains("exactly"), "unexpected refusal: {err}");
+}
+
+#[test]
+fn the_split_between_curve_and_reserve_is_still_the_creators() {
+    let mut f = setup();
+    /*
+     * Only the TOTAL is fixed. A creator who wants half the supply held back for
+     * liquidity rather than a fifth is making a legitimate choice about their own
+     * launch, and a guard that refused it would be enforcing a shape nobody asked
+     * for under the name of a supply guarantee.
+     */
+    create_sized(&mut f, TOKEN, amt(500_000_000), amt(500_000_000)).unwrap();
+    let cfg = curve_config(&f, 1);
+    assert_eq!(cfg.lp_reserve, amt(500_000_000));
+    assert_eq!(cfg.curve.curve_supply, amt(500_000_000));
+}
+
+#[test]
+fn the_platform_earns_a_fixed_share_of_every_fee() {
+    let mut f = setup();
+    /*
+     * THE DEFECT THIS PINS. `creator_fee_share_bps` used to arrive on `CreateLaunch`,
+     * capped at 10_000 bps, which is the whole fee. A creator setting it to the
+     * maximum is not an attack, it is the rational move, so the platform's cut
+     * accrued on every trade and the amount it accrued was zero: a fee that was
+     * modelled, routed, claimable, and guaranteed to be empty.
+     *
+     * The field is gone. The split is policy, at the 70/30 both comparable
+     * launchpads use, and a launch cannot opt out of it because there is nothing
+     * left to set.
+     */
+    assert_eq!(factory::CREATOR_FEE_SHARE_BPS, 7_000);
+    create_sized(&mut f, TOKEN, amt(800_000_000), amt(200_000_000)).unwrap();
+    assert_eq!(
+        curve_config(&f, 1).creator_fee_share_bps,
+        factory::CREATOR_FEE_SHARE_BPS,
+        "the launched curve does not carry the policy split"
+    );
+}
+
+#[test]
+fn the_platform_is_actually_paid_its_share() {
+    let mut f = setup();
+    /*
+     * End to end, because every check above is about configuration and a share that
+     * is configured and never paid is the failure this project keeps finding. Buy,
+     * claim, and read the platform's bank balance.
+     */
+    create_sized(&mut f, TOKEN, amt(800_000_000), amt(200_000_000)).unwrap();
+    let curve = f.launch(1).curve;
+    let platform = f.platform.clone();
+    assert!(f.balance(&platform, QUOTE).is_zero(), "platform starts clean");
+
+    let spend = amt(10);
+    f.app
+        .execute_contract(
+            f.buyer.clone(),
+            curve.clone(),
+            &CurveExec::Buy { min_tokens_out: Uint128::zero(), recipient: None },
+            &coins(spend.u128(), QUOTE),
+        )
+        .unwrap();
+
+    let st: CurveState = f
+        .app
+        .wrap()
+        .query_wasm_smart(curve.clone(), &CurveQuery::State {})
+        .unwrap();
+    assert!(!st.platform_owed.is_zero(), "nothing accrued to the platform");
+    // 30% of the fee, which at 100 bps on a 10 INJ buy is 0.1 INJ of fee.
+    let total_fee = st.platform_owed + st.creator_owed;
+    assert_eq!(
+        st.platform_owed,
+        total_fee - total_fee * Uint128::new(7_000) / Uint128::new(10_000),
+        "the accrued split is not 70/30"
+    );
+
+    f.app
+        .execute_contract(f.buyer.clone(), curve, &CurveExec::ClaimFees {}, &[])
+        .unwrap();
+    assert_eq!(
+        f.balance(&platform, QUOTE),
+        st.platform_owed,
+        "the platform's share was accrued and never paid"
+    );
+}
+
+/// Create with an opening buy, which needs quote attached alongside the supply.
+fn create_with_dev_buy(f: &mut Fx, denom: &str, spend: Uint128) -> Result<(), String> {
+    let seed = seed_total();
+    f.app
+        .execute_contract(
+            f.creator.clone(),
+            f.factory.clone(),
+            &ExecuteMsg::CreateLaunch {
+                denom: denom.into(),
+                lp_reserve: lp_reserve(),
+                curve: curve_cfg(),
+                profile: Default::default(),
+                rules: Default::default(),
+                initial_buy: Some(spend),
+            },
+            &[coin(seed.u128(), denom), coin(spend.u128(), QUOTE)],
+        )
+        .map(|_| ())
+        .map_err(|e| format!("{e:#}"))
+}
+
+#[test]
+fn a_creator_cannot_take_the_curve_in_their_own_opening_buy() {
+    let mut f = setup();
+    /*
+     * `initial_buy` was unbounded. A creator could take most of the curve at the
+     * opening price in the same transaction that created the launch, before any other
+     * address could see the token existed. The create form warned about the share, and
+     * warned is all it did.
+     *
+     * 40 INJ against the default curve takes 76.31% of the supply, measured.
+     */
+    let err = create_with_dev_buy(&mut f, TOKEN, amt(40)).expect_err("the dev took the curve");
+    assert!(
+        err.contains("the most a creator may take"),
+        "the refusal does not name the cap: {err}"
+    );
+}
+
+#[test]
+fn a_modest_opening_buy_is_still_allowed() {
+    let mut f = setup();
+    /*
+     * The cap must not refuse the ordinary case. A creator buying a small opening
+     * position is the normal, disclosed thing every launchpad supports, and a cap that
+     * blocked it would have removed a feature rather than bounded one.
+     */
+    // 1 INJ takes 4.28% of supply on the default curve, measured: comfortably
+    // inside the cap and the sort of opening position a creator actually makes.
+    create_with_dev_buy(&mut f, TOKEN, amt(1)).unwrap();
+    let l = f.launch(1);
+    let st: CurveState = f
+        .app
+        .wrap()
+        .query_wasm_smart(l.curve, &CurveQuery::State {})
+        .unwrap();
+    let ceiling = curve_cfg()
+        .curve_supply
+        .multiply_ratio(factory::MAX_INITIAL_BUY_BPS, 10_000u128);
+    assert!(!st.tokens_sold.is_zero(), "the opening buy did not execute");
+    assert!(st.tokens_sold <= ceiling, "an allowed buy exceeded the cap");
+}
+
+#[test]
+fn the_cap_is_measured_in_supply_not_in_quote() {
+    let mut f = setup();
+    /*
+     * THE REASON THE CAP READS TOKENS. The same quote buys a wildly different share
+     * depending on the curve, so a cap on the attached amount is one a creator designs
+     * around in a single field: halve `virtual_inj` and the same INJ takes far more of
+     * the supply. Here the shape is made cheap and the identical spend that passes on
+     * the default curve must now be refused.
+     */
+    let cheap = amt(2);
+    create_with_dev_buy(&mut f, TOKEN, cheap).expect("the control case should pass");
+
+    let mut f2 = setup();
+    let mut steep = curve_cfg();
+    /*
+     * A smaller opening reserve, so the same INJ buys far more of the curve, AND a
+     * lower graduation target so the curve stays reachable. The first attempt used
+     * `virtual_inj = 1` alone and was refused by curve validation ("graduation target
+     * can never be reached") before the cap was ever consulted: the test passed its
+     * own assertion on a rejection from a different guard entirely.
+     */
+    steep.virtual_inj = amt(10);
+    steep.graduation_target = amt(25);
+    let seed = seed_total();
+    let err = f2
+        .app
+        .execute_contract(
+            f2.creator.clone(),
+            f2.factory.clone(),
+            &ExecuteMsg::CreateLaunch {
+                denom: TOKEN.into(),
+                lp_reserve: lp_reserve(),
+                curve: steep,
+                profile: Default::default(),
+                rules: Default::default(),
+                initial_buy: Some(cheap),
+            },
+            &[coin(seed.u128(), TOKEN), coin(cheap.u128(), QUOTE)],
+        )
+        .map(|_| ())
+        .map_err(|e| format!("{e:#}"))
+        .expect_err("the same spend took an unbounded share on a steeper curve");
+    assert!(
+        err.contains("the most a creator may take"),
+        "refused for the wrong reason: {err}"
+    );
+}
+
+#[test]
+fn the_opening_buy_cap_is_a_share_of_the_curve_not_of_the_total_supply() {
+    let mut f = setup();
+    /*
+     * ADDED AFTER A MUTATION ESCAPED. Changing the ceiling to
+     * `(curve_supply + lp_reserve) * bps` loosened the cap by a quarter and every
+     * test above still passed, because none of them used an amount that falls
+     * between the two bases.
+     *
+     * With the default 800M/200M split: 10% of the curve is 80,000,000 tokens and
+     * 10% of the total is 100,000,000. A 2.5 INJ opening buy takes 81,775,982
+     * (measured), which sits between them. It must be refused.
+     *
+     * The curve supply is the right basis because it is what is actually purchasable:
+     * the reserve is held back for the pool and nobody can buy it, so counting it
+     * would let a creator take a larger share of the tradable supply than the number
+     * claims.
+     */
+    let between = amt(25) / Uint128::new(10);
+    let err = create_with_dev_buy(&mut f, TOKEN, between)
+        .expect_err("a buy above 10% of the curve was accepted");
+    assert!(
+        err.contains("the most a creator may take"),
+        "refused for the wrong reason: {err}"
+    );
+
+    // And the ceiling named in the refusal is the curve's, not the total's.
+    let curve_basis = curve_cfg()
+        .curve_supply
+        .multiply_ratio(factory::MAX_INITIAL_BUY_BPS, 10_000u128);
+    assert!(
+        err.contains(&curve_basis.to_string()),
+        "the refusal names a ceiling other than 10% of the curve supply: {err}"
     );
 }

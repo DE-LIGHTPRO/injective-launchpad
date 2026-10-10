@@ -82,6 +82,16 @@ export interface BoardTotals {
   raised: bigint;
   /** Fees accrued to creators and the platform, in base units. */
   feesAccrued: bigint;
+  /**
+   * Lifetime quote actually handed to creators, in base units.
+   *
+   * A different claim from `feesAccrued`, which is only what is unclaimed at this
+   * instant and DROPS when someone claims. This only rises. It is the figure a
+   * creator weighs when choosing a launchpad, which is why nearly.trade runs
+   * "$146.6K PAID TO CREATORS" on its homepage, and it is counted by the contract as
+   * it pays rather than reconstructed from events.
+   */
+  paidToCreators: bigint;
   graduated: number;
 }
 
@@ -100,12 +110,13 @@ export interface BoardTotals {
  * reserve for that reason, and volume is left out rather than approximated by it.
  */
 export function boardTotals(
-  rows: Array<{ raised: bigint; feesAccrued: bigint; graduated: boolean }>,
+  rows: Array<{ raised: bigint; feesAccrued: bigint; graduated: boolean; creatorPaid: bigint }>,
 ): BoardTotals {
   return {
     launches: rows.length,
     raised: rows.reduce((a, r) => a + r.raised, 0n),
     feesAccrued: rows.reduce((a, r) => a + r.feesAccrued, 0n),
+    paidToCreators: rows.reduce((a, r) => a + r.creatorPaid, 0n),
     graduated: rows.filter((r) => r.graduated).length,
   };
 }

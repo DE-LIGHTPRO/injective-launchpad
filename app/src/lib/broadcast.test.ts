@@ -35,7 +35,6 @@ const input = (over: Partial<LaunchInput> = {}): LaunchInput => ({
   symbol: 'KAIJU',
   curve,
   lpReserve: 200_000_000n * ONE,
-  creatorFeeShareBps: 2_000,
   factory: FACTORY,
   ...over,
 });

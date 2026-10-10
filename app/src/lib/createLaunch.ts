@@ -94,7 +94,6 @@ export interface LaunchInput {
   initialBuy?: bigint;
   curve: CurveConfig;
   lpReserve: bigint;
-  creatorFeeShareBps: number;
   factory: string;
 }
 
@@ -103,7 +102,6 @@ export class LaunchInputError extends Error {
     | keyof LaunchInput
     | 'symbol'
     | 'lpReserve'
-    | 'creatorFeeShareBps'
     | 'curve'
     | 'profile'
     | 'rules';
@@ -156,9 +154,6 @@ export function validateLaunch(input: LaunchInput): void {
   }
   if (!/^inj1[0-9a-z]{38,}$/.test(input.factory)) {
     throw new LaunchInputError('factory', 'This launchpad has no factory configured.');
-  }
-  if (!Number.isInteger(input.creatorFeeShareBps) || input.creatorFeeShareBps < 0 || input.creatorFeeShareBps > 10_000) {
-    throw new LaunchInputError('creatorFeeShareBps', 'The creator fee share is a whole number of basis points, 0 to 10000.');
   }
   if (input.lpReserve < 0n) {
     throw new LaunchInputError('lpReserve', 'The liquidity reserve cannot be negative.');
@@ -290,7 +285,6 @@ export function planLaunch(input: LaunchInput): LaunchPlan {
                 ? { initial_buy: input.initialBuy.toString() }
                 : {}),
               lp_reserve: input.lpReserve.toString(),
-              creator_fee_share_bps: input.creatorFeeShareBps,
               curve: curveMsg,
             },
           },

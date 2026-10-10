@@ -11,6 +11,14 @@ import {
 } from '@/lib/createLaunch';
 import { parseAmount, fmt, maxCollectable, quoteBuy, type CurveConfig, type CurveState } from '@/lib/curve';
 import { NETWORK, getFactoryAddress, isDeployed } from '@/lib/config';
+import {
+  FIXED_TOTAL_SUPPLY,
+  FIXED_TOTAL_SUPPLY_TOKENS,
+  CREATOR_FEE_SHARE_BPS,
+  PLATFORM_FEE_SHARE_BPS,
+  MAX_INITIAL_BUY_BPS,
+  initialBuyCeiling,
+} from '@/lib/launchLimits';
 import type { WalletAccount } from '@/lib/wallet';
 import { profileForChain, profileFieldError, imageSrc } from '@/lib/tokenProfile';
 import {
@@ -58,12 +66,10 @@ const DEFAULTS = {
   openingFeePct: '',
   openingFeeMins: '10',
   initialBuy: '',
-  totalSupply: '1000000000',
   curveShare: '80',
   target: '85',
   virtualInj: '30',
   feeBps: '100',
-  creatorFeeShareBps: '2000',
 };
 
 export function CreateLaunch() {
@@ -87,16 +93,21 @@ export function CreateLaunch() {
    */
   const built = useMemo((): { curve: CurveConfig; lpReserve: bigint } | { error: string } => {
     try {
-      const total = parseAmount(f.totalSupply || '0');
+      const total = FIXED_TOTAL_SUPPLY;
       const sharePct = Number(f.curveShare);
       if (!Number.isFinite(sharePct) || sharePct <= 0 || sharePct >= 100) {
         return { error: 'The share on the curve is a percentage above 0 and below 100.' };
       }
-      if (total <= 0n) return { error: 'Total supply must be above zero.' };
 
       // Integer arithmetic throughout: a percentage of 1e27 through a float
       // loses the low digits of the supply.
       const curveSupply = (total * BigInt(Math.round(sharePct * 100))) / 10_000n;
+      /*
+       * The REMAINDER, never a second percentage. The factory refuses any total but
+       * exactly 1e27 base units, so a reserve computed as its own share of the supply
+       * would be refused on chain for a rounding error of one base unit at some
+       * percentages, and the form would look correct while doing it.
+       */
       const lpReserve = total - curveSupply;
       if (curveSupply <= 0n || lpReserve <= 0n) {
         return { error: 'That split leaves nothing on one side.' };
@@ -143,7 +154,6 @@ export function CreateLaunch() {
           }),
           curve: built.curve,
           lpReserve: built.lpReserve,
-          creatorFeeShareBps: Math.round(Number(f.creatorFeeShareBps) || 0),
           factory,
         }),
       };
@@ -270,7 +280,21 @@ export function CreateLaunch() {
     try {
       const q = quoteBuy(built.curve, { injCollected: 0n, tokensSold: 0n, graduated: false }, devBuy);
       const total = built.curve.curveSupply + built.lpReserve;
-      return { tokens: q.tokensOut, share: Number(q.tokensOut) / Number(total) };
+      /*
+       * Two denominators on purpose, and they are not interchangeable. `share` is of
+       * the TOTAL supply, which is what a holder reads and what the launch page
+       * publishes. The CAP is against the curve supply, which is what is actually
+       * purchasable and what the contract compares. With an 80/20 split those differ
+       * by a quarter, so checking the displayed percentage against the contract's
+       * limit would pass a launch the chain then refuses after signing.
+       */
+      const ceiling = initialBuyCeiling(built.curve.curveSupply);
+      return {
+        tokens: q.tokensOut,
+        share: Number(q.tokensOut) / Number(total),
+        overCap: q.tokensOut > ceiling,
+        ceiling,
+      };
     } catch {
       return null;
     }
@@ -279,7 +303,12 @@ export function CreateLaunch() {
   const fresh: CurveState = { injCollected: 0n, tokensSold: 0n, graduated: false };
   // A rule problem blocks the plan as firmly as a bad curve does. Both are permanent
   // once created, and the form is the only place either can still be changed.
-  const ok = plan !== null && 'plan' in plan && ruleProblems.length === 0;
+  // The opening-buy cap blocks the plan, it does not merely colour a sentence red.
+  // The previous version warned at 20% of supply and let the creator sign anyway,
+  // which is the create-form-as-guarantee failure: the only thing stopping a creator
+  // taking three quarters of their own curve was a paragraph.
+  const ok =
+    plan !== null && 'plan' in plan && ruleProblems.length === 0 && !devBuyPreview?.overCap;
 
   return (
     <>
@@ -420,8 +449,22 @@ export function CreateLaunch() {
 
         <div className="field-row">
           <div className="field">
-            <label htmlFor="cl-supply">Total supply</label>
-            <input id="cl-supply" value={f.totalSupply} onChange={(e) => set('totalSupply')(e.target.value)} inputMode="decimal" />
+            {/*
+              * NOT AN INPUT, and not a disabled one either. A greyed-out field implies
+              * a version of this form where the number can be changed, and there
+              * isn't one: the factory refuses any total but this. Stated as a fact,
+              * with the reason, because a creator who wanted 10M tokens deserves to
+              * know why they cannot have them rather than to find a dead control.
+              */}
+            <span className="field-label">Total supply</span>
+            <div className="fixed-value">
+              <span className="mono">{FIXED_TOTAL_SUPPLY_TOKENS.toLocaleString('en-US')}</span>
+              <span className="chip chip-sm muted">fixed</span>
+            </div>
+            <p className="note">
+              Every launch here has the same supply, so market caps on the board are
+              comparable. You choose how it splits, not how much there is.
+            </p>
           </div>
           <div className="field">
             <label htmlFor="cl-share">
@@ -454,10 +497,24 @@ export function CreateLaunch() {
             <input id="cl-fee" value={f.feeBps} onChange={(e) => set('feeBps')(e.target.value)} inputMode="numeric" />
           </div>
           <div className="field">
-            <label htmlFor="cl-cshare">
-              Your share of the fee <span className="hint">bps of the fee itself</span>
-            </label>
-            <input id="cl-cshare" value={f.creatorFeeShareBps} onChange={(e) => set('creatorFeeShareBps')(e.target.value)} inputMode="numeric" />
+            {/*
+              * Also not an input. It was one, capped at the whole fee, which made the
+              * platform's share something a creator could set to zero: every rational
+              * creator would, so the split was 100/0 and our side of it was a number
+              * that accrued nothing. It is policy now, at the same 70/30 nearly.trade
+              * and ponsfamily.com both use, and it is shown rather than hidden
+              * because a creator earning from their launch is the point of it.
+              */}
+            <span className="field-label">Your share of the fee</span>
+            <div className="fixed-value">
+              <span className="mono">{CREATOR_FEE_SHARE_BPS / 100}%</span>
+              <span className="chip chip-sm muted">fixed</span>
+            </div>
+            <p className="note">
+              {CREATOR_FEE_SHARE_BPS / 100}% of every trading fee is yours, claimable
+              from your launch at any time. The other {PLATFORM_FEE_SHARE_BPS / 100}%
+              runs this launchpad.
+            </p>
           </div>
         </div>
       </div>
@@ -574,13 +631,20 @@ export function CreateLaunch() {
                 launch page will show every visitor, so showing it here is showing
                 them what everyone else will see.
               */
-            <p className={`note ${devBuyPreview.share >= 0.2 ? 'err-text' : ''}`}>
+            <p className={`note ${devBuyPreview.overCap ? 'err-text' : ''}`}>
               That buys about {fmt(devBuyPreview.tokens, 18, 0)}{' '}
               {f.symbol.trim() || 'tokens'}, roughly{' '}
               <strong>{(devBuyPreview.share * 100).toFixed(1)}% of the supply</strong>, in
               the same transaction and before anyone else can buy.
-              {devBuyPreview.share >= 0.2 &&
-                ' A position this size is shown on the launch page and will put buyers off.'}
+              {devBuyPreview.overCap && (
+                <>
+                  {' '}
+                  The contract refuses this: an opening buy cannot exceed{' '}
+                  {MAX_INITIAL_BUY_BPS / 100}% of the curve, which is about{' '}
+                  {fmt(devBuyPreview.ceiling, 18, 0)} {f.symbol.trim() || 'tokens'}.
+                  Reduce the amount.
+                </>
+              )}
             </p>
           )}
         </div>

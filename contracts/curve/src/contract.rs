@@ -430,6 +430,10 @@ fn exec_claim_fees(deps: DepsMut) -> Result<Response, ContractError> {
 
     state.creator_owed = Uint128::zero();
     state.platform_owed = Uint128::zero();
+    // Counted as it is paid, not as it is earned: this is the figure a board adds up
+    // to say what creators have actually been handed.
+    state.creator_paid = state.creator_paid.checked_add(creator)?;
+    state.platform_paid = state.platform_paid.checked_add(platform)?;
     STATE.save(deps.storage, &state)?;
 
     let mut res = Response::new()

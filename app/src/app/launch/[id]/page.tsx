@@ -9,6 +9,7 @@ import { marketCap, compact, feeLabel, ageLabel } from '@/lib/boardMetrics';
 import { addressName } from '@/lib/addressName';
 import { StatusChip } from '@/components/StatusChip';
 import { CreatorPosition } from '@/components/CreatorPosition';
+import { FeeEarnings } from '@/components/FeeEarnings';
 import { CopyButton } from '@/components/CopyButton';
 import { graduationProgress, fmt, spotPrice, maxCollectable } from '@/lib/curve';
 import { NETWORK, isDeployed, isDevBuild } from '@/lib/config';
@@ -274,6 +275,16 @@ export default async function LaunchPage({ params }: { params: Promise<{ id: str
         totalSupply={(detail.config.curveSupply + detail.lpReserve).toString()}
       />
 
+      <FeeEarnings
+        curve={launch.curve}
+        creator={detail.creator}
+        creatorOwed={detail.creatorOwed}
+        platformOwed={detail.platformOwed}
+        creatorPaid={detail.creatorPaid}
+        platformPaid={detail.platformPaid}
+        feeBps={detail.config.feeBps}
+      />
+
       <div className="cols" style={{ marginTop: 'var(--space-5)' }}>
         <div>
           <div className="card">
@@ -348,6 +359,7 @@ export default async function LaunchPage({ params }: { params: Promise<{ id: str
         </div>
 
         <TradePanel
+          curve={launch.curve}
           config={detail.config}
           state={detail.state}
           symbol={symbol}

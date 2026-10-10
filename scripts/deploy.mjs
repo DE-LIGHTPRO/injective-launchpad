@@ -42,6 +42,7 @@ import {
   ChainGrpcBankApi,
 } from '@injectivelabs/sdk-ts';
 import { Network, getNetworkEndpoints } from '@injectivelabs/networks';
+import { createHash } from 'node:crypto';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ARTIFACTS = join(HERE, '..', 'target', 'wasm32-unknown-unknown', 'release');
@@ -311,9 +312,120 @@ async function storeCode(label, bytes) {
   return Number(String(codeId).replace(/"/g, ''));
 }
 
+/**
+ * Reuse a code id already on chain instead of storing the same bytes again.
+ *
+ * WHY THIS EXISTS. `MsgStoreCode` for a 290 KB wasm regularly takes longer than the
+ * SDK's 42-second inclusion poll, and the SDK throws on that timeout. **A timeout is
+ * not a failure**: the run that produced this check threw, and the transaction had
+ * landed, as code id 39965, with the account sequence advanced and the fee paid.
+ * Rerunning the script blind would have stored identical bytes a second time, under a
+ * third code id, and paid for it.
+ *
+ * So a partial deploy resumes: pass the code ids the chain already has. The script
+ * prints them when it manages to read them, and they are also visible on the code
+ * listing for this sender.
+ */
+function reusedCodeId(label) {
+  const raw = process.env[`INJ_${label.toUpperCase()}_CODE_ID`]?.trim();
+  if (!raw) return null;
+  const id = Number(raw);
+  if (!Number.isInteger(id) || id <= 0) {
+    die(`INJ_${label.toUpperCase()}_CODE_ID is not a code id: ${raw}`);
+  }
+  return id;
+}
+
+/**
+ * Confirm a reused code id exists AND holds the bytes we just built.
+ *
+ * Checking it exists is not enough: the whole point of reusing is to skip an upload,
+ * so a stale id would silently deploy last week's contract while the build log says
+ * otherwise. The chain stores a sha256 of the wasm, which is exactly what we have.
+ */
+async function assertCodeMatches(label, id, bytes) {
+  const res = await fetch(`${endpoints.rest}/cosmwasm/wasm/v1/code/${id}`).catch((e) =>
+    die(`Could not read code id ${id}.`, e.message),
+  );
+  if (!res.ok) die(`Code id ${id} does not exist on this chain.`);
+  const body = await res.json();
+  /*
+   * `data_hash` comes back as a HEX string, not base64. Decoding it as base64 yields
+   * 48 bytes of nonsense that never matches, and the mismatch reads as "the chain has
+   * different bytes" rather than "the comparison is broken" — which is exactly how it
+   * first presented: a correct upload reported as the wrong contract.
+   */
+  const onChain = String(body?.code_info?.data_hash ?? '').toLowerCase();
+  const local = createHash('sha256').update(bytes).digest('hex');
+  if (onChain.toLowerCase() !== local.toLowerCase()) {
+    die(
+      `Code id ${id} is not the ${label} you just built.`,
+      `on chain: ${onChain}`,
+      `locally:  ${local}`,
+      'Drop the override and let the script store it.',
+    );
+  }
+  console.log(`     ${label} → code id ${id}  (reused, hash matches)`);
+  return id;
+}
+
 step(4, 'Storing the contracts on chain');
-const curveCodeId = await storeCode('curve', curveWasm);
-const factoryCodeId = await storeCode('factory', factoryWasm);
+const curveReuse = reusedCodeId('curve');
+const curveCodeId = curveReuse
+  ? await assertCodeMatches('curve', curveReuse, curveWasm)
+  : await storeCode('curve', curveWasm);
+const factoryReuse = reusedCodeId('factory');
+const factoryCodeId = factoryReuse
+  ? await assertCodeMatches('factory', factoryReuse, factoryWasm)
+  : await storeCode('factory', factoryWasm);
+
+/**
+ * Refuse a payout address that has never existed on chain.
+ *
+ * THE DEFECT THIS EXISTS FOR. The factory was deployed with
+ * `platform: inj10c4qlte95xqkx505mdvme6lxa50feeujlhlggq`, a well-formed bech32 address
+ * that the chain answers `account not found` for: zero balance, no account, never
+ * transacted. Nobody has shown they hold its key. The platform's share of every
+ * trading fee was routed there and `ClaimFees` would have paid it there, successfully,
+ * because a bank send to a valid unused address is not an error. The money would have
+ * been gone with nothing reporting a problem.
+ *
+ * Checking the FORMAT is what let that through: the address was perfectly formed. The
+ * only cheap evidence that an address is real is that it exists on chain, so that is
+ * what is checked, for both payout addresses, before anything is instantiated.
+ *
+ * It is not proof of control, and it is not meant to be. An account that has
+ * transacted is one somebody has the key to; it could still be the wrong somebody.
+ * What it rules out is the case that actually happened: an address nobody has ever
+ * held, typed into a config file and never questioned.
+ */
+async function assertPayable(label, address) {
+  const url = `${endpoints.rest}/cosmos/auth/v1beta1/accounts/${address}`;
+  let res;
+  try {
+    res = await fetch(url);
+  } catch (e) {
+    die(`Could not check the ${label} address.`, e.message);
+  }
+  if (res.status === 404 || res.status === 400 || res.status === 500) {
+    die(
+      `The ${label} address has no account on this chain: ${address}`,
+      'A well-formed address that has never transacted is one nobody has shown they hold the key to.',
+      'Fees sent there are not refused, they are simply unreachable. Fund it once from the',
+      'wallet that owns it, then deploy.',
+    );
+  }
+  const body = await res.json().catch(() => ({}));
+  // Rule 45: a 200 is not an answer. The LCD returns 200 with a `code` for a
+  // missing account on some versions, so the body decides.
+  if (body.code || !body.account) {
+    die(
+      `The ${label} address has no account on this chain: ${address}`,
+      `the node answered: ${JSON.stringify(body).slice(0, 200)}`,
+    );
+  }
+  console.log(`     ${label}: ${address} ✓ exists on chain`);
+}
 
 step(5, 'Instantiating the factory');
 const initMsg = {
@@ -323,8 +435,8 @@ const initMsg = {
   migration_target: process.env.INJ_MIGRATION_TARGET?.trim() || sender,
   quote_denom: 'inj',
 };
-console.log(`     platform:   ${initMsg.platform}`);
-console.log(`     migration:  ${initMsg.migration_target}`);
+await assertPayable('platform fee recipient', initMsg.platform);
+await assertPayable('migration target', initMsg.migration_target);
 
 const instantiate = MsgInstantiateContract.fromJSON({
   sender,

@@ -73,17 +73,30 @@ test('the fee badge shows one number, because there is one fee', () => {
 
 test('totals come from the rows on screen, so they cannot contradict them', () => {
   const rows = [
-    { raised: 10n * ONE, feesAccrued: ONE / 10n, graduated: false },
-    { raised: 85n * ONE, feesAccrued: ONE, graduated: true },
-    { raised: 5n * ONE, feesAccrued: ONE / 100n, graduated: false },
+    { raised: 10n * ONE, feesAccrued: ONE / 10n, graduated: false, creatorPaid: 2n * ONE },
+    { raised: 85n * ONE, feesAccrued: ONE, graduated: true, creatorPaid: 0n },
+    { raised: 5n * ONE, feesAccrued: ONE / 100n, graduated: false, creatorPaid: ONE / 2n },
   ];
   const t = boardTotals(rows);
   assert.equal(t.launches, 3);
   assert.equal(t.graduated, 1);
   assert.equal(t.raised, 100n * ONE);
   assert.equal(t.feesAccrued, ONE + ONE / 10n + ONE / 100n);
+  /*
+   * Summed independently of `feesAccrued`, and the fixture makes them disagree on
+   * purpose: row two has a full INJ unclaimed and has paid out nothing, row three has
+   * paid out more than it is holding. Equal fixtures would let one field be computed
+   * from the other without the test noticing.
+   */
+  assert.equal(t.paidToCreators, 2n * ONE + ONE / 2n);
   // An empty board is zeros, not a crash and not a blank.
-  assert.deepEqual(boardTotals([]), { launches: 0, raised: 0n, feesAccrued: 0n, graduated: 0 });
+  assert.deepEqual(boardTotals([]), {
+    launches: 0,
+    raised: 0n,
+    feesAccrued: 0n,
+    paidToCreators: 0n,
+    graduated: 0,
+  });
 });
 
 test('a small figure keeps its precision instead of reading as zero', () => {

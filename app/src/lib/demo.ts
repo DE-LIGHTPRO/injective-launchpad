@@ -144,6 +144,8 @@ export function demoDetail(id: number): LaunchDetail | null {
     migrated: state.graduated,
     platformOwed: 0n,
     creatorOwed: 0n,
+    platformPaid: 0n,
+    creatorPaid: 0n,
   };
 }
 
