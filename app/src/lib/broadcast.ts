@@ -173,7 +173,15 @@ interface InjectedSigner {
     signDirect: (
       address: string,
       doc: { bodyBytes: Uint8Array; authInfoBytes: Uint8Array; chainId: string; accountNumber: bigint },
-    ) => Promise<{ signature: { signature: string } }>;
+    ) => Promise<{
+      /*
+       * What the wallet ACTUALLY signed. Keplr (and the others) may re-encode the doc
+       * before signing it, so the signature is over THESE bytes, not the ones passed in.
+       * Broadcasting the original bytes with this signature fails verification. Use these.
+       */
+      signed?: { bodyBytes: Uint8Array; authInfoBytes: Uint8Array };
+      signature: { signature: string };
+    }>;
   };
   getKey: (chainId: string) => Promise<{ pubKey: Uint8Array }>;
 }
@@ -263,6 +271,21 @@ async function signAndBroadcast(opts: {
       accountNumber: BigInt(base.account_number),
     });
     signature = res.signature.signature;
+    /*
+     * Broadcast the bytes the WALLET signed, not the ones we handed it.
+     *
+     * Keplr and the others re-encode the sign doc before signing (field ordering, the
+     * pubkey Any, sometimes the fee), so the signature covers `res.signed`, not our
+     * `txRaw`. Attaching the signature to our original bytes produced
+     * "unable to verify single signer signature: unauthorized" (code 4) on testnet: the
+     * signature was valid, just over a slightly different encoding than what we sent.
+     * When a wallet returns `signed` (all of them do for signDirect), those bytes are
+     * authoritative.
+     */
+    if (res.signed?.bodyBytes && res.signed?.authInfoBytes) {
+      txRaw.bodyBytes = res.signed.bodyBytes;
+      txRaw.authInfoBytes = res.signed.authInfoBytes;
+    }
   } catch (e) {
     const msg = (e as Error).message ?? '';
     if (/reject|denied|closed/i.test(msg)) {
