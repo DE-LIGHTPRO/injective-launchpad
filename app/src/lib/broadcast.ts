@@ -15,6 +15,7 @@ import {
   MSG_SET_METADATA,
   MSG_CHANGE_ADMIN,
   MSG_EXECUTE,
+  TOKEN_DECIMALS,
   type LaunchPlan,
 } from './createLaunch.ts';
 
@@ -107,8 +108,39 @@ export function composeMessages(plan: LaunchPlan, sender: string) {
           amount: (v as { amount: { denom: string; amount: string } }).amount,
         });
       case MSG_SET_METADATA: {
+        /*
+         * The plan holds metadata in the chain's snake_case JSON shape (`denom_units`,
+         * `uri_hash`), but the SDK's `fromJSON` reads camelCase and does
+         * `metadata.denomUnits.map(...)`. Passed the snake_case object directly it found
+         * `denomUnits` undefined and threw "Cannot read properties of undefined
+         * (reading 'map')" at broadcast time, after the user had clicked Create. This is
+         * the first time this path ran against a chain. Translate at the SDK boundary and
+         * keep the plan canonical. Shape mirrors scripts/e2e-testnet.mjs.
+         */
         const meta = (v as { metadata: Record<string, unknown> }).metadata;
-        return MsgSetDenomMetadata.fromJSON({ sender, metadata: meta as never });
+        const units = (meta.denom_units ?? meta.denomUnits ?? []) as Array<{
+          denom: string;
+          exponent: number;
+          aliases?: string[];
+        }>;
+        return MsgSetDenomMetadata.fromJSON({
+          sender,
+          metadata: {
+            description: (meta.description as string) ?? '',
+            denomUnits: units.map((u) => ({
+              denom: u.denom,
+              exponent: u.exponent,
+              aliases: u.aliases ?? [],
+            })),
+            base: meta.base as string,
+            display: meta.display as string,
+            name: (meta.name as string) ?? '',
+            symbol: meta.symbol as string,
+            uri: (meta.uri as string) ?? '',
+            uriHash: (meta.uri_hash as string) ?? (meta.uriHash as string) ?? '',
+            decimals: (meta.decimals as number) ?? TOKEN_DECIMALS,
+          } as never,
+        });
       }
       case MSG_CHANGE_ADMIN: {
         const c = v as { denom: string; new_admin: string };

@@ -14,6 +14,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createTransaction } from '@injectivelabs/sdk-ts';
 import { composeMessages, describeBroadcastFailure, BroadcastError } from './broadcast.ts';
 import { planLaunch, MSG_EXECUTE, type LaunchInput } from './createLaunch.ts';
 import type { CurveConfig } from './curve.ts';
@@ -50,6 +51,35 @@ test('every message in the plan is composed, none dropped', () => {
   const msgs = composeMessages(plan, CREATOR);
   assert.equal(msgs.length, plan.messages.length, 'a message was dropped during composition');
   assert.equal(msgs.length, 5);
+});
+
+test('the composed messages build a transaction, which is where encoding actually runs', () => {
+  /*
+   * THE DEFECT THIS EXISTS FOR. `composeMessages` calls each SDK `fromJSON`, which only
+   * STORES the params; the encoding (`.denomUnits.map(...)` and the rest) runs later,
+   * when `createTransaction` serialises the messages right before signing. So a test
+   * that stopped at `composeMessages` passed while the browser threw "Cannot read
+   * properties of undefined (reading 'map')" the moment it tried to sign: the plan built
+   * metadata as snake_case `denom_units`, and the SDK reads camelCase `denomUnits`.
+   *
+   * This test carries the messages the one step further, into `createTransaction`, which
+   * is exactly what `signAndBroadcast` does before the wallet prompt. It fails against
+   * the unfixed composer. A dummy pubkey and zeroed account are fine: nothing is signed
+   * or sent, only encoded.
+   */
+  const plan = planLaunch(input({ name: 'Kaiju', description: 'a test' }));
+  const msgs = composeMessages(plan, CREATOR);
+  assert.doesNotThrow(() => {
+    createTransaction({
+      message: msgs,
+      memo: '',
+      fee: { amount: [{ denom: 'inj', amount: '1' }], gas: '3000000' },
+      pubKey: Buffer.from('A'.repeat(33)).toString('base64'),
+      sequence: 0,
+      accountNumber: 0,
+      chainId: 'injective-888',
+    });
+  }, 'the composed messages could not be encoded into a transaction');
 });
 
 test('an unknown message type throws rather than being skipped', () => {
