@@ -1,18 +1,8 @@
-import { listTrades, short, symbolOf, type Quote, type Trade } from '@/lib/chain';
-import { firstBlockShare } from '@/lib/creatorHolding';
+import { short, type Quote } from '@/lib/chain';
 import { fmt } from '@/lib/curve';
 import { NETWORK } from '@/lib/config';
-import { isDemoMode } from '@/lib/demo';
-import { buildSeries, changeBps } from '@/lib/priceSeries';
-import { toCandles, candleLayout } from '@/lib/candles';
-import {
-  uniqueTraders,
-  volumeWithin,
-  volumeIsPartial,
-  BLOCKS_PER_DAY,
-} from '@/lib/launchActivity';
-import { currentHeight } from '@/lib/chain';
 import { compact } from '@/lib/boardMetrics';
+import type { TradeViewResult } from '@/lib/tradeView';
 
 /**
  * Recent trades, read from transaction events.
@@ -26,24 +16,8 @@ import { compact } from '@/lib/boardMetrics';
  * evidence about trading. And demo mode has no chain to read at all, which is
  * said rather than shown as an empty list.
  */
-export async function Trades({
-  curve,
-  denom,
-  totalSupply,
-  quote,
-}: {
-  curve: string;
-  denom: string;
-  /** Base units as a string, for the opening-concentration figure. */
-  totalSupply?: string;
-  /**
-   * THIS launch's quote. `buildSeries` takes the decimals because a fill price is
-   * quote over tokens, so a 6-decimal quote read as 18 puts every point on the chart
-   * out by a factor of a trillion.
-   */
-  quote: Quote;
-}) {
-  if (isDemoMode()) {
+export function Trades({ result, quote }: { result: TradeViewResult; quote: Quote }) {
+  if (result.kind === 'demo') {
     return (
       <div className="card">
         <h2>Trades</h2>
@@ -56,107 +30,35 @@ export async function Trades({
     );
   }
 
-  let trades: Trade[];
-  try {
-    trades = await listTrades(curve, 25);
-  } catch (e) {
+  if (result.kind === 'error') {
     return (
       <div className="card">
         <h2>Trades</h2>
-        <p className="note danger-text">{(e as Error).message}</p>
+        <p className="note danger-text">{result.message}</p>
         <p className="note">This says nothing about whether the launch has traded.</p>
       </div>
     );
   }
 
-  const sym = symbolOf(denom);
+  const { trades, series, sym, vol24, volPartial, traders, openingPct, openingBlocks } =
+    result.view;
 
   /*
-   * How much supply was taken in the opening blocks.
-   *
-   * Third-party analytics sell this as "bundle %", and a launchpad that charges a fee
-   * on those trades and then leaves buyers to find the concentration on someone else's
-   * site is choosing not to say. The function existed with its own tests and no call
-   * site, which is this project's most-repeated defect, so this is the wiring.
-   *
-   * Only shown past a threshold. Every launch has a first buyer, and reporting "3% was
-   * bought in the opening blocks" on all of them makes the number noise and teaches
-   * people to skip it, which costs exactly the launches where it matters.
+   * NO CHART HERE. There was a 60-pixel candle strip at the top of this card, under a
+   * full-size bonding curve in the card above it. The candles are the page's main
+   * chart now (`PriceChart`), and leaving a second drawing of the same series here
+   * would be two charts of one fact, disagreeing the moment either changed.
    */
-  const opening = totalSupply ? firstBlockShare(trades, BigInt(totalSupply)) : null;
-  const openingPct = opening?.share != null ? opening.share * 100 : null;
-
-  const series = buildSeries(trades, quote.decimals);
-  /*
-   * Height for the 24h window, read here rather than passed in. `null` on failure,
-   * which `volumeWithin` turns into "not measured" rather than zero: a day with no
-   * trades and a day we could not measure must not read the same.
-   */
-  const height = await currentHeight().catch(() => null);
-  const vol24 = volumeWithin(trades, height, BLOCKS_PER_DAY);
-  const volPartial = volumeIsPartial(trades, trades.length, height, BLOCKS_PER_DAY);
-  const traders = uniqueTraders(trades);
-  const change = changeBps(series);
-  /*
-   * CANDLES, not a line. A line joins fills and hides what happened between them: a
-   * bucket that opened low, spiked and closed low reads as flat. Open, high, low and
-   * close is what a trader expects to see on a market, and the data to build it was
-   * already here.
-   *
-   * Bucketed by BLOCK HEIGHT, because that is the only ordering the transaction log
-   * gives us. Bucketing by a derived wall-clock time would put a precise-looking
-   * label on an estimate.
-   */
-  const candles = toCandles(series, 28);
-  const layout = candleLayout(candles, 560, 60, 3);
-
   return (
     <div className="card">
       <h2>Trades</h2>
 
       {openingPct !== null && openingPct >= 20 && (
         <p className="note warn-text">
-          {openingPct.toFixed(1)}% of the supply was bought within {opening?.blocks} blocks
+          {openingPct.toFixed(1)}% of the supply was bought within {openingBlocks} blocks
           of the first trade. That is the window a buyer watching for the launch cannot
           realistically compete in.
         </p>
-      )}
-
-      {/*
-          The history, which is a different question from the curve above it. The
-          curve is what the contract WILL charge; this is what people actually
-          paid, fee and their own price impact included. Labelled as fills for
-          that reason: on a steep curve a large buy fills well above spot, and a
-          chart drawn from spot would hide exactly that.
-        */}
-      {layout.length > 0 && (
-        <div className="spark">
-          <div className="spark-head">
-            <span className="note">
-              Fill prices, {candles.length} {candles.length === 1 ? 'candle' : 'candles'} by block
-            </span>
-            {change !== null && (
-              <span className={`mono spark-change ${change >= 0 ? 'up' : 'down'}`}>
-                {change >= 0 ? '+' : ''}
-                {(change / 100).toFixed(2)}%
-              </span>
-            )}
-          </div>
-          <svg viewBox="0 0 560 60" width="100%" height="60" role="img"
-               aria-label={`${candles.length} candles across ${series.points.length} fills`}>
-            {layout.map((c, i) => (
-              <g key={i} style={{ fill: c.up ? 'var(--accent)' : 'var(--danger)' }}>
-                {/* Wick first, so the body paints over its middle. */}
-                <rect x={c.x + c.w / 2 - 0.5} y={c.wickTop} width="1" height={c.wickH} />
-                <rect x={c.x} y={c.bodyTop} width={c.w} height={c.bodyH} rx="0.5" />
-              </g>
-            ))}
-          </svg>
-          <div className="spark-foot mono">
-            <span>{series.low.toPrecision(3)}</span>
-            <span>{series.high.toPrecision(3)} {quote.label} per {sym}</span>
-          </div>
-        </div>
       )}
 
       {/*

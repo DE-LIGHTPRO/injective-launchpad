@@ -35,9 +35,44 @@ test('a bucket with no trades is dropped, not carried forward', () => {
    * sit untouched for hours, and a candle drawn there invents an open, high, low and
    * close for a period with no trades in it, making an illiquid token look stable.
    */
-  const c = toCandles(series([pt(1, 5), pt(1000, 6)]), 10);
+  /*
+   * Six trades in two clusters a thousand blocks apart. The bucket count lands at 3,
+   * so the span puts the clusters in slots 0 and 2 and slot 1 covers a stretch
+   * nobody traded in. Two candles come back, not three.
+   *
+   * It used to be two trades, which no longer demonstrates anything: the density
+   * floor (see `toCandles`) puts a two-trade series in a single bucket, so there is
+   * no middle slot for the gap to be dropped from.
+   */
+  const c = toCandles(
+    series([pt(1, 5), pt(2, 5), pt(3, 5), pt(1000, 6), pt(1001, 6), pt(1002, 6)]),
+    10,
+  );
   assert.equal(c.length, 2, 'empty buckets were materialised');
   assert.ok(c.every((x) => x.trades > 0));
+});
+
+test('a bucket holds at least two trades, so a candle can have a body', () => {
+  /*
+   * Measured on a real launch: 5 trades across 9 blocks asked for 40 candles gave a
+   * span of 1 block, one trade per bucket, and therefore five candles with
+   * open == close == high == low. The chart drew five 1-pixel dashes. Every figure
+   * was correct and the chart showed nothing.
+   */
+  const pts = [10, 12, 14, 16, 19].map((h, i) => pt(h, 1 + i * 0.1));
+  const c = toCandles(series(pts), 40);
+  assert.ok(c.length <= 3, `asked for 40 and got ${c.length} candles for 5 trades`);
+  const singles = c.filter((x) => x.trades === 1).length;
+  assert.ok(singles <= 1, `${singles} of ${c.length} candles hold a single fill`);
+  // And at least one of them has a real body rather than being a doji.
+  assert.ok(c.some((x) => x.open !== x.close), 'every candle is still a doji');
+});
+
+test('a busy launch still gets the resolution it asked for', () => {
+  // The density floor must not cap a launch with plenty of trades.
+  const pts = Array.from({ length: 200 }, (_, i) => pt(1000 + i * 3, 1 + (i % 7) * 0.01));
+  const c = toCandles(series(pts), 40);
+  assert.equal(c.length, 40, `200 trades should fill 40 candles, got ${c.length}`);
 });
 
 test('trades inside one block still bucket rather than vanishing', () => {

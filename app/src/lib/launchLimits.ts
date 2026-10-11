@@ -95,26 +95,52 @@ export function initialBuyCeiling(curveSupply: bigint): bigint {
  * opens at the same price."
  */
 export const FIXED_CURVE = {
-  virtualInj: 60_000_000_000_000_000_000n,
+  virtualInj: 676_000_000_000_000_000_000n,
   virtualTokens: 1_073_000_000_000_000_000_000_000_000n,
   curveSupply: 800_000_000_000_000_000_000_000_000n,
-  graduationTarget: 170_000_000_000_000_000_000n,
+  graduationTarget: 1_915_000_000_000_000_000_000n,
 } as const;
 
 /**
  * The fixed curve in a quote asset's own units, exactly as the factory's `fixed_curve`
  * builds it: the two QUOTE figures (opening reserve, graduation target) are whole units
- * times 10^decimals; the token figures do not change. `FIXED_CURVE` is the 18-decimal
- * (INJ) case. Using it for a 6-decimal pair drew a curve, and parsed an opening buy,
- * a trillion times too large.
+ * times 10^decimals; the token figures do not change. Using the 18-decimal figures for
+ * a 6-decimal pair drew a curve, and parsed an opening buy, a trillion times too large.
+ *
+ * THE OPENING RESERVE COMES FROM THE QUOTE, not from a constant here. It is what sets
+ * the market cap a launch opens at, and one number cannot be right for both INJ and a
+ * dollar stablecoin: the figure that opens an INJ launch at about $5,000 opens a
+ * dollar one at about $630. The factory stores it per allowlisted asset and reports it
+ * on `Quotes {}`; `OPENING_RESERVE_QUOTE` below is only the INJ default, for copy that
+ * is about the launchpad rather than about a launch.
  */
-export function fixedCurveFor(quoteDecimals: number) {
-  const unit = 10n ** BigInt(quoteDecimals);
+export function fixedCurveFor(quote: number | { decimals: number; virtualWhole?: number }) {
+  /*
+   * A bare number still means "this many decimals, default scale", because most
+   * callers are about the default quote and widening all of them would be noise. A
+   * caller holding a real quote passes the quote.
+   */
+  const decimals = typeof quote === 'number' ? quote : quote.decimals;
+  const whole =
+    typeof quote === 'number' ? OPENING_RESERVE_QUOTE : quote.virtualWhole ?? OPENING_RESERVE_QUOTE;
+  const unit = 10n ** BigInt(decimals);
   return {
     ...FIXED_CURVE,
-    virtualInj: BigInt(OPENING_RESERVE_QUOTE) * unit,
-    graduationTarget: BigInt(GRADUATION_TARGET_QUOTE) * unit,
+    virtualInj: BigInt(whole) * unit,
+    graduationTarget: graduationWholeFor(whole) * unit,
   };
+}
+
+/**
+ * Graduation from the opening reserve: 17/6, floored, mirroring `GRADUATION_NUM` and
+ * `GRADUATION_DEN` in the factory.
+ *
+ * A RATIO rather than a second constant, so every launch has the same curve SHAPE
+ * however its quote is scaled: the target is 96.7% of the curve's ceiling and the
+ * price multiple from open to graduation is 14.69x, on any asset.
+ */
+export function graduationWholeFor(virtualWhole: number | bigint): bigint {
+  return (BigInt(virtualWhole) * 17n) / 6n;
 }
 
 /** The reserve held back for the pool: whatever the fixed supply leaves over. */
@@ -123,8 +149,33 @@ export const FIXED_LP_RESERVE = FIXED_TOTAL_SUPPLY - FIXED_CURVE.curveSupply;
 /** Whole-token and whole-quote forms, for copy that should not print 27 digits. */
 export const CURVE_SUPPLY_TOKENS = 800_000_000;
 export const LP_RESERVE_TOKENS = 200_000_000;
-export const OPENING_RESERVE_QUOTE = 60;
-export const GRADUATION_TARGET_QUOTE = 170;
+/**
+ * The opening reserve for the DEFAULT quote (INJ), in whole units.
+ *
+ * 676 puts a launch's opening market cap at 630 INJ, which was **about $4,990** at the
+ * INJ price measured on 11 Oct 2026 (Coinbase 7.923, Binance 7.917). The dollar figure
+ * is the premise the number was chosen under, not a property of it: there is no price
+ * oracle in this product and nothing renders a dollar amount. Revisit by re-measuring
+ * INJ and re-deriving the constant, never by adding a feed.
+ *
+ * It was 60, which opened at 55.92 INJ, about $443.
+ */
+export const OPENING_RESERVE_QUOTE = 676;
+
+/** 676 * 17/6, floored. Derived rather than declared, so the two cannot disagree. */
+export const GRADUATION_TARGET_QUOTE = Number(graduationWholeFor(OPENING_RESERVE_QUOTE));
+
+/**
+ * The market cap a launch opens at, in whole units of its quote.
+ *
+ * `virtualQuote / virtualTokens * totalSupply`, which is the same arithmetic the
+ * contract's own test asserts. Exposed because it is the figure the policy was chosen
+ * FOR, and a reader of the create form should see it rather than the reserve that
+ * produces it.
+ */
+export function openingMarketCap(virtualWhole: number = OPENING_RESERVE_QUOTE): number {
+  return (virtualWhole * Number(FIXED_TOTAL_SUPPLY_TOKENS)) / 1_073_000_000;
+}
 
 /**
  * The most a launch may charge per side, in bps.

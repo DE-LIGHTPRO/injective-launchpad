@@ -40,6 +40,23 @@ export interface Series {
 }
 
 /**
+ * A series with nothing in it.
+ *
+ * Exported so a caller that could not read trades renders the same empty state as a
+ * launch that has not traded, rather than each one inventing its own placeholder.
+ * The two are different facts, and the page says which; the CHART is blank either
+ * way, and that is one shape, not two.
+ */
+export const EMPTY_SERIES: Series = {
+  points: [],
+  first: null,
+  last: null,
+  low: 0,
+  high: 0,
+  unpriceable: 0,
+};
+
+/**
  * Price of one whole token from one trade.
  *
  * Both sides use the amount that actually moved, so a buy is priced on the quote

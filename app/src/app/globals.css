@@ -1004,6 +1004,35 @@ button.ghost { background: transparent; border: 1px solid var(--line); color: va
 .spark-change.down { color: var(--danger); }
 .spark-foot { display: flex; justify-content: space-between; font-size: var(--text-micro); color: var(--text-faint); }
 
+/* The launch page's main chart: candles by default, the bonding curve behind a tab. */
+.chart-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); margin-bottom: var(--space-2); }
+.chart-head h2 { margin: 0; }
+.chart-tabs { display: inline-flex; gap: 2px; padding: 2px; border-radius: var(--radius-md); background: var(--surface-sunken); }
+.chart-tab {
+  border: 0; background: transparent; color: var(--text-muted);
+  font: inherit; font-size: var(--text-sm); line-height: 1;
+  padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm); cursor: pointer;
+}
+.chart-tab:hover:not(:disabled) { color: var(--text); }
+.chart-tab.on { background: var(--surface-2); color: var(--text); }
+/* Disabled, not hidden: "no trades yet" is an answer, a missing control is not. */
+.chart-tab:disabled { opacity: 0.45; cursor: default; }
+.chart-meta { display: flex; align-items: baseline; gap: var(--space-3); margin-bottom: var(--space-2); }
+.chart-last { font-size: var(--text-lg); }
+.chart-unit { font-size: var(--text-xs); color: var(--text-faint); }
+.chart-change { font-size: var(--text-sm); }
+.chart-change.up { color: var(--buy); }
+.chart-change.down { color: var(--danger); }
+.chart-foot { display: flex; justify-content: space-between; gap: var(--space-2); font-size: var(--text-micro); color: var(--text-faint); margin-top: var(--space-1); }
+/* The SVG sets its own height and stretches; min-width 0 keeps it off the page edge. */
+.chart { min-width: 0; }
+.chart svg { display: block; }
+
+@media (pointer: coarse) {
+  /* WCAG 2.5.8: a tab a thumb can hit without growing the type. */
+  .chart-tab { min-height: 24px; padding: var(--space-2) var(--space-4); }
+}
+
 .copy-btn {
   font-size: var(--text-micro);
   padding: 1px var(--space-2);

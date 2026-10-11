@@ -3,7 +3,7 @@ import type { Metadata, Viewport } from 'next';
 import Link from 'next/link';
 import { Inter, JetBrains_Mono } from 'next/font/google';
 import { PlusIcon } from '@/components/Icons';
-import { BRAND_NAME, BRAND_TAGLINE } from '@/lib/brand';
+import { SITE_URL, BRAND_NAME, BRAND_TAGLINE } from '@/lib/brand';
 import { NETWORK } from '@/lib/config';
 import { isDemoMode } from '@/lib/demo';
 import { ConnectWallet } from '@/components/ConnectWallet';
@@ -22,7 +22,7 @@ import './globals.css';
 const sans = Inter({ subsets: ['latin'], variable: '--font-sans', display: 'swap' });
 const mono = JetBrains_Mono({ subsets: ['latin'], variable: '--font-mono', display: 'swap' });
 
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL?.trim() || 'https://injpad.vercel.app';
+
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),

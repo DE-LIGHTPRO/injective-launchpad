@@ -23,10 +23,12 @@ import { CopyButton } from '@/components/CopyButton';
 import { graduationProgress, fmt, spotPriceWad, maxCollectable } from '@/lib/curve';
 import { NETWORK, isDeployed, isDevBuild, getPinnedCurveCodeIdsRaw } from '@/lib/config';
 import { isDemoMode } from '@/lib/demo';
-import { CurveChart } from '@/components/CurveChart';
+import { PriceChart } from '@/components/PriceChart';
 import { DemoBanner } from '@/components/DemoBanner';
 import { TradePanel } from '@/components/TradePanel';
 import { Trades } from '@/components/Trades';
+import { loadTradeView } from '@/lib/tradeView';
+import { EMPTY_SERIES } from '@/lib/priceSeries';
 
 export const dynamic = 'force-dynamic';
 
@@ -248,6 +250,18 @@ export default async function LaunchPage({ params }: { params: Promise<{ slug: s
   const totalSupply = detail.config.curveSupply + detail.lpReserve;
   const nowSeconds = Math.floor(Date.now() / 1000);
 
+  /*
+   * The trade history, read ONCE for the whole page. The price chart and the trade
+   * list are the same data asked two ways; fetching it in each would be two tx
+   * searches for one curve on one render.
+   */
+  const tradeView = await loadTradeView({
+    curve: launch.curve,
+    denom: launch.denom,
+    quote,
+    totalSupply: totalSupply.toString(),
+  });
+
   const ruleCopy = describeRules(
     detail.rules,
     (v) => fmt(v, 18, 0),
@@ -382,12 +396,19 @@ export default async function LaunchPage({ params }: { params: Promise<{ slug: s
       <div className="cols" style={{ marginTop: 'var(--space-5)' }}>
         <div>
           <div className="card">
-            <h2>Price curve</h2>
-            <CurveChart
+            {/*
+                ONE FETCH FOR BOTH. `tradeView` is read once above and feeds the chart
+                here and the trade list below; each fetching its own would be two tx
+                searches for the same curve on the same render.
+              */}
+            <PriceChart
+              series={tradeView.kind === 'view' ? tradeView.view.series : EMPTY_SERIES}
+              change={tradeView.kind === 'view' ? tradeView.view.change : null}
               config={detail.config}
               state={detail.state}
               quoteLabel={quote.label}
               quoteDecimals={quote.decimals}
+              sym={symbol}
             />
             <div className="bar" style={{ marginTop: 'var(--space-2)' }}>
               <i style={{ width: `${Math.min(100, progress * 100).toFixed(1)}%` }} />
@@ -460,12 +481,7 @@ export default async function LaunchPage({ params }: { params: Promise<{ slug: s
             </div>
           </div>
           <div style={{ marginTop: 'var(--space-4)' }}>
-            <Trades
-              quote={quote}
-              curve={launch.curve}
-              denom={launch.denom}
-              totalSupply={(detail.config.curveSupply + detail.lpReserve).toString()}
-            />
+            <Trades result={tradeView} quote={quote} />
           </div>
         </div>
 

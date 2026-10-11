@@ -552,6 +552,16 @@ export async function currentHeight(): Promise<number | null> {
 export interface QuoteAsset {
   denom: string;
   decimals: number;
+  /**
+   * Opening virtual reserve in whole units of this quote, from the factory.
+   *
+   * It is what sets the market cap a launch priced in this asset opens at, and it
+   * belongs to the asset rather than to the launchpad: the figure that opens an INJ
+   * launch at about $5,000 would open a dollar-stablecoin launch at about $630.
+   * Absent on a factory that predates the field, in which case the caller falls back
+   * to the default and the curve preview is the INJ one.
+   */
+  virtualWhole?: number;
   /** Display symbol from the factory's allowlist, when the admin set one. */
   symbol?: string;
 }
@@ -584,7 +594,12 @@ export async function listQuotes(): Promise<{ quotes: QuoteAsset[]; defaultDenom
   if (!factory || isDemoMode()) return fallback;
   try {
     const raw = await smartQuery<{
-      quotes?: Array<{ denom?: unknown; decimals?: unknown; symbol?: unknown }>;
+      quotes?: Array<{
+        denom?: unknown;
+        decimals?: unknown;
+        virtual_quote_whole?: unknown;
+        symbol?: unknown;
+      }>;
       default_denom?: unknown;
     }>(factory, { quotes: {} });
     const quotes = (raw.quotes ?? [])
@@ -592,6 +607,16 @@ export async function listQuotes(): Promise<{ quotes: QuoteAsset[]; defaultDenom
       .map((q) => ({
         denom: q.denom as string,
         decimals: q.decimals as number,
+        /*
+         * A decimal STRING on the wire (`Uint128`), parsed here and dropped if it is
+         * not a usable positive number. Dropped rather than defaulted to 0: a zero
+         * opening reserve is a division by zero on the curve, and silently becoming
+         * the INJ default is the behaviour this field exists to end.
+         */
+        ...(() => {
+          const n = Number(q.virtual_quote_whole);
+          return Number.isFinite(n) && n > 0 ? { virtualWhole: n } : {};
+        })(),
         // Rendered as text only, never as markup, and the contract restricts it to
         // 1 to 12 letters, digits, dot or dash; re-checked so a bad value cannot spoof.
         ...(typeof q.symbol === 'string' && /^[A-Za-z0-9.-]{1,12}$/.test(q.symbol)
@@ -644,6 +669,8 @@ export interface Quote {
   decimals: number;
   /** Short, readable form for putting beside a number. */
   label: string;
+  /** This asset's opening virtual reserve, in whole units. See `QuoteAsset`. */
+  virtualWhole?: number;
 }
 
 /** The network's default quote, for surfaces that are about the platform. */
@@ -669,5 +696,6 @@ export async function resolveQuote(denom: string): Promise<Quote> {
     denom,
     decimals: found?.decimals ?? NETWORK.quoteDecimals,
     label: quoteLabel(denom, quotes),
+    ...(found?.virtualWhole !== undefined ? { virtualWhole: found.virtualWhole } : {}),
   };
 }

@@ -122,8 +122,16 @@ export function CreateLaunch() {
    * buy; its label goes everywhere this form used to say "INJ" regardless of the pair.
    */
   const activeQuote = quoteDenom ?? quotes?.defaultDenom ?? NETWORK.quoteDenom;
-  const quoteDecimals =
-    quotes?.quotes.find((q) => q.denom === activeQuote)?.decimals ?? NETWORK.quoteDecimals;
+  /*
+   * The CHOSEN pair's own spec, not the network default. Decimals scale the amounts;
+   * `virtualWhole` scales the curve itself, which is what sets the market cap a
+   * launch in this pair opens at. One constant for every asset would price a dollar
+   * pair at an eighth of an INJ pair's opening cap, and the form would draw it as
+   * though it were the same launch.
+   */
+  const quoteSpec = quotes?.quotes.find((q) => q.denom === activeQuote);
+  const quoteDecimals = quoteSpec?.decimals ?? NETWORK.quoteDecimals;
+  const quoteVirtualWhole = quoteSpec?.virtualWhole;
   const quoteLabel = quoteLabelOf(activeQuote, quotes?.quotes);
   useEffect(() => {
     let live = true;
@@ -193,7 +201,10 @@ export function CreateLaunch() {
     if (typeof sell !== 'number') return sell;
     const feeBps = buy;
     // In the chosen pair's own units, as the factory will build it.
-    const curve: CurveConfig = { ...fixedCurveFor(quoteDecimals), feeBps: BigInt(feeBps) };
+    const curve: CurveConfig = {
+      ...fixedCurveFor({ decimals: quoteDecimals, virtualWhole: quoteVirtualWhole }),
+      feeBps: BigInt(feeBps),
+    };
     const feeSellBps = sell;
     try {
       // Still validated. The constants are hand-written, and a typo in one would
@@ -203,7 +214,7 @@ export function CreateLaunch() {
       return { error: (e as Error).message };
     }
     return { curve, lpReserve: FIXED_LP_RESERVE, feeSellBps };
-  }, [f, quoteDecimals]);
+  }, [f, quoteDecimals, quoteVirtualWhole]);
 
 
   // Null until the address is both safe and complete, so a half-typed URL does not

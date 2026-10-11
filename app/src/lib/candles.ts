@@ -42,8 +42,25 @@ export function toCandles(series: Series, want = 24): Candle[] {
 
   const first = pts[0].height;
   const last = pts[pts.length - 1].height;
+
+  /*
+   * THE BUCKET COUNT IS BOUNDED BY HOW MANY TRADES THERE ARE, not just by the block
+   * range, and that is what makes the chart readable on a young launch.
+   *
+   * Measured on a real launch: 5 trades across 9 blocks, asked for 40 candles. The
+   * span came out at 1 block, so every bucket held exactly ONE trade, every candle
+   * had open == close == high == low, and the chart drew five 1-pixel dashes. Every
+   * number in it was correct. A candle needs more than one fill in it to have a body
+   * or a wick, so a bucket per trade is a chart that cannot show anything.
+   *
+   * Two trades per candle is the floor; beyond that `want` takes over, so a busy
+   * launch still gets the full resolution. Buckets stay BLOCK ranges, which is what
+   * keeps two trades in one block in one candle; only how many of them is chosen
+   * from the data's density.
+   */
+  const bucketCount = Math.min(want, Math.max(1, Math.ceil(pts.length / 2)));
   // At least 1, so a burst of trades inside a single block still buckets.
-  const span = Math.max(1, Math.ceil((last - first + 1) / want));
+  const span = Math.max(1, Math.ceil((last - first + 1) / bucketCount));
 
   const buckets = new Map<number, PricePoint[]>();
   for (const p of pts) {
@@ -72,6 +89,51 @@ export function toCandles(series: Series, want = 24): Candle[] {
 }
 
 /**
+ * The price-to-pixel mapping a chart and its axis must agree on.
+ *
+ * EXPORTED, and that is the point. The axis labels and the candles are two drawings
+ * of one scale; an axis that recomputes `lo` and `hi` for itself can disagree with
+ * the bodies it is labelling, and the disagreement looks like a chart rather than
+ * like a bug. One function, both callers.
+ */
+export interface CandleScale {
+  lo: number;
+  hi: number;
+  /** Price to a y coordinate in the box. */
+  y: (price: number) => number;
+}
+
+export function candleScale(candles: Candle[], height: number, pad = 2): CandleScale {
+  const lo = candles.length === 0 ? 0 : Math.min(...candles.map((c) => c.low));
+  const hi = candles.length === 0 ? 0 : Math.max(...candles.map((c) => c.high));
+  /*
+   * A flat range has no span to normalise against, and dividing by zero puts every
+   * coordinate at NaN, which an SVG renders as nothing at all rather than as an
+   * error. Drawn down the middle instead, which is the honest picture of a price
+   * that has not moved.
+   */
+  const span = hi - lo;
+  return {
+    lo,
+    hi,
+    y: (v: number) => (span === 0 ? height / 2 : pad + (1 - (v - lo) / span) * (height - pad * 2)),
+  };
+}
+
+/**
+ * Evenly spaced price levels for an axis, inclusive of both ends.
+ *
+ * `count` lines means `count` labels, and a flat range collapses to the single price
+ * rather than repeating it: labelling a motionless market with five identical numbers
+ * suggests a precision the data does not have.
+ */
+export function priceTicks(scale: CandleScale, count = 4): number[] {
+  if (scale.hi === scale.lo) return [scale.hi];
+  const step = (scale.hi - scale.lo) / (count - 1);
+  return Array.from({ length: count }, (_, i) => scale.lo + step * i);
+}
+
+/**
  * Geometry for drawing candles in a box.
  *
  * Returned as numbers rather than an SVG string so the component can decide what to
@@ -85,16 +147,7 @@ export function candleLayout(
   pad = 2,
 ): Array<{ x: number; w: number; bodyTop: number; bodyH: number; wickTop: number; wickH: number; up: boolean }> {
   if (candles.length === 0) return [];
-  const lo = Math.min(...candles.map((c) => c.low));
-  const hi = Math.max(...candles.map((c) => c.high));
-  /*
-   * A flat range has no span to normalise against, and dividing by zero puts every
-   * coordinate at NaN, which an SVG renders as nothing at all rather than as an
-   * error. Drawn down the middle instead, which is the honest picture of a price
-   * that has not moved.
-   */
-  const span = hi - lo;
-  const y = (v: number) => (span === 0 ? height / 2 : pad + (1 - (v - lo) / span) * (height - pad * 2));
+  const { y } = candleScale(candles, height, pad);
 
   const slot = width / candles.length;
   const w = Math.max(1, slot * 0.62);

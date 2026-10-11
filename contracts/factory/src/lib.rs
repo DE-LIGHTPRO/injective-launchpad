@@ -117,8 +117,38 @@ pub const MAX_FEE_BPS: u16 = 1_000;
 /// quote unit buys 34,612,903,225,806,451,612,903,226 tokens at 18, 8 and 6 decimals
 /// alike. Getting it wrong instead puts 1 USDC at 35,766,666,666,666 tokens, out by
 /// twelve orders of magnitude.
-pub const CURVE_VIRTUAL_QUOTE_WHOLE: u128 = 60;
-pub const CURVE_GRADUATION_QUOTE_WHOLE: u128 = 170;
+/// The opening virtual reserve for the DEFAULT quote (INJ), in whole units.
+///
+/// WHY 676, WHICH IS NOT A ROUND NUMBER. It is chosen so a launch OPENS AT A MARKET
+/// CAP OF 630 INJ: opening spot is `virtual_quote / virtual_tokens`, and against the
+/// fixed 1,000,000,000 supply that is `virtual_quote * 1e9 / 1.073e9`, so 676 whole
+/// units gives 630.0. At the INJ price measured on 11 Oct 2026 (Coinbase 7.923,
+/// Binance 7.917) that is **about $4,990**.
+///
+/// THE DOLLAR FIGURE IS A PREMISE, NOT A PROPERTY. There is no oracle in this product
+/// and there must not be one here: a contract constant cannot track a price. What is
+/// pinned on chain is 676 INJ-units; the $5k is what that was worth on the day it was
+/// chosen, and it drifts with INJ. Nothing renders a dollar figure anywhere, and the
+/// right way to revisit this is to re-measure INJ and re-derive the constant, not to
+/// add a price feed.
+///
+/// It replaced 60, which opened at 55.92 INJ, about $443 — low enough that a single
+/// modest buy moved the price a long way, which is what made price impact read high.
+pub const CURVE_VIRTUAL_QUOTE_WHOLE: u128 = 676;
+
+/// Graduation as a fraction of the opening virtual reserve: 17/6.
+///
+/// A RATIO, NOT A SECOND CONSTANT, so the curve's SHAPE is identical for every quote
+/// asset however the opening reserve is scaled. It is exactly the old 170/60, kept so
+/// the rescaling changes where a launch starts and not how it behaves: the target is
+/// 96.7% of the curve's ceiling either way, 99.1% of the curve supply is sold at
+/// graduation either way, and the price multiple from open to graduation is 14.69x
+/// either way.
+///
+/// Two independent constants let the pair drift into a shape nobody chose; the one
+/// that matters, the fraction of the ceiling, is not visible in either of them.
+pub const GRADUATION_NUM: u128 = 17;
+pub const GRADUATION_DEN: u128 = 6;
 
 /// Token-denominated, and therefore NOT scaled by the quote.
 ///
@@ -128,6 +158,22 @@ pub const CURVE_GRADUATION_QUOTE_WHOLE: u128 = 170;
 /// their names.
 pub const CURVE_VIRTUAL_TOKENS: u128 = 1_073_000_000_000_000_000_000_000_000;
 pub const CURVE_SUPPLY: u128 = 800_000_000_000_000_000_000_000_000;
+
+/// An opening reserve an admin may actually set.
+///
+/// Zero is refused rather than clamped: a zero virtual reserve is not a small curve,
+/// it is a division by zero in `tokens_out = vt - (vi * vt) / (vi + x)` at x = 0 and a
+/// spot price of zero at the open. The ceiling keeps `unit * whole` inside a `u128`.
+fn validate_virtual_whole(denom: &str, whole: Uint128) -> Result<(), FactoryError> {
+    if whole.is_zero() || whole > Uint128::new(MAX_VIRTUAL_QUOTE_WHOLE) {
+        return Err(FactoryError::BadQuoteScale {
+            denom: denom.to_string(),
+            got: whole,
+            max: Uint128::new(MAX_VIRTUAL_QUOTE_WHOLE),
+        });
+    }
+    Ok(())
+}
 
 /// The quote's decimals, raised to a multiplier.
 ///
@@ -152,13 +198,21 @@ pub fn lp_reserve() -> Uint128 {
 /// Only the two QUOTE-denominated figures scale. `virtual_tokens` and `curve_supply`
 /// are token amounts and every token this factory launches is 18 decimals, so they
 /// are the same on every launch whatever it is priced in.
-pub fn fixed_curve(fee_bps: u16, fee_sell_bps: u16, quote_decimals: u8) -> CurveConfigStored {
-    let unit = quote_unit(quote_decimals);
+pub fn fixed_curve(fee_bps: u16, fee_sell_bps: u16, spec: &QuoteSpec) -> CurveConfigStored {
+    let unit = quote_unit(spec.decimals);
+    let virtual_whole = spec.virtual_quote_whole;
+    /*
+     * Integer arithmetic, multiplying before dividing, so the ratio is exact to the
+     * whole unit rather than losing the remainder twice. `GRADUATION_DEN` is a
+     * non-zero constant, so this cannot divide by zero.
+     */
+    let graduation_whole =
+        virtual_whole.multiply_ratio(Uint128::new(GRADUATION_NUM), Uint128::new(GRADUATION_DEN));
     CurveConfigStored {
-        virtual_inj: unit * Uint128::new(CURVE_VIRTUAL_QUOTE_WHOLE),
+        virtual_inj: unit * virtual_whole,
         virtual_tokens: Uint128::new(CURVE_VIRTUAL_TOKENS),
         curve_supply: Uint128::new(CURVE_SUPPLY),
-        graduation_target: unit * Uint128::new(CURVE_GRADUATION_QUOTE_WHOLE),
+        graduation_target: unit * graduation_whole,
         fee_bps,
         fee_sell_bps,
     }
@@ -277,6 +331,9 @@ pub enum FactoryError {
 
     #[error("a quote denom cannot be empty")]
     BadQuoteDenom,
+
+    #[error("quote `{denom}` opening reserve {got} is not between 1 and {max} whole units")]
+    BadQuoteScale { denom: String, got: Uint128, max: Uint128 },
 
     #[error("`{denom}` is this factory's default quote and cannot be removed")]
     CannotRemoveDefaultQuote { denom: String },
@@ -465,7 +522,29 @@ pub const NEXT_ID: Item<u64> = Item::new("next_id");
 /// The curation is the other. Any address can create a bank denom on Injective, so an
 /// open quote field means a launch priced in a worthless token the creator minted
 /// that morning, which would read on the board exactly like a real pair.
-pub const QUOTES: Map<&str, u8> = Map::new("quotes");
+///
+/// THE OPENING RESERVE IS PART OF THE QUOTE, not a constant applied to all of them.
+/// It was `CURVE_VIRTUAL_QUOTE_WHOLE` for every asset, which is only coherent while
+/// every quote is worth the same as every other. The whole point of 676 is that a
+/// launch opens around $5,000; applied to a dollar stablecoin the identical constant
+/// opens one at $630, and nothing on the screen would say so. The admin allowlisting
+/// an asset states what the opening reserve is in that asset, which is an explicit,
+/// dated judgement recorded on chain rather than the code pretending to know prices.
+#[cw_serde]
+pub struct QuoteSpec {
+    pub decimals: u8,
+    /// Opening virtual reserve in WHOLE units of this quote. See `fixed_curve`.
+    pub virtual_quote_whole: Uint128,
+}
+
+pub const QUOTES: Map<&str, QuoteSpec> = Map::new("quotes");
+
+/// The largest opening reserve an admin may set, in whole units.
+///
+/// `quote_unit` can be `10^24`, and `unit * whole` must fit a `u128` (about 3.4e38),
+/// so a whole-unit figure above ~3.4e14 overflows the multiplication in `fixed_curve`.
+/// A trillion is far past any real asset and leaves two orders of magnitude of slack.
+pub const MAX_VIRTUAL_QUOTE_WHOLE: u128 = 1_000_000_000_000;
 /// A display symbol per quote, set by the admin alongside the decimals. Optional: an
 /// Injective peggy or erc20 denom is a hex address (mainnet USDT is
 /// `peggy0xdAC17F95…`), and without this the UI can only print the address.
@@ -487,6 +566,13 @@ pub struct InstantiateMsg {
     /// deployment script that does not send it still produces an INJ factory.
     #[serde(default = "default_quote_decimals")]
     pub quote_decimals: u8,
+    /// Opening virtual reserve for the default quote, in WHOLE units of it.
+    ///
+    /// Absent falls back to `CURVE_VIRTUAL_QUOTE_WHOLE`, which is correct for INJ and
+    /// wrong for anything whose unit is not worth about what INJ is worth. A deploy
+    /// whose default quote is a stablecoin must set it.
+    #[serde(default)]
+    pub quote_virtual_whole: Option<Uint128>,
 }
 
 #[cw_serde]
@@ -540,6 +626,9 @@ pub enum ExecuteMsg {
     SetQuote {
         denom: String,
         decimals: u8,
+        /// Opening virtual reserve in WHOLE units of this quote, which sets the
+        /// market cap a launch priced in it opens at. REQUIRED: see `QuoteSpec`.
+        virtual_quote_whole: Uint128,
         /// What the UI prints for this quote, e.g. "USDT". Absent keeps any symbol
         /// already set; 1 to 12 letters, digits, dot or dash.
         #[serde(default)]
@@ -584,6 +673,10 @@ pub enum QueryMsg {
 pub struct QuoteAsset {
     pub denom: String,
     pub decimals: u8,
+    /// Opening virtual reserve in whole units of this quote, which is what sets the
+    /// market cap a launch priced in it opens at. The app draws its curve preview
+    /// from this rather than from a constant of its own.
+    pub virtual_quote_whole: Uint128,
     /// Display symbol, when the admin set one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub symbol: Option<String>,
@@ -631,7 +724,20 @@ pub fn instantiate(
             decimals: msg.quote_decimals,
         });
     }
-    QUOTES.save(deps.storage, &msg.quote_denom, &msg.quote_decimals)?;
+    /*
+     * The default quote's opening reserve, required rather than defaulted. A default
+     * is how the wrong scale ships silently: 676 is right for INJ and wrong by about
+     * 8x for a dollar stablecoin, and neither the contract nor the screen can tell.
+     */
+    let virtual_whole = msg
+        .quote_virtual_whole
+        .unwrap_or_else(|| Uint128::new(CURVE_VIRTUAL_QUOTE_WHOLE));
+    validate_virtual_whole(&msg.quote_denom, virtual_whole)?;
+    QUOTES.save(
+        deps.storage,
+        &msg.quote_denom,
+        &QuoteSpec { decimals: msg.quote_decimals, virtual_quote_whole: virtual_whole },
+    )?;
     NEXT_ID.save(deps.storage, &1u64)?;
     Ok(Response::new().add_attribute("action", "instantiate_factory"))
 }
@@ -666,7 +772,7 @@ pub fn execute(
             rules,
             initial_buy,
         ),
-        ExecuteMsg::SetQuote { denom, decimals, symbol } => {
+        ExecuteMsg::SetQuote { denom, decimals, virtual_quote_whole, symbol } => {
             let cfg = CONFIG.load(deps.storage)?;
             if info.sender != cfg.admin {
                 return Err(FactoryError::Unauthorised);
@@ -683,7 +789,12 @@ pub fn execute(
             if denom.trim().is_empty() {
                 return Err(FactoryError::BadQuoteDenom);
             }
-            QUOTES.save(deps.storage, &denom, &decimals)?;
+            validate_virtual_whole(&denom, virtual_quote_whole)?;
+            QUOTES.save(
+                deps.storage,
+                &denom,
+                &QuoteSpec { decimals, virtual_quote_whole },
+            )?;
             if let Some(sym) = &symbol {
                 let ok = (1..=12).contains(&sym.len())
                     && sym.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-');
@@ -695,7 +806,8 @@ pub fn execute(
             Ok(Response::new()
                 .add_attribute("action", "set_quote")
                 .add_attribute("denom", denom)
-                .add_attribute("decimals", decimals.to_string()))
+                .add_attribute("decimals", decimals.to_string())
+                .add_attribute("virtual_quote_whole", virtual_quote_whole.to_string()))
         }
         ExecuteMsg::RemoveQuote { denom } => {
             let cfg = CONFIG.load(deps.storage)?;
@@ -797,7 +909,7 @@ fn create_launch(
      * by orders of magnitude. The admin records it once, per asset.
      */
     let quote = quote_denom.unwrap_or_else(|| cfg.quote_denom.clone());
-    let quote_decimals = QUOTES
+    let quote_spec = QUOTES
         .may_load(deps.storage, &quote)?
         .ok_or_else(|| FactoryError::QuoteNotAllowed { denom: quote.clone() })?;
 
@@ -817,7 +929,7 @@ fn create_launch(
         }
     }
 
-    let curve = fixed_curve(fee_bps, sell_bps, quote_decimals);
+    let curve = fixed_curve(fee_bps, sell_bps, &quote_spec);
     let lp_reserve = lp_reserve();
     let parsed: CurveConfig = (&curve).into();
     parsed.validate()?;
@@ -1163,9 +1275,17 @@ pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
             let quotes = QUOTES
                 .range(deps.storage, None, None, cosmwasm_std::Order::Ascending)
                 .map(|r| {
-                    r.map(|(denom, decimals)| {
+                    r.map(|(denom, spec)| {
                         let symbol = QUOTE_SYMBOLS.may_load(deps.storage, &denom).ok().flatten();
-                        QuoteAsset { denom, decimals, symbol }
+                        QuoteAsset {
+                            denom,
+                            decimals: spec.decimals,
+                            // Reported, because the app draws the curve preview from
+                            // it. Left out, the create form would price every pair
+                            // with the default quote's scale.
+                            virtual_quote_whole: spec.virtual_quote_whole,
+                            symbol,
+                        }
                     })
                 })
                 .collect::<Result<Vec<_>, _>>()?;

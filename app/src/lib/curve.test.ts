@@ -442,7 +442,12 @@ test('a pool round trip never returns more than was spent', () => {
 // ---------------------------------------------------------- 6-decimal quotes --
 
 import { marketCapExact, spotPriceWad, PRICE_WAD } from './curve.ts';
-import { fixedCurveFor, FIXED_TOTAL_SUPPLY } from './launchLimits.ts';
+import {
+  fixedCurveFor,
+  graduationWholeFor,
+  openingMarketCap,
+  FIXED_TOTAL_SUPPLY,
+} from './launchLimits.ts';
 
 test('a 6-decimal launch has a real market cap and price, not zero', () => {
   // Seen live: PAIR5277 held 9.90 TUSD and showed market cap 0.00, because the
@@ -450,9 +455,13 @@ test('a 6-decimal launch has a real market cap and price, not zero', () => {
   const cfg = { ...fixedCurveFor(6), feeBps: 100n };
   const st = { injCollected: 0n, tokensSold: 0n, graduated: false };
   const mc = marketCapExact(cfg, st, null, FIXED_TOTAL_SUPPLY);
-  // 60 * 1B / 1.073B = 55.919 whole units, the same figure an INJ launch shows.
-  // It doubled with the opening reserve when the curve was scaled 30/85 -> 60/170.
-  assert.equal(mc, 55_917_986n, `market cap ${mc}`);
+  /*
+   * 676 * 1B / 1.073B = 630.009 whole units, the same figure an INJ launch shows.
+   * It is 630 and not 55.92 because the curve was rescaled so a launch opens at a
+   * market cap of about $5,000 rather than about $443; it is 630.009 and not 630
+   * because 1,073,000,000 does not divide 1,000,000,000 evenly.
+   */
+  assert.equal(mc, 630_009_319n, `market cap ${mc}`);
   const wad = spotPriceWad(cfg, st, null, ONE);
   assert.ok(wad > 0n, 'the wad price must not floor to zero');
   // Same shape as INJ: identical price once each is read at its own decimals.
@@ -463,7 +472,40 @@ test('a 6-decimal launch has a real market cap and price, not zero', () => {
 
 test('the 18-decimal fixed curve is exactly the factory constants', () => {
   const c = fixedCurveFor(18);
-  assert.equal(c.virtualInj, 60n * ONE);
-  assert.equal(c.graduationTarget, 170n * ONE);
-  assert.equal(fixedCurveFor(6).virtualInj, 60_000_000n);
+  assert.equal(c.virtualInj, 676n * ONE);
+  // 676 * 17/6 floored, which is what the factory stores.
+  assert.equal(c.graduationTarget, 1915n * ONE);
+  assert.equal(fixedCurveFor(6).virtualInj, 676_000_000n);
+});
+
+test('a quote carries its own opening scale, and the shape survives it', () => {
+  /*
+   * The defect this covers: one opening reserve for every quote asset. 676 is chosen
+   * to open an INJ launch at about $5,000; the identical number against a 6-decimal
+   * dollar stablecoin opens one at about $630. The scale belongs to the asset and the
+   * shape belongs to the launchpad, so a caller passing a quote gets its own reserve
+   * and the same curve.
+   */
+  const usd = fixedCurveFor({ decimals: 6, virtualWhole: 5_354 });
+  assert.equal(usd.virtualInj, 5_354_000_000n);
+  assert.equal(usd.graduationTarget, graduationWholeFor(5_354) * 1_000_000n);
+
+  const inj = fixedCurveFor(18);
+  const shape = (c: { graduationTarget: bigint; virtualInj: bigint }) =>
+    (c.graduationTarget * 10_000n) / c.virtualInj;
+  // Within a few bps: `graduation = whole * 17/6` floors at WHOLE units, so the two
+  // land 4 bps apart. That residue is the granularity of the quote's own unit.
+  const drift = shape(inj) - shape(usd);
+  assert.ok(drift >= -10n && drift <= 10n, `the two quotes drew different curves: ${drift} bps`);
+
+  // Token amounts never scale: every launched token is 18 decimals.
+  assert.equal(inj.curveSupply, usd.curveSupply);
+  assert.equal(inj.virtualTokens, usd.virtualTokens);
+});
+
+test('the opening market cap is the figure the curve was scaled for', () => {
+  // The constant is not the point; this is. 676 was chosen to produce it.
+  assert.ok(Math.abs(openingMarketCap() - 630) < 0.1, `${openingMarketCap()}`);
+  // And it tracks the quote's own scale rather than a constant.
+  assert.ok(Math.abs(openingMarketCap(5_354) - 4_989.75) < 1, `${openingMarketCap(5_354)}`);
 });

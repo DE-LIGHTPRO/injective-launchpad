@@ -230,6 +230,7 @@ fn setup() -> Fx {
                 platform: platform.to_string(),
                 quote_denom: QUOTE.into(),
                 quote_decimals: 18,
+            quote_virtual_whole: None,
             },
             &[],
             "factory",
@@ -425,7 +426,7 @@ fn the_policy_curve_can_actually_reach_its_graduation_target() {
      * is stalled by design, with no caller to blame and nothing refusing it. So the
      * assertion is against the constants themselves.
      */
-    let curve: launchpad_math::CurveConfig = (&factory::fixed_curve(100, 100, 18)).into();
+    let curve: launchpad_math::CurveConfig = (&factory::fixed_curve(100, 100, &factory::QuoteSpec { decimals: 18, virtual_quote_whole: Uint128::new(676) })).into();
     let ceiling = curve.max_collectable().expect("the policy curve cannot be priced");
     assert!(
         curve.graduation_target <= ceiling,
@@ -1041,10 +1042,11 @@ fn every_launch_gets_the_same_curve_and_the_same_supply() {
     f.create(TOKEN).unwrap();
 
     let cfg = curve_config(&f, 1);
-    assert_eq!(cfg.curve.virtual_inj, amt(60), "opening reserve is not policy");
+    assert_eq!(cfg.curve.virtual_inj, amt(676), "opening reserve is not policy");
     assert_eq!(cfg.curve.virtual_tokens, amt(1_073_000_000));
     assert_eq!(cfg.curve.curve_supply, amt(800_000_000));
-    assert_eq!(cfg.curve.graduation_target, amt(170));
+    // 676 * 17/6, floored. The ratio is the policy; this is what it comes to.
+    assert_eq!(cfg.curve.graduation_target, amt(1915));
     assert_eq!(cfg.lp_reserve, amt(200_000_000));
     assert_eq!(
         cfg.curve.curve_supply + cfg.lp_reserve,
@@ -1214,12 +1216,17 @@ fn the_opening_buy_cap_is_a_share_of_the_curve_not_of_the_total_supply() {
      * other test still passed, because none used an amount between the two bases.
      *
      * 10% of the curve is 80,000,000 tokens and 10% of the total is 100,000,000. A
-     * 5 INJ opening buy takes 81,775,982 (measured), which sits between them.
+     * 60 INJ opening buy takes about 86,670,000, which sits between them.
+     *
+     * THE AMOUNT IS DERIVED FROM THE CURVE, so rescaling the curve breaks this test
+     * loudly rather than quietly. It was 5 INJ against the opening reserve of 60;
+     * moving that reserve to 676 made 5 INJ buy 7.8M, comfortably under BOTH caps, so
+     * the test would have passed while testing nothing at all.
      *
      * The curve supply is the right basis because it is what is actually purchasable:
      * the reserve is held back for the pool and nobody can buy it.
      */
-    let between = amt(5);
+    let between = amt(60);
     let err = create_with_dev_buy(&mut f, TOKEN, between)
         .expect_err("a buy above 10% of the curve was accepted");
     assert!(
@@ -1261,7 +1268,7 @@ fn the_curve_shape_is_identical_at_every_quote_decimals() {
      */
     let mut outs = vec![];
     for dec in [18u8, 8, 6] {
-        let cfg: launchpad_math::CurveConfig = (&factory::fixed_curve(100, 100, dec)).into();
+        let cfg: launchpad_math::CurveConfig = (&factory::fixed_curve(100, 100, &factory::QuoteSpec { decimals: dec, virtual_quote_whole: Uint128::new(676) })).into();
         let one_whole = Uint128::new(10u128.pow(dec as u32));
         let q = launchpad_math::quote_buy(
             &cfg,
@@ -1282,10 +1289,10 @@ fn the_curve_shape_is_identical_at_every_quote_decimals() {
 #[test]
 fn a_six_decimal_quote_scales_the_curve_rather_than_inheriting_eighteen() {
     // The specific disaster: 18-decimal constants against a 6-decimal quote put the
-    // graduation target at 85 trillion USDC. It must be 85.
-    let c = factory::fixed_curve(100, 100, 6);
-    assert_eq!(c.graduation_target, Uint128::new(170_000_000));
-    assert_eq!(c.virtual_inj, Uint128::new(60_000_000));
+    // graduation target in the trillions. It must be in whole units of the quote.
+    let c = factory::fixed_curve(100, 100, &factory::QuoteSpec { decimals: 6, virtual_quote_whole: Uint128::new(676) });
+    assert_eq!(c.graduation_target, Uint128::new(1_915_000_000));
+    assert_eq!(c.virtual_inj, Uint128::new(676_000_000));
     // Token amounts do NOT scale: every launched token is 18 decimals.
     assert_eq!(c.curve_supply, amt(800_000_000));
     assert_eq!(c.virtual_tokens, amt(1_073_000_000));
@@ -1324,7 +1331,8 @@ fn an_allowlisted_quote_launches_with_its_own_scale() {
         .execute_contract(
             admin,
             f.factory.clone(),
-            &ExecuteMsg::SetQuote { denom: USDC.into(), decimals: 6, symbol: None },
+            &ExecuteMsg::SetQuote {
+            virtual_quote_whole: Uint128::new(676), denom: USDC.into(), decimals: 6, symbol: None },
             &[],
         )
         .unwrap();
@@ -1351,7 +1359,7 @@ fn an_allowlisted_quote_launches_with_its_own_scale() {
     assert_eq!(cfg.quote_denom, USDC, "the curve was given the wrong quote");
     assert_eq!(
         cfg.curve.graduation_target,
-        Uint128::new(170_000_000),
+        Uint128::new(1_915_000_000),
         "the curve kept 18-decimal constants against a 6-decimal quote"
     );
 }
@@ -1365,7 +1373,8 @@ fn only_the_admin_curates_quotes() {
         .execute_contract(
             creator,
             f.factory.clone(),
-            &ExecuteMsg::SetQuote { denom: USDC.into(), decimals: 6, symbol: None },
+            &ExecuteMsg::SetQuote {
+            virtual_quote_whole: Uint128::new(676), denom: USDC.into(), decimals: 6, symbol: None },
             &[],
         )
         .map_err(|e| format!("{e:#}"))
@@ -1387,7 +1396,8 @@ fn absurd_decimals_are_refused_rather_than_silently_clamped() {
         .execute_contract(
             admin,
             f.factory.clone(),
-            &ExecuteMsg::SetQuote { denom: USDC.into(), decimals: 40, symbol: None },
+            &ExecuteMsg::SetQuote {
+            virtual_quote_whole: Uint128::new(676), denom: USDC.into(), decimals: 40, symbol: None },
             &[],
         )
         .map_err(|e| format!("{e:#}"))
@@ -1441,7 +1451,8 @@ fn the_quote_list_is_readable_and_names_its_default() {
         .execute_contract(
             admin.clone(),
             f.factory.clone(),
-            &ExecuteMsg::SetQuote { denom: USDC.into(), decimals: 6, symbol: None },
+            &ExecuteMsg::SetQuote {
+            virtual_quote_whole: Uint128::new(676), denom: USDC.into(), decimals: 6, symbol: None },
             &[],
         )
         .unwrap();
@@ -1509,8 +1520,11 @@ fn an_opening_buy_with_a_future_start_is_refused_by_name() {
 #[test]
 fn an_opening_buy_over_the_wallet_cap_is_refused_by_name() {
     let mut f = setup();
-    // 1 INJ buys ~34.6M tokens on this curve; a 10M cap cannot hold it.
-    let cap = Uint128::new(10_000_000) * one();
+    // On the 676 curve 1 INJ buys ~1.58M tokens, so the cap has to be below that to
+    // be the thing that refuses. It was 10M against the old 60 curve, where 1 INJ
+    // bought ~34.6M; rescaling the curve made the cap larger than the buy and the
+    // test passed for no reason until the buy stopped being refused at all.
+    let cap = Uint128::new(500_000) * one();
     let rules = LaunchRules { max_per_wallet: Some(cap), trade_start: None, early_fee: None };
     let err = create_with_buy(&mut f, rules, amt(1)).unwrap_err().to_string();
     assert!(err.contains("over this launch's wallet cap"), "{err}");
@@ -1537,7 +1551,8 @@ fn a_quote_can_carry_a_display_symbol_and_bad_ones_are_refused() {
             .execute_contract(
                 admin.clone(),
                 f.factory.clone(),
-                &ExecuteMsg::SetQuote { denom: hex.into(), decimals: 6, symbol: Some(bad.into()) },
+                &ExecuteMsg::SetQuote {
+            virtual_quote_whole: Uint128::new(676), denom: hex.into(), decimals: 6, symbol: Some(bad.into()) },
                 &[],
             )
             .is_err(), "symbol {bad:?} was accepted");
@@ -1546,7 +1561,8 @@ fn a_quote_can_carry_a_display_symbol_and_bad_ones_are_refused() {
         .execute_contract(
             admin.clone(),
             f.factory.clone(),
-            &ExecuteMsg::SetQuote { denom: hex.into(), decimals: 6, symbol: Some("USDT".into()) },
+            &ExecuteMsg::SetQuote {
+            virtual_quote_whole: Uint128::new(676), denom: hex.into(), decimals: 6, symbol: Some("USDT".into()) },
             &[],
         )
         .unwrap();
@@ -1559,7 +1575,8 @@ fn a_quote_can_carry_a_display_symbol_and_bad_ones_are_refused() {
         .execute_contract(
             admin,
             f.factory.clone(),
-            &ExecuteMsg::SetQuote { denom: hex.into(), decimals: 6, symbol: None },
+            &ExecuteMsg::SetQuote {
+            virtual_quote_whole: Uint128::new(676), denom: hex.into(), decimals: 6, symbol: None },
             &[],
         )
         .unwrap();
@@ -1752,4 +1769,140 @@ fn a_sell_is_charged_the_sell_fee_not_the_buy_fee() {
         !charged.is_zero(),
         "the sell was charged the 0 bps BUY fee instead of the 10% sell fee"
     );
+}
+
+/// A launch opens at the market cap the curve was scaled for.
+///
+/// THE CONSTANT IS NOT THE POINT, the opening market cap is. `virtual_quote_whole`
+/// was chosen so a launch opens around $5,000 at the INJ price on the day it was
+/// picked; asserting the constant only restates it, and would pass if somebody
+/// changed `virtual_tokens` or `FIXED_TOTAL_SUPPLY` underneath and moved the market
+/// cap without touching the reserve.
+///
+/// Opening market cap = opening spot x total supply
+///                    = (virtual_quote / virtual_tokens) x total supply.
+///
+/// Measured in WHOLE QUOTE UNITS, which is the only honest unit here: the dollar
+/// figure that motivated the number is a premise about the price of INJ on one day,
+/// and there is no oracle in this product to carry it.
+#[test]
+fn a_launch_opens_at_the_market_cap_the_curve_was_scaled_for() {
+    let mut f = setup();
+    f.create(TOKEN).unwrap();
+    let cfg = curve_config(&f, 1);
+
+    // Scaled by 1e18 so the division keeps its precision in integer arithmetic.
+    let total_supply = Uint128::new(factory::FIXED_TOTAL_SUPPLY.u128());
+    let opening_mc = cfg
+        .curve
+        .virtual_inj
+        .multiply_ratio(total_supply, cfg.curve.virtual_tokens);
+
+    /*
+     * 630.0093, not 630 exactly: the opening market cap is
+     * `virtual_quote * total_supply / virtual_tokens`, and 1,073,000,000 does not
+     * divide 1,000,000,000 evenly. Asserted as a tight band rather than rounded to a
+     * figure the arithmetic does not produce, because a test that states a prettier
+     * number than the code computes is a test that will be "fixed" in the wrong
+     * direction later.
+     */
+    let lo = amt(629) + Uint128::new(900_000_000_000_000_000);
+    let hi = amt(630) + Uint128::new(100_000_000_000_000_000);
+    assert!(
+        opening_mc >= lo && opening_mc <= hi,
+        "a launch no longer opens at about 630 whole quote units of market cap: {opening_mc}"
+    );
+
+    /*
+     * And the shape, which the graduation RATIO is there to hold constant. Both are
+     * asserted together because the pair is the policy: rescaling the opening reserve
+     * without the ratio would move graduation relative to the curve's ceiling, which
+     * changes how a launch behaves rather than where it starts.
+     */
+    let ceiling = {
+        let k = cfg.curve.virtual_inj.full_mul(cfg.curve.virtual_tokens);
+        let left = cfg.curve.virtual_tokens - cfg.curve.curve_supply;
+        Uint128::try_from(k / cosmwasm_std::Uint256::from(left)).unwrap() - cfg.curve.virtual_inj
+    };
+    let pct = cfg.curve.graduation_target.multiply_ratio(10_000u128, ceiling);
+    assert!(
+        (9_650..=9_690).contains(&pct.u128()),
+        "graduation moved relative to the curve ceiling: {pct} bps, expected ~9670"
+    );
+}
+
+/// Two quotes, two scales, and the curve shape identical in both.
+///
+/// THE DEFECT THIS EXISTS FOR. The opening reserve was one constant applied to every
+/// quote asset, so the number chosen to open an INJ launch at about $5,000 opened a
+/// dollar-stablecoin launch at about $630, and nothing on chain or on screen said so.
+/// The scale belongs to the asset; the SHAPE belongs to the launchpad.
+#[test]
+fn each_quote_carries_its_own_scale_and_the_same_shape() {
+    let inj = factory::fixed_curve(
+        100,
+        100,
+        &factory::QuoteSpec { decimals: 18, virtual_quote_whole: Uint128::new(676) },
+    );
+    // What a dollar quote would be set to for the same opening market cap, at the INJ
+    // price measured on 11 Oct 2026. A judgement the admin records, not a constant.
+    let usd = factory::fixed_curve(
+        100,
+        100,
+        &factory::QuoteSpec { decimals: 6, virtual_quote_whole: Uint128::new(5_354) },
+    );
+
+    assert_eq!(inj.virtual_inj, amt(676));
+    assert_eq!(usd.virtual_inj, Uint128::new(5_354_000_000));
+
+    // Same ratio of target to opening reserve on both, which is the shape.
+    let shape = |target: Uint128, vi: Uint128| target.multiply_ratio(10_000u128, vi);
+    /*
+     * Within a handful of basis points, not identical. `graduation = whole * 17/6`
+     * floors at WHOLE units, so 676 gives 1915 (of 1915.33) and 5354 gives 15169 (of
+     * 15169.67); the ratios land 4 bps apart. That residue is the granularity of the
+     * quote's own unit and cannot be removed without storing a fractional target.
+     */
+    let a = shape(inj.graduation_target, inj.virtual_inj).u128() as i128;
+    let b = shape(usd.graduation_target, usd.virtual_inj).u128() as i128;
+    assert!(
+        (a - b).abs() <= 10,
+        "the two quotes drew different curves: {a} bps against {b} bps",
+    );
+
+    // Token amounts never scale: every launched token is 18 decimals.
+    assert_eq!(inj.curve_supply, usd.curve_supply);
+    assert_eq!(inj.virtual_tokens, usd.virtual_tokens);
+}
+
+/// A quote with no opening reserve, or an absurd one, is refused at the door.
+#[test]
+fn a_quote_scale_of_zero_or_beyond_the_cap_is_refused() {
+    let mut f = setup();
+    for bad in [Uint128::zero(), Uint128::new(factory::MAX_VIRTUAL_QUOTE_WHOLE) + Uint128::one()] {
+        let err = f
+            .app
+            .execute_contract(
+                f.admin.clone(),
+                f.factory.clone(),
+                &ExecuteMsg::SetQuote {
+                    denom: "uscam".into(),
+                    decimals: 6,
+                    virtual_quote_whole: bad,
+                    symbol: None,
+                },
+                &[],
+            )
+            .unwrap_err();
+        /*
+         * `to_string()` on a cw-multi-test error prints the WasmMsg that failed, not
+         * the contract's own message, so asserting on it matches the JSON rather than
+         * the reason. The root cause is the `FactoryError`.
+         */
+        let reason = err.root_cause().to_string();
+        assert!(
+            reason.contains("opening reserve"),
+            "a scale of {bad} was accepted or refused for the wrong reason: {reason}"
+        );
+    }
 }

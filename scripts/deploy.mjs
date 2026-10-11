@@ -261,6 +261,9 @@ const factoryWasm = loadWasm('factory.wasm');
 
 const broadcaster = new MsgBroadcasterWithPk({ privateKey, network, simulateTx: true });
 
+/** Gas for a `MsgStoreCode`. See `storeCode` for why this is not simulated. */
+const STORE_CODE_GAS = 12_000_000;
+
 /** Pull a value out of the tx events, whichever shape the node returns. */
 function fromEvents(res, type, key) {
   const events = res?.events ?? [];
@@ -304,7 +307,26 @@ async function storeCode(label, bytes) {
    */
   assertWasm(bytes, label);
   const msg = MsgStoreCode.fromJSON({ sender, wasmBytes: new Uint8Array(bytes) });
-  const res = await broadcaster.broadcast({ msgs: msg });
+  /*
+   * AN EXPLICIT GAS LIMIT, because simulating this one cannot work.
+   *
+   * `MsgBroadcasterWithPk` simulates to estimate gas, and Injective charges `txSize`
+   * gas against the limit the simulate itself is given. A 356 KB module costs about
+   * 3.65M gas in txSize alone, well past the SDK's 600,000 default, so the simulate
+   * runs out of gas inside the node and the SDK reports it as:
+   *
+   *   Simulate on cosmos.tx.v1beta1.Service failed with INVALID_ARGUMENT
+   *
+   * which names neither gas nor size and sent me looking at payload limits, the
+   * endpoints and the module bytes in turn. 300 KB of random bytes simulated fine,
+   * which ruled out size and transport; what separated them was that an INVALID
+   * module is rejected before the txSize charge and a valid one is not.
+   *
+   * 12M is roughly three times the measured txSize cost of the larger contract,
+   * which leaves room for the module to grow without this needing to be revisited.
+   * Gas is only charged for what is used.
+   */
+  const res = await broadcaster.broadcast({ msgs: msg, gas: { gas: STORE_CODE_GAS } });
   const codeId = fromEvents(res, 'cosmwasm.wasm.v1.EventCodeStored', 'code_id')
     ?? fromEvents(res, 'store_code', 'code_id');
   if (!codeId) {
@@ -499,6 +521,14 @@ const initMsg = {
    * graduation target to 85 trillion, which nothing can reach.
    */
   quote_decimals: 18,
+  /*
+   * The opening virtual reserve for INJ, in whole INJ, which is what sets the market
+   * cap a launch opens at: 676 gives 630 INJ, about $4,990 at the INJ price measured
+   * on 11 Oct 2026. Stated here rather than left to the contract's default so the
+   * deploy records the number, and so a deploy whose default quote is a stablecoin
+   * fails to look right by accident.
+   */
+  quote_virtual_whole: '676',
 };
 await assertPayable('platform fee recipient', initMsg.platform);
 if (configAdmin !== sender) await assertPayable('factory admin', configAdmin);

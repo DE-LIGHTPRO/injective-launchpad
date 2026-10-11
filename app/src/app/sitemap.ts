@@ -3,7 +3,7 @@ import { isDemoMode } from '@/lib/demo';
 import { listLaunches } from '@/lib/chain';
 import { launchPath } from '@/lib/launchPath';
 
-const SITE = process.env.NEXT_PUBLIC_SITE_URL?.trim() || 'https://injpad.vercel.app';
+import { SITE_URL as SITE } from '@/lib/brand';
 
 /**
  * Every launch page, so a token can be found by name. Empty in demo mode, for the same

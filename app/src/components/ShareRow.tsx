@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { BRAND_NAME } from '@/lib/brand';
+import { BRAND_NAME, absoluteUrl } from '@/lib/brand';
 import { CheckIcon, ExternalIcon, LinkIcon } from './Icons';
 
 /**
@@ -13,7 +13,13 @@ import { CheckIcon, ExternalIcon, LinkIcon } from './Icons';
  */
 export function ShareRow({ symbol, path }: { symbol: string; path: string }) {
   const [copied, setCopied] = useState(false);
-  const url = () => (typeof window === 'undefined' ? path : new URL(path, window.location.origin).toString());
+  /*
+   * The site's own origin, not `window.location`. Reading the window made the server
+   * render a RELATIVE url into the X intent and the client swap it in afterwards: a
+   * hydration mismatch, and a share link that went nowhere for anyone who clicked
+   * before hydration or read the markup without running it.
+   */
+  const url = absoluteUrl(path);
   const text = `$${symbol} on ${BRAND_NAME}: fixed supply, liquidity that locks itself at graduation.`;
 
   return (
@@ -23,7 +29,7 @@ export function ShareRow({ symbol, path }: { symbol: string; path: string }) {
         className="icon-btn"
         onClick={async () => {
           try {
-            await navigator.clipboard.writeText(url());
+            await navigator.clipboard.writeText(url);
             setCopied(true);
             window.setTimeout(() => setCopied(false), 1600);
           } catch {
@@ -35,7 +41,7 @@ export function ShareRow({ symbol, path }: { symbol: string; path: string }) {
         {copied ? 'Copied' : 'Copy link'}
       </button>
       <a
-        href={`https://x.com/intent/post?text=${encodeURIComponent(text)}&url=${encodeURIComponent(url())}`}
+        href={`https://x.com/intent/post?text=${encodeURIComponent(text)}&url=${encodeURIComponent(url)}`}
         target="_blank"
         rel="noopener noreferrer"
         className="icon-btn"
