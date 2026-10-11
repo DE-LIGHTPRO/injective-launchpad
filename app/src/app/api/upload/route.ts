@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { allowUpload, clientKey } from '@/lib/uploadLimit';
 
 /**
  * Pin a launch logo to IPFS.
@@ -19,6 +20,7 @@ import { NextResponse } from 'next/server';
  */
 
 const MAX_BYTES = 5 * 1024 * 1024;
+
 
 /*
  * Checked against the sniffed bytes, not the declared type. `Content-Type` on an upload
@@ -62,6 +64,24 @@ export async function POST(req: Request) {
       { error: 'Uploading is not set up on this deployment. Paste a link instead.' },
       { status: 501 },
     );
+  }
+
+  if (!allowUpload(clientKey(req))) {
+    return NextResponse.json(
+      { error: 'Too many uploads from here. Wait a few minutes, or paste a link instead.' },
+      { status: 429 },
+    );
+  }
+
+  /*
+   * Before the body is parsed. `formData()` reads the whole request into memory, so
+   * checking `file.size` afterwards rejects an oversized upload only after paying for
+   * it. A declared length over the cap (plus room for the multipart envelope) is
+   * refused unread; an undeclared one still meets the `file.size` check below.
+   */
+  const declared = Number(req.headers.get('content-length') ?? '0');
+  if (declared > MAX_BYTES + 64 * 1024) {
+    return NextResponse.json({ error: 'That image is over the 5 MB limit.' }, { status: 413 });
   }
 
   let file: File | null = null;
