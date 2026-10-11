@@ -1962,3 +1962,7 @@ table.board .dim { color: var(--text-faint); }
 .trending-row:hover { background: var(--glass-well); }
 .trending-row strong { flex: 1; min-width: 0; font-size: var(--text-sm); }
 .trending-rank { color: var(--text-faint); font-size: var(--text-xs); min-width: 14px; }
+
+/* Claimable-fee rows on /claim. Spaced from the button below so a sweep is not
+   one keystroke away from a misread row. */
+.claim-rows { margin-bottom: var(--space-4); }

@@ -389,3 +389,49 @@ export async function broadcastExecute(opts: {
     gas: opts.gas ?? GAS.trade,
   });
 }
+
+/**
+ * Several contract calls, in ONE transaction the wallet prompts for once.
+ *
+ * WHY BATCHED. A creator with five launches has five separate fee balances, and
+ * claiming them one at a time is five wallet prompts, five fees and five chances to
+ * stop halfway. Cosmos puts many messages in one transaction natively, so the batch
+ * is the natural shape and the loop was the unnatural one.
+ *
+ * It is also ATOMIC, which matters more than the convenience: either every claim
+ * lands or none does. A partial sweep leaves a creator guessing which of their
+ * launches paid out, and the answer is only discoverable by checking each one.
+ *
+ * Gas scales with the number of messages. A flat limit sized for one would fail a
+ * batch of five AFTER the user approved it, which is the failure mode worth avoiding:
+ * a ceiling costs nothing on Injective's fee market, a ceiling that is too low costs
+ * a signature.
+ */
+export async function broadcastExecuteMany(opts: {
+  calls: Array<{
+    contract: string;
+    msg: Record<string, unknown>;
+    funds?: Array<{ denom: string; amount: string }>;
+  }>;
+  sender: string;
+  wallet: unknown;
+  gasPerCall?: number;
+}): Promise<{ txHash: string }> {
+  if (opts.calls.length === 0) throw new BroadcastError('simulate', 'Nothing to send.');
+  const perCall = opts.gasPerCall ?? GAS.claim;
+  return signAndBroadcast({
+    msgs: composeMessages(
+      {
+        messages: opts.calls.map((c) => ({
+          typeUrl: MSG_EXECUTE,
+          value: { contract: c.contract, msg: c.msg, funds: c.funds ?? [] },
+        })),
+      } as unknown as LaunchPlan,
+      opts.sender,
+    ),
+    sender: opts.sender,
+    wallet: opts.wallet,
+    // A base for the transaction itself plus room per message.
+    gas: 150_000 + perCall * opts.calls.length,
+  });
+}

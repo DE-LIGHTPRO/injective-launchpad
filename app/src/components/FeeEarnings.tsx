@@ -1,7 +1,6 @@
 'use client';
 
 import { useState } from 'react';
-import { ConnectWallet } from './ConnectWallet';
 import { fmt } from '@/lib/curve';
 import { NETWORK } from '@/lib/config';
 import { CREATOR_FEE_SHARE_BPS, PLATFORM_FEE_SHARE_BPS } from '@/lib/launchLimits';
@@ -152,7 +151,11 @@ export function FeeEarnings({
         </p>
       ) : account === null ? (
         <div style={{ marginTop: 'var(--space-4)' }}>
-          <ConnectWallet />
+          {/* Sticky header already offers this; a second identical button here is
+              the same control twice on one screen. */}
+          <p className="note">
+            Connect a wallet, using the button in the header, to pay these out.
+          </p>
           <p className="note">
             Anyone can trigger the payout, and it pays the creator and the launchpad at
             the addresses set when this launch was created. Connecting only pays the gas.

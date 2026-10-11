@@ -7,7 +7,6 @@ import { allBalances } from '@/lib/wallet';
 import { symbolOf } from '@/lib/chain';
 import { fmt } from '@/lib/curve';
 import { TokenLogo } from './TokenLogo';
-import { ConnectWallet } from './ConnectWallet';
 import type { LaunchRow } from '@/lib/launchList';
 
 const ONE = 10n ** 18n;
@@ -88,10 +87,10 @@ export function Portfolio({ rows }: { rows: LaunchRow[] }) {
   if (!account) {
     return (
       <div className="empty" style={{ marginTop: 'var(--space-5)' }}>
-        <p>Connect a wallet to see what it holds across launches.</p>
-        <div style={{ marginTop: 'var(--space-3)' }}>
-          <ConnectWallet />
-        </div>
+        {/* The header's connect button is sticky and always in view; a second one
+            here would be the same control twice on one screen. */}
+        <p>Connect a wallet, using the button in the header, to see what it holds
+          across launches.</p>
       </div>
     );
   }

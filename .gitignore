@@ -27,3 +27,4 @@ out/
 # TypeScript incremental build cache: a build artifact, not source. It was tracked
 # and changed on every typecheck, adding noise to every diff.
 *.tsbuildinfo
+.env*

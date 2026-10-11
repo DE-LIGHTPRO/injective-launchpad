@@ -1,7 +1,6 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ConnectWallet } from './ConnectWallet';
 import { LogoUpload } from './LogoUpload';
 import { listQuotes, denomLabel, quoteLabel as quoteLabelOf, type QuoteAsset } from '@/lib/chain';
 import { CurveChart } from './CurveChart';
@@ -837,8 +836,19 @@ export function CreateLaunch() {
 
         {!account && (
           <>
-            <p className="note">Connect a wallet to see exactly what would be signed.</p>
-            <ConnectWallet />
+{/*
+              NO SECOND CONNECT BUTTON. The header is `position: sticky`, so its
+              "Connect wallet" is on screen at every scroll position, and an identical
+              button here put two of the same control in view at once: a reader has to
+              work out whether they do different things, and they do not.
+
+              The sentence stays, because the reason this section is empty still needs
+              saying. It names where the control is rather than repeating it.
+            */}
+            <p className="note">
+              Connect a wallet, using the button in the header, to see exactly what
+              would be signed.
+            </p>
           </>
         )}
 
