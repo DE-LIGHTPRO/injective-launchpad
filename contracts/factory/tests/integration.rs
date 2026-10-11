@@ -57,7 +57,6 @@ fn setup() -> Fx {
     let creator = api.addr_make("creator");
     let buyer = api.addr_make("buyer");
     let platform = api.addr_make("platform");
-    let migration = api.addr_make("migration");
 
     app.init_modules(|router, _, storage| {
         // Fund the creator with every denom the tests launch.
@@ -95,7 +94,6 @@ fn setup() -> Fx {
                 admin: admin.to_string(),
                 curve_code_id: curve_code,
                 platform: platform.to_string(),
-                migration_target: migration.to_string(),
                 quote_denom: QUOTE.into(),
                 quote_decimals: 18,
             },
@@ -363,6 +361,60 @@ fn only_admin_can_repoint_the_curve_code() {
         .query_wasm_smart(f.factory.clone(), &QueryMsg::Config {})
         .unwrap();
     assert_eq!(cfg.curve_code_id, 999);
+}
+
+#[test]
+fn a_launched_curve_has_no_wasm_admin_so_its_code_can_never_be_replaced() {
+    // The locked pool is only locked if no key can migrate the contract holding it.
+    let mut f = setup();
+    f.create(TOKEN).unwrap();
+    let curve = f.launch(1).curve;
+    let info = f.app.wrap().query_wasm_contract_info(curve).unwrap();
+    assert_eq!(info.admin, None, "a curve was created with a wasm admin");
+}
+
+#[test]
+fn an_admin_handover_takes_effect_only_when_accepted() {
+    let mut f = setup();
+    let (admin, creator, buyer) = (f.admin.clone(), f.creator.clone(), f.buyer.clone());
+    let cfg = |f: &Fx| -> Config {
+        f.app.wrap().query_wasm_smart(f.factory.clone(), &QueryMsg::Config {}).unwrap()
+    };
+
+    f.app
+        .execute_contract(
+            admin.clone(),
+            f.factory.clone(),
+            &ExecuteMsg::UpdateAdmin { admin: creator.to_string() },
+            &[],
+        )
+        .unwrap();
+    // Proposed, not transferred: the old admin still holds it.
+    assert_eq!(cfg(&f).admin, admin);
+    assert_eq!(cfg(&f).pending_admin, Some(creator.clone()));
+
+    // Nobody but the proposed address can complete it.
+    assert!(f
+        .app
+        .execute_contract(buyer, f.factory.clone(), &ExecuteMsg::AcceptAdmin {}, &[])
+        .is_err());
+
+    f.app
+        .execute_contract(creator.clone(), f.factory.clone(), &ExecuteMsg::AcceptAdmin {}, &[])
+        .unwrap();
+    assert_eq!(cfg(&f).admin, creator);
+    assert_eq!(cfg(&f).pending_admin, None);
+
+    // And the old admin has lost it.
+    assert!(f
+        .app
+        .execute_contract(
+            admin,
+            f.factory.clone(),
+            &ExecuteMsg::SetCurveCodeId { code_id: 7 },
+            &[]
+        )
+        .is_err());
 }
 
 // ---------------------------------------------------------------- token profile --

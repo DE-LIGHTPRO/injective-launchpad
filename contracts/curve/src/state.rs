@@ -29,11 +29,14 @@ pub struct Config {
     pub creator: Addr,
     /// Platform fee recipient.
     pub platform: Addr,
-    /// Where the INJ and the LP tokens go once the curve graduates.
-    pub migration_target: Addr,
     /// Tokens held back from the curve entirely, reserved to pair against the
-    /// collected INJ at migration. Without this the curve can sell out and
-    /// graduate with INJ but no token side for the pool.
+    /// collected INJ in the locked pool at graduation. Without this the curve can
+    /// sell out and graduate with INJ but no token side for the pool.
+    ///
+    /// There is deliberately no `migration_target`. Graduation used to send the
+    /// reserve and these tokens to an address, which made whoever held that key the
+    /// custodian of every graduated launch. The liquidity now stays in this contract
+    /// as a constant-product pool with no withdrawal path; see `launchpad_math::pool`.
     pub lp_reserve: Uint128,
     /// Share of the trading fee that goes to the creator, in bps of the fee
     /// itself. The remainder goes to the platform.
@@ -82,11 +85,18 @@ pub struct State {
     pub inj_collected: Uint128,
     /// Tokens handed to buyers so far.
     pub tokens_sold: Uint128,
-    /// Trading has closed. Set by the buy that reaches the target.
+    /// The curve phase is over. Set by the buy that reaches the target.
     pub graduated: bool,
-    /// Liquidity has actually been moved out. Separate from `graduated` so
-    /// migration can never run twice.
+    /// The reserve and leftover tokens have been seeded into the locked pool and
+    /// trading now prices against `pool_quote` / `pool_tokens`. Separate from
+    /// `graduated` so seeding can never run twice.
     pub migrated: bool,
+    /// Real reserves of the locked pool, zero until `migrated`. Nothing can withdraw
+    /// these: they move only to a trader, in exchange for the other side.
+    #[serde(default)]
+    pub pool_quote: Uint128,
+    #[serde(default)]
+    pub pool_tokens: Uint128,
     /// Fees accrued but not yet withdrawn. Kept separate from the reserve so
     /// a fee claim can never eat the INJ that backs outstanding tokens.
     pub platform_owed: Uint128,
@@ -116,7 +126,7 @@ pub struct State {
     /// own invariant: the price of every sell is derived from it against `tokens_sold`,
     /// so adding quote to it without issuing tokens would move the curve off its
     /// formula and quietly change what every later trade costs. This is a separate
-    /// balance that rides along to the migration target at graduation and becomes
+    /// balance that is added to the locked pool at graduation and becomes
     /// liquidity for everyone who trades afterwards.
     ///
     /// Deliberately NOT paid to the creator. A creator who earns more when snipers win
@@ -126,6 +136,10 @@ pub struct State {
 }
 
 impl State {
+    pub fn pool(&self) -> launchpad_math::PoolReserves {
+        launchpad_math::PoolReserves { quote: self.pool_quote, tokens: self.pool_tokens }
+    }
+
     pub fn curve_state(&self) -> CurveState {
         CurveState {
             inj_collected: self.inj_collected,

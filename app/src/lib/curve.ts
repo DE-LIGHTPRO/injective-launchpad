@@ -322,6 +322,80 @@ export function chartMarker(
   return { injX, price };
 }
 
+/**
+ * The locked pool a launch becomes at graduation, mirrored from
+ * `packages/launchpad-math/src/pool.rs`.
+ *
+ * Plain `x * y = k` over REAL reserves, fees on the quote leg only, every division
+ * rounded toward the pool. Covered by the `pool*` rows in the parity vectors, so a
+ * one-unit drift from the contract fails a test rather than a trade.
+ */
+export interface PoolReserves {
+  quote: bigint;
+  tokens: bigint;
+}
+
+export interface PoolBuyQuote {
+  fee: bigint;
+  quoteInAfterFee: bigint;
+  tokensOut: bigint;
+}
+
+function checkPool(pool: PoolReserves, feeBps: bigint): void {
+  if (pool.quote <= 0n || pool.tokens <= 0n) throw new CurveError('the pool has no liquidity');
+  if (feeBps > MAX_FEE_BPS) throw new CurveError('fee above the maximum');
+}
+
+export function poolQuoteBuy(pool: PoolReserves, feeBps: bigint, quoteIn: bigint): PoolBuyQuote {
+  checkPool(pool, feeBps);
+  if (quoteIn <= 0n) throw new CurveError('amount must be greater than zero');
+  const fee = feeOn(quoteIn, feeBps);
+  const net = quoteIn - fee;
+  if (net <= 0n) throw new CurveError('amount must be greater than zero');
+  const newTokens = ceilDiv(pool.quote * pool.tokens, pool.quote + net);
+  const tokensOut = pool.tokens > newTokens ? pool.tokens - newTokens : 0n;
+  if (tokensOut <= 0n) throw new CurveError('amount must be greater than zero');
+  return { fee, quoteInAfterFee: net, tokensOut };
+}
+
+export function poolQuoteSell(pool: PoolReserves, feeBps: bigint, tokensIn: bigint): SellQuote {
+  checkPool(pool, feeBps);
+  if (tokensIn <= 0n) throw new CurveError('amount must be greater than zero');
+  const newQuote = ceilDiv(pool.quote * pool.tokens, pool.tokens + tokensIn);
+  const gross = pool.quote > newQuote ? pool.quote - newQuote : 0n;
+  if (gross <= 0n) throw new CurveError('amount must be greater than zero');
+  const fee = feeOn(gross, feeBps);
+  const injOut = gross - fee;
+  if (injOut <= 0n) throw new CurveError('amount must be greater than zero');
+  return { fee, injOut };
+}
+
+export function poolSpotPrice(pool: PoolReserves, oneToken: bigint): bigint {
+  if (pool.tokens <= 0n) throw new CurveError('the pool has no liquidity');
+  return (pool.quote * oneToken) / pool.tokens;
+}
+
+const toBpsNumber = (b: bigint) =>
+  b > BigInt(Number.MAX_SAFE_INTEGER) ? Number.MAX_SAFE_INTEGER : Number(b);
+
+/** Buy impact against spot before the trade, fee excluded; same definition as the curve's. */
+export function poolBuyImpactBps(pool: PoolReserves, feeBps: bigint, quoteIn: bigint): number {
+  const q = poolQuoteBuy(pool, feeBps, quoteIn);
+  const num = q.quoteInAfterFee * pool.tokens;
+  const den = q.tokensOut * pool.quote;
+  if (num <= den) return 0;
+  return toBpsNumber(((num - den) * BPS_DENOM) / den);
+}
+
+/** Sell shortfall below spot before the trade, fee excluded. */
+export function poolSellImpactBps(pool: PoolReserves, feeBps: bigint, tokensIn: bigint): number {
+  const q = poolQuoteSell(pool, feeBps, tokensIn);
+  const atSpot = tokensIn * pool.quote;
+  const actual = (q.injOut + q.fee) * pool.tokens;
+  if (actual >= atSpot) return 0;
+  return toBpsNumber(((atSpot - actual) * BPS_DENOM) / atSpot);
+}
+
 /** At or above this, say so prominently. 5%. */
 export const IMPACT_WARN_BPS = 500;
 /** At or above this, the trader is losing a quarter of their money to the shape. 25%. */
@@ -335,8 +409,27 @@ export function spotPrice(cfg: CurveConfig, st: CurveState, oneToken: bigint): b
   return (injRes * oneToken) / tokRes;
 }
 
+/**
+ * The price a launch trades at right now: the pool's once graduated, else the curve's.
+ *
+ * One function so no page can quote a graduated launch off its exhausted curve, which
+ * would read the curve's terminal state rather than the market that replaced it.
+ */
+export function launchSpotPrice(
+  cfg: CurveConfig,
+  st: CurveState,
+  pool: PoolReserves | null | undefined,
+  oneToken: bigint,
+): bigint {
+  if (pool && pool.quote > 0n && pool.tokens > 0n) return poolSpotPrice(pool, oneToken);
+  return spotPrice(cfg, st, oneToken);
+}
+
 /** How far along the curve this launch is, 0..1, for progress bars. */
 export function graduationProgress(cfg: CurveConfig, st: CurveState): number {
+  // A graduated curve's reserve has moved into the pool, so `injCollected` reads zero
+  // afterwards; without this a finished launch would show 0% on every bar.
+  if (st.graduated) return 1;
   if (cfg.graduationTarget <= 0n) return 0;
   if (st.injCollected >= cfg.graduationTarget) return 1;
   return Number((st.injCollected * 10_000n) / cfg.graduationTarget) / 10_000;

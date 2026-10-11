@@ -50,11 +50,13 @@ export function HowItWorks() {
           <li>
             <span className="step-n">3</span>
             <div>
-              <strong>It graduates to a pool</strong>
+              <strong>It graduates to a locked pool</strong>
               <p className="note">
-                When the curve reaches its target, the {q} it collected and the tokens
-                held back move out together as liquidity. Trading continues there, and
-                the launch rules below stop applying at that point.
+                The buy that reaches the target seeds a pool with the {q} the curve
+                collected and the tokens held back, in the same transaction. The pool
+                lives in the launch&rsquo;s own contract, which has no withdraw function
+                and no upgrade key, so that liquidity can never be pulled. Trading
+                continues there, and the launch rules below stop applying.
               </p>
             </div>
           </li>

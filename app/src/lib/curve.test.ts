@@ -43,6 +43,10 @@ import {
   parseAmount,
   priceImpactBps,
   sellPriceImpactBps,
+  poolQuoteBuy,
+  poolQuoteSell,
+  poolBuyImpactBps,
+  poolSellImpactBps,
   IMPACT_SEVERE_BPS,
   fmt,
   validate,
@@ -396,4 +400,41 @@ test('the committed vectors are what the Rust produces right now', (t) => {
     'curve-vectors.json is stale: the Rust produces different numbers. Run `npm run vectors`, ' +
       'then check what changed before committing it, because the UI quotes these.',
   );
+});
+
+// ------------------------------------------------------------------ locked pool --
+
+test('pool buys and sells match the Rust to the unit', () => {
+  const poolRow = VECTORS.find((r) => r.kind === 'pool');
+  assert.ok(poolRow, 'the vectors carry no pool row; regenerate with `npm run vectors`');
+  const pool = { quote: big(poolRow.quote), tokens: big(poolRow.tokens) };
+  const feeBps = BigInt(Number(poolRow.feeBps));
+  const buys = rowsOf('poolBuy');
+  const sells = rowsOf('poolSell');
+  assert.ok(buys.length >= 3 && sells.length >= 3, 'too few pool vectors to compare');
+  for (const r of buys) {
+    const q = poolQuoteBuy(pool, feeBps, big(r.injIn));
+    assert.equal(q.fee, big(r.fee), `pool buy fee for ${r.injIn}`);
+    assert.equal(q.quoteInAfterFee, big(r.net), `pool buy net for ${r.injIn}`);
+    assert.equal(q.tokensOut, big(r.tokensOut), `pool buy tokensOut for ${r.injIn}`);
+    assert.equal(poolBuyImpactBps(pool, feeBps, big(r.injIn)), Number(r.impactBps));
+  }
+  for (const r of sells) {
+    const q = poolQuoteSell(pool, feeBps, big(r.tokensIn));
+    assert.equal(q.fee, big(r.fee), `pool sell fee for ${r.tokensIn}`);
+    assert.equal(q.injOut, big(r.injOut), `pool sell injOut for ${r.tokensIn}`);
+    assert.equal(poolSellImpactBps(pool, feeBps, big(r.tokensIn)), Number(r.impactBps));
+  }
+});
+
+test('a pool round trip never returns more than was spent', () => {
+  let pool = { quote: 85n * ONE, tokens: 207_000_000n * ONE };
+  for (const n of [1n, 7n, 50n, 400n]) {
+    const spent = (n * ONE) / 10n;
+    const b = poolQuoteBuy(pool, 0n, spent);
+    const after = { quote: pool.quote + b.quoteInAfterFee, tokens: pool.tokens - b.tokensOut };
+    const s = poolQuoteSell(after, 0n, b.tokensOut);
+    assert.ok(s.injOut <= spent, `round trip of ${n} returned ${s.injOut} for ${spent}`);
+    pool = after;
+  }
 });

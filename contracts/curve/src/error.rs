@@ -52,7 +52,7 @@ pub enum ContractError {
         now: cosmwasm_std::Timestamp,
     },
 
-    #[error("trading has closed; this launch has graduated")]
+    #[error("this launch has graduated and its liquidity is already in the locked pool")]
     Graduated,
 
     #[error("the curve has not reached its graduation target yet")]

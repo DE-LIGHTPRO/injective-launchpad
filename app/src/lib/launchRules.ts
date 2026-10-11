@@ -9,8 +9,9 @@
  *
  * What IS true: every buy and sell before graduation goes through the curve contract, so
  * a rule there binds every trade for the whole fair-launch window, which is when launch
- * rules are worth anything. At graduation liquidity moves to a DEX and the rules stop
- * completely.
+ * rules are worth anything. At graduation the reserve is seeded into the locked pool in
+ * the same contract, and the rules stop completely: like Pons's anti-snipe window, they
+ * are launch-window rules and they expire.
  *
  * So the wording is fixed, and `test/launch-rules.test.ts` holds it: "on the curve",
  * "until it graduates", never "on the token" and never "every transfer".
@@ -316,6 +317,8 @@ export function statusLabel(s: LaunchStatus): { text: string; tone: 'accent' | '
     case 'graduated':
       return { text: 'graduated', tone: 'warn' };
     case 'migrated':
-      return { text: 'migrated', tone: 'warn' };
+      // Tradable again, against the locked pool, so it reads as live rather than as a
+      // warning. "migrated" said liquidity had gone somewhere; it no longer goes anywhere.
+      return { text: 'in pool', tone: 'accent' };
   }
 }

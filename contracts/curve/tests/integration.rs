@@ -39,7 +39,7 @@ struct Fixture {
     bob: Addr,
 }
 
-/// Tokens held back to pair against the collected INJ at migration.
+/// Tokens held back to pair against the collected INJ in the locked pool.
 fn lp_reserve() -> Uint128 {
     amt(200_000_000)
 }
@@ -100,7 +100,6 @@ fn setup_with(rules: LaunchRules) -> Fixture {
                 quote_denom: QUOTE.into(),
                 creator: creator.to_string(),
                 platform: platform.to_string(),
-                migration_target: migration.to_string(),
                 lp_reserve: lp_reserve(),
                 creator_fee_share_bps: 5_000, // half the fee to the creator
                 curve: curve_cfg(),
@@ -158,7 +157,10 @@ impl Fixture {
          * premium be spent on a sell or a fee claim while every solvency assertion in
          * the suite still passed: the exact shape of hole this helper exists to find.
          */
-        let owed = st.inj_collected + st.platform_owed + st.creator_owed + st.lp_bonus;
+        // `pool_quote` too: after graduation the reserve lives there, and a sell
+        // against the pool is paid out of it.
+        let owed =
+            st.inj_collected + st.platform_owed + st.creator_owed + st.lp_bonus + st.pool_quote;
         assert!(
             held >= owed,
             "insolvent: holds {held} {QUOTE}, owes {owed} (reserve {} + fees {} + lp bonus {})",
@@ -194,7 +196,6 @@ fn seeding_requires_the_exact_supply() {
             quote_denom: QUOTE.into(),
             creator: creator.to_string(),
             platform: creator.to_string(),
-            migration_target: creator.to_string(),
             lp_reserve: Uint128::zero(),
             creator_fee_share_bps: 0,
             curve: curve_cfg(),
@@ -325,63 +326,106 @@ fn front_running_a_buy_triggers_the_victims_slippage_guard() {
     f.assert_solvent();
 }
 
-#[test]
-fn curve_graduates_and_then_refuses_trades() {
-    let mut f = setup();
-    let alice = f.alice.clone();
-
-    // Push past the 85 INJ target.
-    for _ in 0..10 {
+fn graduate(f: &mut Fixture, who: &Addr) {
+    for _ in 0..12 {
         if f.state().graduated {
             break;
         }
-        let _ = f.buy(&alice, amt(10));
+        let _ = f.buy(who, amt(10));
     }
     assert!(f.state().graduated, "curve never graduated");
+}
 
-    let buy_err = f.buy(&alice, amt(1)).unwrap_err().to_string();
-    assert!(buy_err.contains("graduated"), "buying after graduation failed for another reason: {buy_err}");
-    let held = f.balance(&alice, TOKEN);
-    let sell_err = f.sell(&alice, held).unwrap_err().to_string();
-    assert!(sell_err.contains("graduated"), "selling after graduation failed for another reason: {sell_err}");
+#[test]
+fn the_graduating_buy_seeds_the_locked_pool_in_the_same_transaction() {
+    let mut f = setup();
+    let alice = f.alice.clone();
+    graduate(&mut f, &alice);
+
+    let st = f.state();
+    assert!(st.migrated, "graduated but the pool was not seeded");
+    assert!(st.inj_collected.is_zero() && st.lp_bonus.is_zero());
+    // Token side: the held-back reserve plus whatever the curve never sold, and the
+    // contract holds exactly that many tokens. Nothing went anywhere else.
+    assert!(st.pool_tokens >= lp_reserve(), "pool has no token side");
+    assert_eq!(f.balance(&f.addr, TOKEN), st.pool_tokens);
+    // Quote side: everything the contract holds that is not an owed fee, EXACTLY.
+    // An inequality here would let a stranded or leaked unit pass.
+    assert_eq!(
+        f.balance(&f.addr, QUOTE),
+        st.pool_quote + st.creator_owed + st.platform_owed
+    );
+    // And nothing was sent to anyone who is not a trader.
+    assert!(f.balance(&f.migration, QUOTE).is_zero());
+    assert!(f.balance(&f.migration, TOKEN).is_zero());
     f.assert_solvent();
 }
 
 #[test]
-fn graduation_moves_liquidity_once_and_only_once() {
+fn trading_continues_against_the_pool_after_graduation() {
     let mut f = setup();
-    let alice = f.alice.clone();
-    for _ in 0..10 {
-        if f.state().graduated {
-            break;
-        }
-        let _ = f.buy(&alice, amt(10));
-    }
-    assert!(f.state().graduated);
+    let (alice, bob) = (f.alice.clone(), f.bob.clone());
+    graduate(&mut f, &alice);
+    let before = f.state();
 
-    let reserve = f.state().inj_collected;
-    f.app
-        .execute_contract(alice.clone(), f.addr.clone(), &ExecuteMsg::Graduate {}, &[])
+    // Quoted and executed agree, after graduation as before it.
+    let sim: curve::msg::SimulateBuyResponse = f
+        .app
+        .wrap()
+        .query_wasm_smart(f.addr.clone(), &QueryMsg::SimulateBuy { inj_in: amt(3) })
         .unwrap();
+    let held = f.balance(&bob, TOKEN);
+    f.buy(&bob, amt(3)).unwrap();
+    assert_eq!(f.balance(&bob, TOKEN) - held, sim.tokens_out);
+    assert!(!sim.graduates && sim.refund.is_zero());
 
-    assert_eq!(f.balance(&f.migration, QUOTE), reserve, "reserve did not move");
-    assert!(
-        f.balance(&f.migration, TOKEN) >= lp_reserve(),
-        "migrated pool got no token side: {} < reserved {}",
-        f.balance(&f.migration, TOKEN),
-        lp_reserve()
-    );
-    assert!(f.state().migrated);
+    let mid = f.state();
+    assert!(mid.pool_quote > before.pool_quote && mid.pool_tokens < before.pool_tokens);
+    assert!(mid.creator_owed > before.creator_owed, "the pool fee did not accrue to the creator");
+    f.assert_solvent();
 
-    // A second attempt must fail, or the fee pot gets drained as "reserve".
-    let twice =
-        f.app
-            .execute_contract(alice, f.addr.clone(), &ExecuteMsg::Graduate {}, &[]);
-    assert!(twice.is_err(), "graduation ran twice");
+    // The early holder can exit into the pool: this is the whole point of a pool.
+    let alice_tokens = f.balance(&alice, TOKEN);
+    let quote_before = f.balance(&alice, QUOTE);
+    f.sell(&alice, alice_tokens / Uint128::new(2)).unwrap();
+    assert!(f.balance(&alice, QUOTE) > quote_before);
+    f.assert_solvent();
+
+    // Rounding favours the pool: k never shrinks.
+    let k = |s: &State| s.pool_quote.full_mul(s.pool_tokens);
+    assert!(k(&f.state()) >= k(&before));
 }
 
 #[test]
-fn graduation_is_permissionless_but_not_premature() {
+fn pool_trades_honour_slippage_bounds() {
+    let mut f = setup();
+    let (alice, bob) = (f.alice.clone(), f.bob.clone());
+    graduate(&mut f, &alice);
+    let err = f
+        .app
+        .execute_contract(
+            bob.clone(),
+            f.addr.clone(),
+            &ExecuteMsg::Buy { min_tokens_out: Uint128::MAX, recipient: None },
+            &coins(amt(1).u128(), QUOTE),
+        )
+        .unwrap_err();
+    assert!(format!("{err:#}").contains("asked for at least"), "{err:#}");
+    let held = f.balance(&alice, TOKEN);
+    let err = f
+        .app
+        .execute_contract(
+            alice,
+            f.addr.clone(),
+            &ExecuteMsg::Sell { min_inj_out: Uint128::MAX },
+            &coins(held.u128(), TOKEN),
+        )
+        .unwrap_err();
+    assert!(format!("{err:#}").contains("asked for at least"), "{err:#}");
+}
+
+#[test]
+fn the_pool_cannot_be_seeded_twice_or_early() {
     let mut f = setup();
     let bob = f.bob.clone();
 
@@ -392,17 +436,13 @@ fn graduation_is_permissionless_but_not_premature() {
         .execute_contract(bob.clone(), f.addr.clone(), &ExecuteMsg::Graduate {}, &[]);
     assert!(early.is_err(), "graduated before reaching the target");
 
-    // A stranger, not the creator, can finish it once the target is met.
-    for _ in 0..10 {
-        if f.state().graduated {
-            break;
-        }
-        let _ = f.buy(&bob, amt(10));
-    }
-    f.app
-        .execute_contract(bob, f.addr.clone(), &ExecuteMsg::Graduate {}, &[])
-        .unwrap();
-    assert!(f.state().migrated);
+    graduate(&mut f, &bob);
+    // Already seeded by the buy; a second seeding would double-count the reserve.
+    let twice = f
+        .app
+        .execute_contract(bob, f.addr.clone(), &ExecuteMsg::Graduate {}, &[]);
+    assert!(twice.is_err(), "the pool was seeded twice");
+    f.assert_solvent();
 }
 
 #[test]
@@ -421,14 +461,14 @@ fn fees_survive_graduation_and_pay_out_correctly() {
     };
     assert!(!creator_owed.is_zero());
 
-    f.app
-        .execute_contract(alice.clone(), f.addr.clone(), &ExecuteMsg::Graduate {}, &[])
-        .unwrap();
-
-    // Migration must not have swept the fee pot.
+    // Seeding the pool must not have swept the fee pot into liquidity.
     let s = f.state();
-    assert_eq!(s.creator_owed, creator_owed);
-    assert_eq!(s.platform_owed, platform_owed);
+    assert!(s.migrated);
+    assert_eq!(
+        f.balance(&f.addr, QUOTE),
+        s.pool_quote + creator_owed + platform_owed,
+        "fees were folded into the pool"
+    );
 
     f.app
         .execute_contract(alice, f.addr.clone(), &ExecuteMsg::ClaimFees {}, &[])
@@ -804,46 +844,35 @@ fn the_premium_goes_to_the_pool_and_not_to_the_creator() {
 }
 
 #[test]
-fn the_premium_leaves_with_the_reserve_at_graduation() {
+fn the_premium_becomes_pool_liquidity_at_graduation() {
     /*
      * An accumulator that fills and is never paid out is a tax collected for nobody,
      * and it would sit in the contract looking exactly like solvency. This is the test
      * that makes the rule real rather than merely accounted.
+     *
+     * EXACT, because `>=` was not an assertion: mutation testing on the earlier version
+     * showed the premium could be dropped and an inequality still passed. Here the
+     * contract's whole quote balance must equal pool + owed fees to the unit, so a
+     * premium left out of the pool shows up as a surplus and fails.
      */
     let mut f = setup_with(with_early_fee(1_100, 100_000));
     let alice = f.alice.clone();
-    let migration = f.migration.clone();
-
+    let mut accrued = Uint128::zero();
     for _ in 0..12 {
-        if f.state().graduated { break }
+        let st = f.state();
+        if st.graduated { break }
+        accrued = st.lp_bonus;
         let _ = f.buy(&alice, amt(10));
     }
-    assert!(f.state().graduated, "the curve never graduated");
-    let accrued = f.state().lp_bonus;
+    let st = f.state();
+    assert!(st.migrated, "the curve never graduated");
     assert!(accrued > Uint128::zero(), "no premium was accrued during the decay");
-
-    /*
-     * The EXACT amount, because `>=` was not an assertion.
-     *
-     * The first version checked `moved >= accrued`, and mutation testing showed the
-     * premium could be dropped from the payout entirely and it still passed: the
-     * reserve alone is tens of INJ and the premium is a couple, so the inequality
-     * holds either way. An assertion that cannot fail for the defect it names is
-     * worse than none, because it reads as coverage.
-     */
-    let reserve = f.state().inj_collected;
-    let expected = reserve + accrued;
-    let before = f.balance(&migration, QUOTE);
-    f.app
-        .execute_contract(alice.clone(), f.addr.clone(), &ExecuteMsg::Graduate {}, &[])
-        .unwrap();
-    let moved = f.balance(&migration, QUOTE) - before;
-
+    assert_eq!(st.lp_bonus, Uint128::zero(), "the premium was not moved into the pool");
     assert_eq!(
-        moved, expected,
-        "the pool received {moved}, expected reserve {reserve} plus premium {accrued}"
+        f.balance(&f.addr, QUOTE),
+        st.pool_quote + st.creator_owed + st.platform_owed,
+        "quote held does not equal pool plus fees: premium stranded or leaked"
     );
-    assert_eq!(f.state().lp_bonus, Uint128::zero(), "the premium was paid but not cleared");
     f.assert_solvent();
 }
 
@@ -929,7 +958,8 @@ fn a_buy_that_fills_the_curve_during_the_opening_window_refunds_in_full() {
      * asks whether it holds ENOUGH, never whether it holds too much.
      */
     let st = f.state();
-    let accounted = st.inj_collected + st.platform_owed + st.creator_owed + st.lp_bonus;
+    let accounted =
+        st.inj_collected + st.platform_owed + st.creator_owed + st.lp_bonus + st.pool_quote;
     let held = f.balance(&f.addr, QUOTE);
     assert_eq!(
         held, accounted,

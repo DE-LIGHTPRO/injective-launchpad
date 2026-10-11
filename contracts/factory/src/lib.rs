@@ -282,8 +282,11 @@ pub struct Config {
     pub curve_code_id: u64,
     /// Fee recipient for every launch this factory creates.
     pub platform: Addr,
-    /// Where graduated liquidity is sent.
-    pub migration_target: Addr,
+    /// An admin handover in progress. Set by `UpdateAdmin`, completed only when the
+    /// named address sends `AcceptAdmin`, so a typo cannot hand the factory to an
+    /// address nobody controls (the same reason Pons uses `Ownable2Step`).
+    #[serde(default)]
+    pub pending_admin: Option<Addr>,
     /// What buyers pay with, normally "inj".
     pub quote_denom: String,
 }
@@ -443,7 +446,6 @@ pub struct InstantiateMsg {
     pub admin: String,
     pub curve_code_id: u64,
     pub platform: String,
-    pub migration_target: String,
     pub quote_denom: String,
     /// Decimals of the default quote. INJ is 18; Injective's USDC is 6, which is the
     /// reason this is asked for rather than assumed. Defaults to 18 so an existing
@@ -500,7 +502,10 @@ pub enum ExecuteMsg {
     /// Point the factory at a new curve code id. Only affects future launches;
     /// existing ones are immutable by construction.
     SetCurveCodeId { code_id: u64 },
+    /// Propose a new admin. Takes effect only when that address sends `AcceptAdmin`.
     UpdateAdmin { admin: String },
+    /// Complete a handover proposed by `UpdateAdmin`. Only the proposed address may.
+    AcceptAdmin {},
 }
 
 #[cw_serde]
@@ -557,7 +562,7 @@ pub fn instantiate(
             admin: deps.api.addr_validate(&msg.admin)?,
             curve_code_id: msg.curve_code_id,
             platform: deps.api.addr_validate(&msg.platform)?,
-            migration_target: deps.api.addr_validate(&msg.migration_target)?,
+            pending_admin: None,
             quote_denom: msg.quote_denom.clone(),
         },
     )?;
@@ -662,9 +667,24 @@ pub fn execute(
             if info.sender != cfg.admin {
                 return Err(FactoryError::Unauthorised);
             }
-            cfg.admin = deps.api.addr_validate(&admin)?;
+            let proposed = deps.api.addr_validate(&admin)?;
+            cfg.pending_admin = Some(proposed.clone());
             CONFIG.save(deps.storage, &cfg)?;
-            Ok(Response::new().add_attribute("action", "update_admin"))
+            Ok(Response::new()
+                .add_attribute("action", "propose_admin")
+                .add_attribute("pending_admin", proposed.as_str()))
+        }
+        ExecuteMsg::AcceptAdmin {} => {
+            let mut cfg = CONFIG.load(deps.storage)?;
+            if cfg.pending_admin.as_ref() != Some(&info.sender) {
+                return Err(FactoryError::Unauthorised);
+            }
+            cfg.admin = info.sender.clone();
+            cfg.pending_admin = None;
+            CONFIG.save(deps.storage, &cfg)?;
+            Ok(Response::new()
+                .add_attribute("action", "accept_admin")
+                .add_attribute("admin", info.sender.as_str()))
         }
     }
 }
@@ -672,7 +692,7 @@ pub fn execute(
 #[allow(clippy::too_many_arguments)]
 fn create_launch(
     deps: DepsMut,
-    env: Env,
+    _env: Env,
     info: MessageInfo,
     denom: String,
     fee_bps: u16,
@@ -846,7 +866,6 @@ fn create_launch(
         quote_denom: quote.clone(),
         creator: info.sender.to_string(),
         platform: cfg.platform.to_string(),
-        migration_target: cfg.migration_target.to_string(),
         lp_reserve,
         // Policy, not a parameter: the creator never had a say and the curve stores
         // the figure it was launched under, so a later change to this constant does
@@ -859,7 +878,16 @@ fn create_launch(
     // custodian of launch funds even for one block.
     let sub = SubMsg::reply_on_success(
         WasmMsg::Instantiate {
-            admin: Some(env.contract.address.to_string()),
+            /*
+             * NO ADMIN, so the curve can never be migrated by anyone.
+             *
+             * This was `Some(factory)`. The factory has no migrate message, but the
+             * factory itself is upgradeable by whoever holds ITS wasm admin, and new
+             * factory code could then migrate every curve it administers to code that
+             * drains the reserve and the locked pool. "Liquidity locked forever" is
+             * only true if no key on earth can replace the code holding it.
+             */
+            admin: None,
             code_id: cfg.curve_code_id,
             msg: to_json_binary(&init)?,
             funds: vec![Coin {

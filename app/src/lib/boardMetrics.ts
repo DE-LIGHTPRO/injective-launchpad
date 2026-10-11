@@ -1,4 +1,4 @@
-import { spotPrice, type CurveConfig, type CurveState } from './curve.ts';
+import { launchSpotPrice, type CurveConfig, type CurveState, type PoolReserves } from './curve.ts';
 
 /**
  * The figures a launchpad board is read by, and the ones this chain cannot produce.
@@ -31,8 +31,13 @@ const ONE = 10n ** 18n;
  * Returned in quote base units. Converting to USD needs a price for the quote asset,
  * which is a separate measurement with its own provenance.
  */
-export function marketCap(config: CurveConfig, state: CurveState, totalSupply: bigint): bigint {
-  const price = spotPrice(config, state, ONE);
+export function marketCap(
+  config: CurveConfig,
+  state: CurveState,
+  totalSupply: bigint,
+  pool: PoolReserves | null = null,
+): bigint {
+  const price = launchSpotPrice(config, state, pool, ONE);
   // Scaled through the token unit so an 18-decimal supply times an 18-decimal price
   // does not come back 18 orders of magnitude out.
   return (price * totalSupply) / ONE;

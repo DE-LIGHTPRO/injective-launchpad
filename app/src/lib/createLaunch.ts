@@ -164,7 +164,7 @@ export function validateLaunch(input: LaunchInput): void {
     /*
      * Allowed by the contract and almost always a mistake. With no reserve the
      * curve can sell out exactly and graduate with quote but no token side, so
-     * the migrated pool has nothing to pair. The contract tolerates it because an
+     * the locked pool has nothing to pair. The contract tolerates it because an
      * operator may have a reason; the form should not produce it silently.
      */
     throw new LaunchInputError(

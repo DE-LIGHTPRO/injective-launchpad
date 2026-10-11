@@ -28,6 +28,8 @@ export const DEMO_HEIGHT = 12_000_000;
 
 const ONE = 1_000_000_000_000_000_000n;
 const amt = (n: bigint) => n * ONE;
+/** The 200M of the fixed 1B supply held back from the curve for the pool. */
+const DEMO_LP_RESERVE = amt(200_000_000n);
 
 export function isDemoMode(): boolean {
   return process.env.NEXT_PUBLIC_DEMO === '1';
@@ -142,6 +144,17 @@ export function demoDetail(id: number): LaunchDetail | null {
     config: BASE_CONFIG,
     state,
     migrated: state.graduated,
+    /*
+     * Seeded exactly as the contract seeds it: the reserve against the 200M held back
+     * plus whatever the curve never sold. So the graduated demo launch trades against a
+     * pool with real arithmetic instead of showing a dead panel.
+     */
+    pool: state.graduated
+      ? {
+          quote: state.injCollected,
+          tokens: DEMO_LP_RESERVE + (BASE_CONFIG.curveSupply - state.tokensSold),
+        }
+      : null,
     platformOwed: 0n,
     creatorOwed: 0n,
     platformPaid: 0n,

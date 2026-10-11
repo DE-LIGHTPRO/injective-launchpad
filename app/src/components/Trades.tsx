@@ -206,7 +206,7 @@ export async function Trades({
                     {t.injOut !== null && <> for {fmt(t.injOut, quote.decimals, 4)} {quote.label}</>}
                   </>
                 )}
-                {t.kind === 'graduate' && <>liquidity migrated</>}
+                {t.kind === 'graduate' && <>locked pool seeded</>}
                 {t.who && <span style={{ color: 'var(--text-faint)' }}> · {short(t.who)}</span>}
               </span>
               <a

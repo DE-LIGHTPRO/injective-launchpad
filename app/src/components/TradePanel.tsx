@@ -8,11 +8,16 @@ import {
   IMPACT_WARN_BPS,
   IMPACT_SEVERE_BPS,
   quoteSell,
+  poolQuoteBuy,
+  poolQuoteSell,
+  poolBuyImpactBps,
+  poolSellImpactBps,
   parseAmount,
   fmt,
   CurveError,
   type CurveConfig,
   type CurveState,
+  type PoolReserves,
 } from '@/lib/curve';
 import { NETWORK } from '@/lib/config';
 import { isDemoMode } from '@/lib/demo';
@@ -75,6 +80,7 @@ export function TradePanel({
   quoteAsset,
   tradingClosed,
   rules = NO_RULES,
+  pool = null,
 }: {
   config: CurveConfig;
   state: CurveState;
@@ -93,7 +99,14 @@ export function TradePanel({
   denom: string;
   tradingClosed: boolean;
   rules?: LaunchRules;
+  /**
+   * The locked pool, once the launch has graduated. Present means every quote on this
+   * panel prices against the pool instead of the curve, through the same contract and
+   * the same Buy / Sell messages, so nothing else about trading changes for the user.
+   */
+  pool?: PoolReserves | null;
 }) {
+  const inPool = pool !== null && pool.quote > 0n && pool.tokens > 0n;
   const [side, setSide] = useState<Side>('buy');
   const [input, setInput] = useState('');
 
@@ -134,7 +147,7 @@ export function TradePanel({
     return () => {
       live = false;
     };
-  }, [account, denom]);
+  }, [account, denom, quoteAsset.denom]);
 
   const held = side === 'buy' ? quoteBal : tokenBal;
   const [slippagePct, setSlippagePct] = useState(1);
@@ -155,7 +168,7 @@ export function TradePanel({
    * after a launch opens is the minute people are actually looking at it.
    */
   const [now, setNow] = useState(() => Math.floor(Date.now() / 1000));
-  const notOpenYet = !tradingClosed && !buyingOpenAt(rules, now);
+  const notOpenYet = !tradingClosed && !inPool && !buyingOpenAt(rules, now);
   useEffect(() => {
     if (!notOpenYet) return;
     const id = window.setInterval(() => setNow(Math.floor(Date.now() / 1000)), 1_000);
@@ -174,9 +187,10 @@ export function TradePanel({
    * can watch it fall, which is the behaviour the rule is trying to encourage.
    */
   const baseBps = Number(config.feeBps);
-  const chargedBps = feeBpsAt(rules, baseBps, now);
+  // Launch-window rules expire with the curve: the pool charges its base fee only.
+  const chargedBps = inPool ? baseBps : feeBpsAt(rules, baseBps, now);
   const premiumBps = Math.max(0, chargedBps - baseBps);
-  const decaySecondsLeft = secondsUntilBaseFee(rules, now);
+  const decaySecondsLeft = inPool ? null : secondsUntilBaseFee(rules, now);
   useEffect(() => {
     if (decaySecondsLeft === null) return;
     const id = window.setInterval(() => setNow(Math.floor(Date.now() / 1000)), 1_000);
@@ -213,6 +227,23 @@ export function TradePanel({
        * tax, and applying it to sells would punish an early buyer for changing their
        * mind.
        */
+      if (inPool && pool) {
+        return side === 'buy'
+          ? (() => {
+              const q = poolQuoteBuy(pool, config.feeBps, raw);
+              return {
+                ok: true,
+                side: 'buy',
+                fee: q.fee,
+                tokensOut: q.tokensOut,
+                injInAfterFee: q.quoteInAfterFee,
+                refund: 0n,
+                graduates: false,
+                earlyFeePremium: 0n,
+              } as const;
+            })()
+          : ({ ok: true, side: 'sell', ...poolQuoteSell(pool, config.feeBps, raw) } as const);
+      }
       const premium =
         side === 'buy' && premiumBps > 0 ? (raw * BigInt(premiumBps)) / 10_000n : 0n;
       const forCurve = raw - premium;
@@ -230,7 +261,7 @@ export function TradePanel({
         error: e instanceof CurveError ? e.message : 'That amount could not be quoted.',
       } as const;
     }
-  }, [input, side, config, state, premiumBps, inputDecimals]);
+  }, [input, side, config, state, premiumBps, inputDecimals, inPool, pool]);
 
   /**
    * Send the trade.
@@ -302,13 +333,18 @@ export function TradePanel({
       // Both sides, because the exit is where a holder is most exposed and it had
       // no disclosure at all: selling a quarter of a position on this shape pays
       // about 25% below spot, against the 1% fee shown beside it.
+      if (inPool && pool) {
+        return quote.side === 'buy'
+          ? poolBuyImpactBps(pool, config.feeBps, raw)
+          : poolSellImpactBps(pool, config.feeBps, raw);
+      }
       return quote.side === 'buy'
         ? priceImpactBps(config, state, raw)
         : sellPriceImpactBps(config, state, raw);
     } catch {
       return null;
     }
-  }, [quote, config, state, input]);
+  }, [quote, config, state, input, inPool, pool, inputDecimals]);
 
   if (notOpenYet && rules.tradeStart !== null) {
     return (
@@ -341,13 +377,14 @@ export function TradePanel({
     );
   }
 
-  if (tradingClosed) {
+  if (tradingClosed && !inPool) {
     return (
       <div className="card">
-        <h2>Trading closed</h2>
+        <h2>Graduating</h2>
         <p className="note">
-          This launch has graduated. Its liquidity has moved on, so the curve no longer accepts
-          buys or sells.
+          This launch reached its target. Its reserve is being seeded into the locked pool,
+          which happens in the same transaction as the graduating buy, so this state should
+          clear on the next refresh.
         </p>
       </div>
     );

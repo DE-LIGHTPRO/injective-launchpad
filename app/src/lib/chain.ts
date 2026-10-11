@@ -22,7 +22,7 @@ function openedAtSeconds(raw: unknown): number | null {
 }
 import { NETWORK, getLcdUrl, getFactoryAddress } from './config.ts';
 import { isDemoMode, demoLaunches, demoDetail, demoDetailByCurve, demoTrades, DEMO_HEIGHT } from './demo.ts';
-import type { CurveConfig, CurveState } from './curve.ts';
+import type { CurveConfig, CurveState, PoolReserves } from './curve.ts';
 
 /** Shape stored by the factory for each launch. */
 export interface Launch {
@@ -53,7 +53,6 @@ interface RawCurveContractConfig {
   quote_denom: string;
   creator: string;
   platform: string;
-  migration_target: string;
   lp_reserve: string;
   creator_fee_share_bps: number;
   curve: RawCurveConfig;
@@ -69,6 +68,9 @@ interface RawCurveState {
   /** Optional: a curve deployed before lifetime counters existed omits them. */
   platform_paid?: string;
   creator_paid?: string;
+  /** Locked-pool reserves; zero until graduation seeds them. */
+  pool_quote?: string;
+  pool_tokens?: string;
 }
 
 export class ChainError extends Error {
@@ -194,6 +196,11 @@ export interface LaunchDetail {
   config: CurveConfig;
   state: CurveState;
   migrated: boolean;
+  /**
+   * The locked pool, once graduation has seeded it; `null` before. Nothing can
+   * withdraw it, so it is the liquidity every holder exits into after graduation.
+   */
+  pool: PoolReserves | null;
   platformOwed: bigint;
   creatorOwed: bigint;
   /** Lifetime paid out. Zero on a curve too old to have counted. */
@@ -239,6 +246,9 @@ export async function getLaunchDetail(curveAddress: string): Promise<LaunchDetai
       openedAtSeconds((cfg as { opened_at?: unknown }).opened_at),
     ),
     migrated: st.migrated,
+    pool: st.migrated
+      ? { quote: BigInt(st.pool_quote ?? '0'), tokens: BigInt(st.pool_tokens ?? '0') }
+      : null,
     platformOwed: BigInt(st.platform_owed),
     creatorOwed: BigInt(st.creator_owed),
     /*
@@ -383,6 +393,14 @@ export async function listTrades(curve: string, limit = 20): Promise<Trade[]> {
     if (tx.code && tx.code !== 0) continue;
     for (const ev of tx.events ?? []) {
       if (ev.type !== 'wasm') continue;
+      /*
+       * Only THIS curve's events. The search matches any transaction that touched the
+       * curve, and a transaction can carry wasm events from other contracts too (a
+       * router, or a second curve), whose buys would otherwise be shown here as this
+       * launch's.
+       */
+      const addr = ev.attributes?.find((x) => x.key === '_contract_address')?.value;
+      if (addr !== undefined && addr !== curve) continue;
       const t = tradeFromAttrs(ev.attributes ?? []);
       if (!t || t.kind === 'other') continue;
       out.push({ ...t, height: Number(tx.height ?? 0), txHash: tx.txhash ?? '' });

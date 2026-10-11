@@ -1,7 +1,10 @@
 use cosmwasm_std::{
     coins, entry_point, to_json_binary, BankMsg, Binary, Deps, DepsMut, Env, MessageInfo, Response,
     StdResult, Uint128, Timestamp};
-use launchpad_math::{quote_buy, quote_sell, spot_price, CurveConfig};
+use launchpad_math::{
+    pool_quote_buy, pool_quote_sell, pool_spot_price, quote_buy, quote_sell, spot_price,
+    CurveConfig,
+};
 
 use crate::error::ContractError;
 use crate::msg::{
@@ -37,7 +40,7 @@ pub fn instantiate(
     // The launch is funded here and only here: the creator sends the entire
     // sellable supply up front. Nothing mints later, so the curve can never
     // promise tokens it does not hold.
-    // Sellable supply plus the LP allocation held back for migration.
+    // Sellable supply plus the LP allocation held back for the locked pool.
     let required = msg.curve.curve_supply.checked_add(msg.lp_reserve)?;
     let sent = cw_utils::must_pay(&info, &msg.denom)?;
     if sent != required {
@@ -53,7 +56,6 @@ pub fn instantiate(
         quote_denom: msg.quote_denom,
         creator: deps.api.addr_validate(&msg.creator)?,
         platform: deps.api.addr_validate(&msg.platform)?,
-        migration_target: deps.api.addr_validate(&msg.migration_target)?,
         lp_reserve: msg.lp_reserve,
         creator_fee_share_bps: msg.creator_fee_share_bps,
         curve: msg.curve,
@@ -134,8 +136,15 @@ fn exec_buy(
     };
     let cfg = CONFIG.load(deps.storage)?;
     let mut state = STATE.load(deps.storage)?;
+    if state.migrated {
+        return exec_pool_buy(deps, info, cfg, state, buyer, min_tokens_out);
+    }
     if state.graduated {
-        return Err(ContractError::Graduated);
+        // Target met but the pool not yet seeded. Unreachable through `Buy`, which
+        // seeds in the same transaction, but a curve must never be stuck here.
+        seed_pool(&cfg, &mut state)?;
+        STATE.save(deps.storage, &state)?;
+        return exec_pool_buy(deps, info, cfg, state, buyer, min_tokens_out);
     }
 
     /*
@@ -251,8 +260,13 @@ fn exec_buy(
     state.platform_owed = state.platform_owed.checked_add(platform_cut)?;
     state.lp_bonus = state.lp_bonus.checked_add(premium)?;
     let total_refund = q.refund.checked_add(carried_refund)?;
+    // Graduation is atomic with the buy that reaches the target. There is no window
+    // in which the curve is closed and the pool not yet open, and no second
+    // transaction anyone has to remember to send.
+    let mut seeded = None;
     if q.graduates {
         state.graduated = true;
+        seeded = Some(seed_pool(&cfg, &mut state)?);
     }
     STATE.save(deps.storage, &state)?;
 
@@ -263,13 +277,20 @@ fn exec_buy(
         })
         .add_attribute("action", "buy")
         .add_attribute("buyer", buyer.as_str())
-        .add_attribute("buyer", info.sender.as_str())
+        // Was a second "buyer" attribute: two values under one key, so an indexer
+        // reading the first saw the recipient and one reading the last saw the payer.
+        .add_attribute("sender", info.sender.as_str())
         .add_attribute("inj_in", inj_in)
         .add_attribute("tokens_out", q.tokens_out)
         .add_attribute("fee", q.fee)
         .add_attribute("refund", total_refund)
         .add_attribute("early_fee_premium", premium)
         .add_attribute("graduated", q.graduates.to_string());
+    if let Some((quote, tokens)) = seeded {
+        res = res
+            .add_attribute("pool_quote", quote)
+            .add_attribute("pool_tokens", tokens);
+    }
 
     // Partial fill: hand back whatever the curve could not absorb, including the part
     // the first quote already found unabsorbable. Reporting only `q.refund` would
@@ -292,8 +313,12 @@ fn exec_sell(
 ) -> Result<Response, ContractError> {
     let cfg = CONFIG.load(deps.storage)?;
     let mut state = STATE.load(deps.storage)?;
-    if state.graduated {
-        return Err(ContractError::Graduated);
+    if state.graduated && !state.migrated {
+        seed_pool(&cfg, &mut state)?;
+        STATE.save(deps.storage, &state)?;
+    }
+    if state.migrated {
+        return exec_pool_sell(deps, info, cfg, state, min_inj_out);
     }
 
     let tokens_in = cw_utils::must_pay(&info, &cfg.denom)?;
@@ -351,71 +376,124 @@ fn exec_sell(
         .add_attribute("fee", q.fee))
 }
 
-fn exec_graduate(deps: DepsMut, _env: Env) -> Result<Response, ContractError> {
-    let cfg = CONFIG.load(deps.storage)?;
-    let mut state = STATE.load(deps.storage)?;
-
+/// Move the curve's reserve and every token it still holds into the locked pool.
+///
+/// Returns what was seeded, for the event. The quote side is the curve's reserve plus
+/// the opening-fee premium; the token side is the held-back LP allocation plus
+/// whatever the curve never sold. Fees owed are NOT part of it: they stay claimable.
+///
+/// Price continuity, measured on the fixed curve: the curve's last spot price is
+/// about 4.11e-7 INJ per token and the pool opens at about 4.11e-7, because the
+/// 1.073B virtual / 200M reserve split was chosen so the two meet.
+fn seed_pool(cfg: &Config, state: &mut State) -> Result<(Uint128, Uint128), ContractError> {
     if state.migrated {
         return Err(ContractError::Graduated);
     }
-    // Defensive: allow graduation on the target being met even if no buy
-    // happened to set the flag.
     if !state.graduated && state.inj_collected < cfg.curve.graduation_target {
         return Err(ContractError::NotReady);
     }
-
-    /*
-     * The opening-fee premium leaves with the reserve, because that is the only thing
-     * that makes the rule real. An accumulator that fills and is never paid out is a
-     * tax collected for nobody, and it would sit in the contract looking like solvency.
-     */
-    // Captured before the state is zeroed below, because the attribute is emitted
-    // after that and would otherwise report zero on every graduation: a figure that is
-    // always the same is indistinguishable from a feature that never ran.
-    let premium = state.lp_bonus;
-    let reserve = state.inj_collected.checked_add(premium)?;
-    // The held-back LP allocation, plus anything the curve never managed to
-    // sell. The LP allocation is what guarantees the migrated pool has a
-    // token side at all, even when the curve sells out exactly.
+    let quote = state.inj_collected.checked_add(state.lp_bonus)?;
     let unsold = cfg
         .curve
         .curve_supply
         .checked_sub(state.tokens_sold)
         .unwrap_or(Uint128::zero());
-    let leftover = cfg.lp_reserve.checked_add(unsold)?;
+    let tokens = cfg.lp_reserve.checked_add(unsold)?;
 
     state.graduated = true;
     state.migrated = true;
     state.inj_collected = Uint128::zero();
     state.lp_bonus = Uint128::zero();
     state.tokens_sold = cfg.curve.curve_supply;
+    state.pool_quote = quote;
+    state.pool_tokens = tokens;
+    Ok((quote, tokens))
+}
+
+fn exec_graduate(deps: DepsMut, _env: Env) -> Result<Response, ContractError> {
+    let cfg = CONFIG.load(deps.storage)?;
+    let mut state = STATE.load(deps.storage)?;
+    // Captured first: `seed_pool` zeroes it, and an attribute that always reads zero
+    // is indistinguishable from a feature that never ran.
+    let premium = state.lp_bonus;
+    let (quote, tokens) = seed_pool(&cfg, &mut state)?;
+    STATE.save(deps.storage, &state)?;
+    Ok(Response::new()
+        .add_attribute("action", "graduate")
+        .add_attribute("pool_quote", quote)
+        .add_attribute("early_fee_premium", premium)
+        .add_attribute("pool_tokens", tokens))
+}
+
+/// A buy against the locked pool. No wallet cap, start time or opening premium:
+/// those are launch-window rules and, as on Pons, they expire with the curve.
+fn exec_pool_buy(
+    deps: DepsMut,
+    info: MessageInfo,
+    cfg: Config,
+    mut state: State,
+    buyer: cosmwasm_std::Addr,
+    min_tokens_out: Uint128,
+) -> Result<Response, ContractError> {
+    let quote_in = cw_utils::must_pay(&info, &cfg.quote_denom)?;
+    let q = pool_quote_buy(&state.pool(), cfg.curve.fee_bps, quote_in)?;
+    if q.tokens_out < min_tokens_out {
+        return Err(ContractError::Slippage { got: q.tokens_out, min: min_tokens_out });
+    }
+    let (creator_cut, platform_cut) = split_fee(q.fee, cfg.creator_fee_share_bps);
+    state.pool_quote = state.pool_quote.checked_add(q.quote_in_after_fee)?;
+    state.pool_tokens = state.pool_tokens.checked_sub(q.tokens_out)?;
+    state.creator_owed = state.creator_owed.checked_add(creator_cut)?;
+    state.platform_owed = state.platform_owed.checked_add(platform_cut)?;
     STATE.save(deps.storage, &state)?;
 
-    let mut res = Response::new()
-        .add_attribute("action", "graduate")
-        .add_attribute("reserve_moved", reserve)
-        // Reported separately so the figure is auditable: a pool that received more
-        // than the curve collected should say where the difference came from.
-        .add_attribute("early_fee_premium", premium)
-        .add_attribute("tokens_moved", leftover)
-        .add_attribute("target", cfg.migration_target.as_str());
+    Ok(Response::new()
+        .add_message(BankMsg::Send {
+            to_address: buyer.to_string(),
+            amount: coins(q.tokens_out.u128(), &cfg.denom),
+        })
+        .add_attribute("action", "buy")
+        .add_attribute("venue", "pool")
+        .add_attribute("buyer", buyer.as_str())
+        .add_attribute("sender", info.sender.as_str())
+        .add_attribute("inj_in", quote_in)
+        .add_attribute("tokens_out", q.tokens_out)
+        .add_attribute("fee", q.fee)
+        .add_attribute("refund", Uint128::zero())
+        .add_attribute("graduated", "false"))
+}
 
-    // Fees are deliberately left behind for ClaimFees; only the reserve and
-    // the unsold tokens become liquidity.
-    if !reserve.is_zero() {
-        res = res.add_message(BankMsg::Send {
-            to_address: cfg.migration_target.to_string(),
-            amount: coins(reserve.u128(), &cfg.quote_denom),
-        });
+fn exec_pool_sell(
+    deps: DepsMut,
+    info: MessageInfo,
+    cfg: Config,
+    mut state: State,
+    min_inj_out: Uint128,
+) -> Result<Response, ContractError> {
+    let tokens_in = cw_utils::must_pay(&info, &cfg.denom)?;
+    let q = pool_quote_sell(&state.pool(), cfg.curve.fee_bps, tokens_in)?;
+    if q.inj_out < min_inj_out {
+        return Err(ContractError::Slippage { got: q.inj_out, min: min_inj_out });
     }
-    if !leftover.is_zero() {
-        res = res.add_message(BankMsg::Send {
-            to_address: cfg.migration_target.to_string(),
-            amount: coins(leftover.u128(), &cfg.denom),
-        });
-    }
+    let gross = q.inj_out.checked_add(q.fee)?;
+    let (creator_cut, platform_cut) = split_fee(q.fee, cfg.creator_fee_share_bps);
+    state.pool_quote = state.pool_quote.checked_sub(gross)?;
+    state.pool_tokens = state.pool_tokens.checked_add(tokens_in)?;
+    state.creator_owed = state.creator_owed.checked_add(creator_cut)?;
+    state.platform_owed = state.platform_owed.checked_add(platform_cut)?;
+    STATE.save(deps.storage, &state)?;
 
-    Ok(res)
+    Ok(Response::new()
+        .add_message(BankMsg::Send {
+            to_address: info.sender.to_string(),
+            amount: coins(q.inj_out.u128(), &cfg.quote_denom),
+        })
+        .add_attribute("action", "sell")
+        .add_attribute("venue", "pool")
+        .add_attribute("seller", info.sender.as_str())
+        .add_attribute("tokens_in", tokens_in)
+        .add_attribute("inj_out", q.inj_out)
+        .add_attribute("fee", q.fee))
 }
 
 fn exec_claim_fees(deps: DepsMut) -> Result<Response, ContractError> {
@@ -465,6 +543,16 @@ pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
         QueryMsg::SimulateBuy { inj_in } => {
             let cfg = CONFIG.load(deps.storage)?;
             let state = STATE.load(deps.storage)?;
+            if state.migrated {
+                let q = pool_quote_buy(&state.pool(), cfg.curve.fee_bps, inj_in)
+                    .map_err(|e| cosmwasm_std::StdError::generic_err(e.to_string()))?;
+                return to_json_binary(&SimulateBuyResponse {
+                    tokens_out: q.tokens_out,
+                    fee: q.fee,
+                    refund: Uint128::zero(),
+                    graduates: false,
+                });
+            }
             let curve: CurveConfig = (&cfg.curve).into();
             let q = quote_buy(&curve, &state.curve_state(), inj_in)
                 .map_err(|e| cosmwasm_std::StdError::generic_err(e.to_string()))?;
@@ -478,6 +566,11 @@ pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
         QueryMsg::SimulateSell { tokens_in } => {
             let cfg = CONFIG.load(deps.storage)?;
             let state = STATE.load(deps.storage)?;
+            if state.migrated {
+                let q = pool_quote_sell(&state.pool(), cfg.curve.fee_bps, tokens_in)
+                    .map_err(|e| cosmwasm_std::StdError::generic_err(e.to_string()))?;
+                return to_json_binary(&SimulateSellResponse { inj_out: q.inj_out, fee: q.fee });
+            }
             let curve: CurveConfig = (&cfg.curve).into();
             let q = quote_sell(&curve, &state.curve_state(), tokens_in)
                 .map_err(|e| cosmwasm_std::StdError::generic_err(e.to_string()))?;
@@ -489,6 +582,11 @@ pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
         QueryMsg::SpotPrice { one_token } => {
             let cfg = CONFIG.load(deps.storage)?;
             let state = STATE.load(deps.storage)?;
+            if state.migrated {
+                let price = pool_spot_price(&state.pool(), one_token)
+                    .map_err(|e| cosmwasm_std::StdError::generic_err(e.to_string()))?;
+                return to_json_binary(&SpotPriceResponse { price });
+            }
             let curve: CurveConfig = (&cfg.curve).into();
             let price = spot_price(&curve, &state.curve_state(), one_token)
                 .map_err(|e| cosmwasm_std::StdError::generic_err(e.to_string()))?;
@@ -554,7 +652,6 @@ mod tests {
             quote_denom: QUOTE.to_string(),
             creator: who.to_string(),
             platform: who.to_string(),
-            migration_target: who.to_string(),
             lp_reserve: Uint128::new(LP_RESERVE),
             creator_fee_share_bps: 2_000,
             curve: curve_cfg(),
@@ -578,7 +675,6 @@ mod tests {
             quote_denom: QUOTE.to_string(),
             creator: who.to_string(),
             platform: who.to_string(),
-            migration_target: who.to_string(),
             lp_reserve: Uint128::zero(),
             creator_fee_share_bps: 0,
             curve: curve_cfg(),

@@ -53,7 +53,8 @@ async function loadRows(): Promise<{ rows: Row[]; error?: string; errorDetail?: 
         const d = await getLaunchDetail(launch.curve);
         return {
           launch,
-          raised: d.state.injCollected,
+          // After graduation the reserve lives in the locked pool.
+          raised: d.pool ? d.pool.quote : d.state.injCollected,
           target: d.config.graduationTarget,
           progress: graduationProgress(d.config, d.state),
           graduated: d.state.graduated,
@@ -66,7 +67,7 @@ async function loadRows(): Promise<{ rows: Row[]; error?: string; errorDetail?: 
            * larger claim than it looks on a curve, which is why the card labels it
            * "MC" rather than calling it a valuation.
            */
-          marketCap: marketCap(d.config, d.state, d.config.curveSupply + d.lpReserve),
+          marketCap: marketCap(d.config, d.state, d.config.curveSupply + d.lpReserve, d.pool),
           feesAccrued: d.creatorOwed + d.platformOwed,
           /*
            * PAID, not owed. `feesAccrued` above is what is sitting unclaimed right

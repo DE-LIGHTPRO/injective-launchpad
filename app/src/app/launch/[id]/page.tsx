@@ -11,7 +11,7 @@ import { StatusChip } from '@/components/StatusChip';
 import { CreatorPosition } from '@/components/CreatorPosition';
 import { FeeEarnings } from '@/components/FeeEarnings';
 import { CopyButton } from '@/components/CopyButton';
-import { graduationProgress, fmt, spotPrice, maxCollectable } from '@/lib/curve';
+import { graduationProgress, fmt, launchSpotPrice, maxCollectable } from '@/lib/curve';
 import { NETWORK, isDeployed, isDevBuild } from '@/lib/config';
 import { isDemoMode } from '@/lib/demo';
 import { CurveChart } from '@/components/CurveChart';
@@ -54,11 +54,11 @@ export async function generateMetadata({
      * in a chat, where nobody can click through to check the units.
      */
     const q = await resolveQuote(detail.quoteDenom);
-    const raised = fmt(detail.state.injCollected, q.decimals, 2);
+    const raised = fmt(detail.pool ? detail.pool.quote : detail.state.injCollected, q.decimals, 2);
     const target = fmt(detail.config.graduationTarget, q.decimals, 0);
 
     const state = detail.state.graduated
-      ? 'Graduated'
+      ? `Graduated: trading against a locked pool of ${raised} ${q.label}`
       : `${pct}% to graduation, ${raised} of ${target} ${q.label} raised`;
     const description = `${state}. One-sided bonding curve on Injective: the creator supplies tokens, buyers bring ${q.label}.`;
 
@@ -157,7 +157,8 @@ export default async function LaunchPage({ params }: { params: Promise<{ id: str
     (secs) => `${new Date(secs * 1000).toISOString().slice(0, 16).replace('T', ' ')} UTC`,
   );
   const progress = graduationProgress(detail.config, detail.state);
-  const price = spotPrice(detail.config, detail.state, ONE);
+  const price = launchSpotPrice(detail.config, detail.state, detail.pool, ONE);
+  const reserveNow = detail.pool ? detail.pool.quote : detail.state.injCollected;
   const ceiling = maxCollectable(detail.config);
   const remaining = detail.config.curveSupply - detail.state.tokensSold;
 
@@ -247,9 +248,9 @@ export default async function LaunchPage({ params }: { params: Promise<{ id: str
               reserve is what backs sells on the curve, and calling it liquidity would
               borrow the word from a thing that does not exist yet.
             */}
-          <span className="k">Curve reserve</span>
+          <span className="k">{detail.pool ? 'Locked liquidity' : 'Curve reserve'}</span>
           <span className="v mono">
-            {fmt(detail.state.injCollected, quote.decimals, 2)} {quote.label}
+            {fmt(reserveNow, quote.decimals, 2)} {quote.label}
           </span>
         </div>
         <div>
@@ -331,9 +332,9 @@ export default async function LaunchPage({ params }: { params: Promise<{ id: str
               </span>
             </div>
             <div className="metric-row">
-              <span className="k">Raised</span>
+              <span className="k">{detail.pool ? 'Pool liquidity' : 'Raised'}</span>
               <span className="v mono">
-                {fmt(detail.state.injCollected, quote.decimals, 3)} {quote.label}
+                {fmt(reserveNow, quote.decimals, 3)} {quote.label}
               </span>
             </div>
             <div className="metric-row">
@@ -389,6 +390,7 @@ export default async function LaunchPage({ params }: { params: Promise<{ id: str
           symbol={symbol}
           denom={detail.denom}
           tradingClosed={detail.state.graduated}
+          pool={detail.pool}
           rules={detail.rules}
         />
 
