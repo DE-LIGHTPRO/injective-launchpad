@@ -53,9 +53,11 @@ const argv = process.argv.slice(2);
 const wantMainnet = argv.includes('--mainnet');
 const confirmedMainnet = argv.includes('--i-understand-this-is-real-money');
 
-function die(msg, hint) {
+// Every hint line is printed. This took one `hint` while callers passed up to three,
+// so the second and third lines of every multi-line refusal were silently dropped.
+function die(msg, ...hints) {
   console.error(`\n  ✗ ${msg}`);
-  if (hint) console.error(`    ${hint}`);
+  for (const hint of hints) if (hint) console.error(`    ${hint}`);
   console.error('');
   process.exit(1);
 }
@@ -428,11 +430,68 @@ async function assertPayable(label, address) {
 }
 
 step(5, 'Instantiating the factory');
+/*
+ * NO SILENT FALLBACK TO THE DEPLOY KEY.
+ *
+ * This read `INJ_PLATFORM_ADDRESS || sender`, so forgetting the variable routed the
+ * platform's share of every fee, on every launch, to a throwaway deploy key that the
+ * comments above tell you not to keep. Name the recipient on purpose, even if it is
+ * the deployer: the point is that someone chose it.
+ *
+ * There is no migration target any more. Graduated liquidity stays locked in each
+ * launch's own contract (see `launchpad_math::pool`), so no address receives it.
+ */
+const platform = process.env.INJ_PLATFORM_ADDRESS?.trim();
+if (!platform) {
+  die(
+    'INJ_PLATFORM_ADDRESS is not set.',
+    'It receives the platform share of every trading fee on every launch. Set it in',
+    'scripts/.env.local to an address you control. It may be the deployer, but say so.',
+  );
+}
+
+/*
+ * Who may UPGRADE the factory's code. Curves are created with no wasm admin and can
+ * never be migrated, but the factory itself can be, by this address. On mainnet it
+ * must be chosen explicitly: a multisig, or `none` to make the factory immutable.
+ */
+const wasmAdminRaw = process.env.INJ_FACTORY_WASM_ADMIN?.trim();
+if (netName === 'mainnet' && !wasmAdminRaw) {
+  die(
+    'INJ_FACTORY_WASM_ADMIN is not set.',
+    'On mainnet name the factory upgrade key explicitly: a multisig address, or `none`.',
+  );
+}
+const factoryWasmAdmin =
+  wasmAdminRaw === 'none' ? undefined : wasmAdminRaw || sender;
+console.log(
+  `     factory upgrade key: ${factoryWasmAdmin ?? 'none (immutable)'}` +
+    (factoryWasmAdmin === sender ? '  ← the deploy key; fine on testnet only' : ''),
+);
+
+/*
+ * Who administers the factory's CONFIG: quote allowlist, curve code id for future
+ * launches, admin handover. Distinct from the wasm upgrade key above. On mainnet this
+ * should be a multisig (a DAO DAO or cw3 multisig contract address works: the factory
+ * only compares the sender). It defaults to the deployer on testnet so that
+ * `e2e-testnet.mjs` can allowlist its own test quote.
+ */
+const configAdmin = process.env.INJ_FACTORY_ADMIN?.trim() || (netName === 'mainnet' ? '' : sender);
+if (!configAdmin) {
+  die(
+    'INJ_FACTORY_ADMIN is not set.',
+    'On mainnet name the factory admin explicitly, normally a multisig address.',
+  );
+}
+console.log(
+  `     factory admin: ${configAdmin}` +
+    (configAdmin === sender ? '  ← the deploy key; fine on testnet only' : ''),
+);
+
 const initMsg = {
-  admin: sender,
+  admin: configAdmin,
   curve_code_id: curveCodeId,
-  platform: process.env.INJ_PLATFORM_ADDRESS?.trim() || sender,
-  migration_target: process.env.INJ_MIGRATION_TARGET?.trim() || sender,
+  platform,
   quote_denom: 'inj',
   /*
    * INJ is 18 decimals. Declared rather than assumed because this number scales the
@@ -442,11 +501,14 @@ const initMsg = {
   quote_decimals: 18,
 };
 await assertPayable('platform fee recipient', initMsg.platform);
-await assertPayable('migration target', initMsg.migration_target);
+if (configAdmin !== sender) await assertPayable('factory admin', configAdmin);
+if (factoryWasmAdmin && factoryWasmAdmin !== sender) {
+  await assertPayable('factory upgrade key', factoryWasmAdmin);
+}
 
 const instantiate = MsgInstantiateContract.fromJSON({
   sender,
-  admin: sender,
+  admin: factoryWasmAdmin ?? '',
   codeId: factoryCodeId,
   label: `injective-launchpad-factory-${Date.now()}`,
   msg: initMsg,
@@ -481,6 +543,7 @@ console.log(`
 
     NEXT_PUBLIC_NETWORK=${netName}
     NEXT_PUBLIC_FACTORY_ADDRESS=${factoryAddress}
+    NEXT_PUBLIC_CURVE_CODE_IDS=${curveCodeId}
     NEXT_PUBLIC_LCD_URL=${endpoints.rest}
 
   Put them in app/.env.local, then restart the dev server.

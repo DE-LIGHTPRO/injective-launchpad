@@ -34,3 +34,17 @@ test('a bare denom is already a ticker', () => {
 test('an IBC denom is named as one rather than as a hash', () => {
   assert.ok(denomLabel('ibc/ABCDEF0123456789').startsWith('IBC/'));
 });
+
+import { quoteLabel } from './chain.ts';
+
+test('a quote prints its factory symbol, falling back to a short denom', () => {
+  const hex = 'peggy0xdAC17F958D2ee523a2206206994597C13D831ec7';
+  const quotes = [
+    { denom: hex, decimals: 6, symbol: 'USDT' },
+    { denom: 'inj', decimals: 18 },
+  ];
+  assert.equal(quoteLabel(hex, quotes), 'USDT');
+  assert.equal(quoteLabel('inj', quotes), 'INJ');
+  // No symbol known: the old short hex form, never the full address.
+  assert.equal(quoteLabel(hex, []), '0xdAC1…1ec7');
+});

@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { imageSrc } from '@/lib/tokenProfile';
+import { tickerHue } from '@/lib/priceFormat';
 import type { TokenProfile } from '@/lib/tokenProfile';
 
 /**
@@ -37,7 +38,15 @@ export function TokenLogo({
     return (
       <span
         className="token-logo token-logo-fallback"
-        style={{ width: size, height: size, fontSize: Math.round(size * 0.36) }}
+        style={
+          {
+            width: size,
+            height: size,
+            fontSize: Math.round(size * 0.36),
+            // A generated identity: the same ticker always gets the same gradient.
+            '--h': tickerHue(symbol),
+          } as React.CSSProperties
+        }
         aria-hidden="true"
       >
         {symbol.slice(0, 2).toUpperCase()}

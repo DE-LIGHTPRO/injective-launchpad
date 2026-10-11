@@ -81,7 +81,7 @@ test('the markup actually produces the selectors the rule targets', () => {
    * renders it, so a rule aimed at a class nothing uses fails here rather than
    * silently protecting nothing.
    */
-  const detail = readFileSync(join(APP, 'app', 'launch', '[id]', 'page.tsx'), 'utf8');
+  const detail = readFileSync(join(APP, 'app', 'launch', '[slug]', 'page.tsx'), 'utf8');
 
   // `.note > a` — the breadcrumb.
   assert.match(detail, /className="note"[\s\S]{0,120}<Link/, 'no link inside a .note wrapper');

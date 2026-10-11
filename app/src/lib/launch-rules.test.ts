@@ -208,6 +208,8 @@ test('the pending label says what the contract does, not what marketing would', 
   assert.equal(tone, 'muted');
   assert.equal(statusLabel('live').tone, 'accent');
   assert.equal(statusLabel('graduated').tone, 'warn');
+  // A graduated launch trades against its locked pool, so it is tradable, not a warning.
+  assert.deepEqual(statusLabel('migrated'), { text: 'in pool', tone: 'accent' });
 });
 
 test('the client fee mirrors the contract at every boundary', () => {

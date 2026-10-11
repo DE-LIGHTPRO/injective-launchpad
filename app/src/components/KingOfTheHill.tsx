@@ -54,14 +54,10 @@ export function KingOfTheHill({ rows, nowSeconds }: { rows: LaunchRow[]; nowSeco
     <section className="hill" aria-labelledby="hill-heading">
       <div className="hill-head">
         <h2 id="hill-heading">King of the hill</h2>
-        <p className="note">
-          The three largest launches still on their curve, by market cap. Updated every
-          time this page reads the chain.
-        </p>
       </div>
 
       <div className="hill-grid">
-        <Link href={`/launch/${king.id}`} className="hill-king">
+        <Link href={king.path} className="hill-king">
           <div className="hill-crown">Holds the hill</div>
           <div className="hill-id">
             <TokenLogo profile={king.profile} symbol={symbolOf(king.denom)} size={44} />
@@ -78,7 +74,7 @@ export function KingOfTheHill({ rows, nowSeconds }: { rows: LaunchRow[]; nowSeco
           </div>
           <div className="hill-cap">
             <span className="v mono">
-              {compact(BigInt(king.marketCap), king.quoteDecimals)} {denomLabel(king.quoteDenom)}
+              {compact(BigInt(king.marketCap), king.quoteDecimals)} {king.quoteLabel ?? denomLabel(king.quoteDenom)}
             </span>
             <span className="k">market cap</span>
           </div>
@@ -101,12 +97,12 @@ export function KingOfTheHill({ rows, nowSeconds }: { rows: LaunchRow[]; nowSeco
 
         <div className="hill-rest">
           {rest.map((r, i) => (
-            <Link key={r.id} href={`/launch/${r.id}`} className="hill-row">
+            <Link key={r.id} href={r.path} className="hill-row">
               <span className="hill-rank mono">{i + 2}</span>
               <TokenLogo profile={r.profile} symbol={symbolOf(r.denom)} size={28} />
               <strong>{symbolOf(r.denom)}</strong>
               <span className="v mono">
-                {compact(BigInt(r.marketCap), r.quoteDecimals)} {denomLabel(r.quoteDenom)}
+                {compact(BigInt(r.marketCap), r.quoteDecimals)} {r.quoteLabel ?? denomLabel(r.quoteDenom)}
               </span>
             </Link>
           ))}

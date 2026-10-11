@@ -5,8 +5,142 @@
 //! funded, and then unreachable forever. That is the failure mode of this
 //! pattern, so it gets tested directly.
 
-use cosmwasm_std::{coin, coins, Addr, Empty, Uint128};
-use cw_multi_test::{App, AppBuilder, BankSudo, Contract, ContractWrapper, Executor, SudoMsg};
+use cosmwasm_std::{coin, coins, Addr, Api, Binary, BlockInfo, CustomMsg, CustomQuery, Empty, Querier, Storage, Uint128};
+use cw_multi_test::{
+    App, AppBuilder, AppResponse, BankKeeper, BankSudo, Contract, ContractWrapper, CosmosRouter,
+    DistributionKeeper, Executor, FailingModule, GovFailingModule, IbcFailingModule, StakeKeeper,
+    Stargate, SudoMsg, WasmKeeper,
+};
+use cosmwasm_std::testing::{MockApi, MockStorage};
+use cosmwasm_schema::serde::de::DeserializeOwned;
+
+/// A stand-in for Injective's tokenfactory admin rule, which is the only part of that
+/// module these contracts depend on: `MsgChangeAdmin` is refused unless its sender is
+/// the denom's current admin.
+///
+/// A denom nobody has registered is treated as already administered by the factory,
+/// which models what every launch transaction does first (the creator's own
+/// `MsgChangeAdmin` to the factory), so the existing tests describe a well-formed
+/// launch. `/test.SetAdmin` registers a different admin, which is how
+/// `a_creator_who_keeps_the_mint_key_cannot_launch` models a creator who did not.
+struct TokenFactorySim;
+
+const TF_DEFAULT: &[u8] = b"tfsim:default";
+fn tf_key(denom: &str) -> Vec<u8> {
+    [b"tfsim:admin:".as_slice(), denom.as_bytes()].concat()
+}
+
+/// Decode the three length-delimited strings of a `MsgChangeAdmin`.
+fn decode_change_admin(b: &[u8]) -> (String, String, String) {
+    let mut fields = [String::new(), String::new(), String::new()];
+    let mut i = 0;
+    while i < b.len() {
+        let tag = b[i] >> 3;
+        i += 1;
+        let (mut len, mut shift) = (0usize, 0);
+        loop {
+            let byte = b[i];
+            i += 1;
+            len |= ((byte & 0x7f) as usize) << shift;
+            if byte & 0x80 == 0 {
+                break;
+            }
+            shift += 7;
+        }
+        fields[(tag - 1) as usize] = String::from_utf8(b[i..i + len].to_vec()).unwrap();
+        i += len;
+    }
+    let [a, d, n] = fields;
+    (a, d, n)
+}
+
+impl Stargate for TokenFactorySim {
+    fn execute_stargate<ExecC, QueryC>(
+        &self,
+        _api: &dyn Api,
+        storage: &mut dyn Storage,
+        _router: &dyn CosmosRouter<ExecC = ExecC, QueryC = QueryC>,
+        _block: &BlockInfo,
+        sender: Addr,
+        type_url: String,
+        value: Binary,
+    ) -> anyhow::Result<AppResponse>
+    where
+        ExecC: CustomMsg + DeserializeOwned + 'static,
+        QueryC: CustomQuery + DeserializeOwned + 'static,
+    {
+        match type_url.as_str() {
+            "/test.DefaultAdmin" => storage.set(TF_DEFAULT, value.as_slice()),
+            "/test.SetAdmin" => {
+                let (denom, admin) = String::from_utf8(value.to_vec())?
+                    .split_once('|')
+                    .map(|(a, b)| (a.to_string(), b.to_string()))
+                    .unwrap();
+                storage.set(&tf_key(&denom), admin.as_bytes());
+            }
+            factory::MSG_CHANGE_ADMIN => {
+                let (from, denom, to) = decode_change_admin(value.as_slice());
+                anyhow::ensure!(from == sender.as_str(), "signer mismatch");
+                let current = storage
+                    .get(&tf_key(&denom))
+                    .or_else(|| storage.get(TF_DEFAULT))
+                    .unwrap_or_default();
+                anyhow::ensure!(
+                    current == from.as_bytes(),
+                    "unauthorized account: {from} is not the admin of {denom}"
+                );
+                storage.set(&tf_key(&denom), to.as_bytes());
+            }
+            other => anyhow::bail!("unexpected stargate message {other}"),
+        }
+        Ok(AppResponse::default())
+    }
+
+    fn query_stargate(
+        &self,
+        _api: &dyn Api,
+        storage: &dyn Storage,
+        _querier: &dyn Querier,
+        _block: &BlockInfo,
+        path: String,
+        data: Binary,
+    ) -> anyhow::Result<Binary> {
+        anyhow::ensure!(path == "/test.Admin", "unexpected stargate query {path}");
+        let denom = String::from_utf8(data.to_vec())?;
+        let admin = storage
+            .get(&tf_key(&denom))
+            .or_else(|| storage.get(TF_DEFAULT))
+            .unwrap_or_default();
+        Ok(cosmwasm_std::to_json_binary(&String::from_utf8(admin)?)?)
+    }
+}
+
+type TestApp = App<
+    BankKeeper,
+    MockApi,
+    MockStorage,
+    FailingModule<Empty, Empty, Empty>,
+    WasmKeeper<Empty, Empty>,
+    StakeKeeper,
+    DistributionKeeper,
+    IbcFailingModule,
+    GovFailingModule,
+    TokenFactorySim,
+>;
+
+#[allow(deprecated)]
+fn stargate(type_url: &str, value: Vec<u8>) -> cosmwasm_std::CosmosMsg {
+    cosmwasm_std::CosmosMsg::Stargate { type_url: type_url.into(), value: Binary::from(value) }
+}
+
+fn denom_admin(app: &TestApp, denom: &str) -> String {
+    #[allow(deprecated)]
+    let q = cosmwasm_std::QueryRequest::Stargate {
+        path: "/test.Admin".into(),
+        data: Binary::from(denom.as_bytes().to_vec()),
+    };
+    app.wrap().query(&q).unwrap()
+}
 
 use curve::msg::{ExecuteMsg as CurveExec, QueryMsg as CurveQuery};
 use curve::state::State as CurveState;
@@ -41,7 +175,7 @@ fn factory_contract() -> Box<dyn Contract<Empty>> {
 }
 
 struct Fx {
-    app: App,
+    app: TestApp,
     factory: Addr,
     admin: Addr,
     creator: Addr,
@@ -51,13 +185,12 @@ struct Fx {
 }
 
 fn setup() -> Fx {
-    let mut app = AppBuilder::new().build(|_, _, _| {});
+    let mut app = AppBuilder::new().with_stargate(TokenFactorySim).build(|_, _, _| {});
     let api = app.api().clone();
     let admin = api.addr_make("admin");
     let creator = api.addr_make("creator");
     let buyer = api.addr_make("buyer");
     let platform = api.addr_make("platform");
-    let migration = api.addr_make("migration");
 
     app.init_modules(|router, _, storage| {
         // Fund the creator with every denom the tests launch.
@@ -95,7 +228,6 @@ fn setup() -> Fx {
                 admin: admin.to_string(),
                 curve_code_id: curve_code,
                 platform: platform.to_string(),
-                migration_target: migration.to_string(),
                 quote_denom: QUOTE.into(),
                 quote_decimals: 18,
             },
@@ -103,6 +235,8 @@ fn setup() -> Fx {
             "factory",
             None,
         )
+        .unwrap();
+    app.execute(admin.clone(), stargate("/test.DefaultAdmin", factory.as_bytes().to_vec()))
         .unwrap();
 
     Fx { app, factory, admin, creator, buyer, platform }
@@ -132,6 +266,8 @@ impl Fx {
                 &ExecuteMsg::CreateLaunch {
                     denom: denom.into(),
                     fee_bps: 100,
+                    fee_sell_bps: None,
+                    reward_route: Default::default(),
                 quote_denom: None,
                     profile,
                     rules,
@@ -170,6 +306,8 @@ impl Fx {
                     profile: Default::default(),
                     rules: Default::default(),
                     initial_buy: None,
+                    fee_sell_bps: None,
+                    reward_route: Default::default(),
                 },
                 &coins(seed_total().u128(), denom),
             )
@@ -266,6 +404,8 @@ fn wrong_seed_amount_is_refused() {
             initial_buy: None,
             denom: TOKEN.into(),
             fee_bps: 100,
+            fee_sell_bps: None,
+            reward_route: Default::default(),
                 quote_denom: None,
         },
         &coins(amt(1).u128(), TOKEN), // nowhere near the required seed
@@ -285,7 +425,7 @@ fn the_policy_curve_can_actually_reach_its_graduation_target() {
      * is stalled by design, with no caller to blame and nothing refusing it. So the
      * assertion is against the constants themselves.
      */
-    let curve: launchpad_math::CurveConfig = (&factory::fixed_curve(100, 18)).into();
+    let curve: launchpad_math::CurveConfig = (&factory::fixed_curve(100, 100, 18)).into();
     let ceiling = curve.max_collectable().expect("the policy curve cannot be priced");
     assert!(
         curve.graduation_target <= ceiling,
@@ -363,6 +503,106 @@ fn only_admin_can_repoint_the_curve_code() {
         .query_wasm_smart(f.factory.clone(), &QueryMsg::Config {})
         .unwrap();
     assert_eq!(cfg.curve_code_id, 999);
+}
+
+#[test]
+fn the_mint_key_ends_with_the_curve_where_nothing_can_use_it() {
+    // A denom admin can mint without limit, so a creator who kept it could mint after
+    // graduation and empty the locked pool. After a launch the admin must be the curve.
+    let mut f = setup();
+    f.create(TOKEN).unwrap();
+    let curve = f.launch(1).curve;
+    assert_eq!(denom_admin(&f.app, TOKEN), curve.to_string());
+}
+
+#[test]
+fn a_creator_who_keeps_the_mint_key_cannot_launch() {
+    let mut f = setup();
+    let creator = f.creator.clone();
+    // The creator still administers the denom: they skipped the handover to the factory.
+    f.app
+        .execute(
+            creator.clone(),
+            stargate("/test.SetAdmin", format!("{TOKEN}|{creator}").into_bytes()),
+        )
+        .unwrap();
+    let err = f.create(TOKEN).unwrap_err().to_string();
+    assert!(err.contains("not the admin") || err.contains("Error executing"), "{err}");
+    // Nothing was created and the seed is back with the creator: the tx reverted whole.
+    assert_eq!(f.balance(&creator, TOKEN), seed_total());
+    let all: LaunchesResponse = f
+        .app
+        .wrap()
+        .query_wasm_smart(f.factory.clone(), &QueryMsg::Launches { start_after: None, limit: None })
+        .unwrap();
+    assert!(all.launches.is_empty(), "a launch exists whose creator kept the mint key");
+
+    // Handing admin to the factory, as the app does in the same transaction, fixes it.
+    f.app
+        .execute(
+            creator.clone(),
+            stargate(
+                factory::MSG_CHANGE_ADMIN,
+                factory::encode_change_admin(creator.as_str(), TOKEN, f.factory.as_str()).to_vec(),
+            ),
+        )
+        .unwrap();
+    f.create(TOKEN).unwrap();
+    assert_eq!(denom_admin(&f.app, TOKEN), f.launch(1).curve.to_string());
+}
+
+#[test]
+fn a_launched_curve_has_no_wasm_admin_so_its_code_can_never_be_replaced() {
+    // The locked pool is only locked if no key can migrate the contract holding it.
+    let mut f = setup();
+    f.create(TOKEN).unwrap();
+    let curve = f.launch(1).curve;
+    let info = f.app.wrap().query_wasm_contract_info(curve).unwrap();
+    assert_eq!(info.admin, None, "a curve was created with a wasm admin");
+}
+
+#[test]
+fn an_admin_handover_takes_effect_only_when_accepted() {
+    let mut f = setup();
+    let (admin, creator, buyer) = (f.admin.clone(), f.creator.clone(), f.buyer.clone());
+    let cfg = |f: &Fx| -> Config {
+        f.app.wrap().query_wasm_smart(f.factory.clone(), &QueryMsg::Config {}).unwrap()
+    };
+
+    f.app
+        .execute_contract(
+            admin.clone(),
+            f.factory.clone(),
+            &ExecuteMsg::UpdateAdmin { admin: creator.to_string() },
+            &[],
+        )
+        .unwrap();
+    // Proposed, not transferred: the old admin still holds it.
+    assert_eq!(cfg(&f).admin, admin);
+    assert_eq!(cfg(&f).pending_admin, Some(creator.clone()));
+
+    // Nobody but the proposed address can complete it.
+    assert!(f
+        .app
+        .execute_contract(buyer, f.factory.clone(), &ExecuteMsg::AcceptAdmin {}, &[])
+        .is_err());
+
+    f.app
+        .execute_contract(creator.clone(), f.factory.clone(), &ExecuteMsg::AcceptAdmin {}, &[])
+        .unwrap();
+    assert_eq!(cfg(&f).admin, creator);
+    assert_eq!(cfg(&f).pending_admin, None);
+
+    // And the old admin has lost it.
+    assert!(f
+        .app
+        .execute_contract(
+            admin,
+            f.factory.clone(),
+            &ExecuteMsg::SetCurveCodeId { code_id: 7 },
+            &[]
+        )
+        .is_err());
 }
 
 // ---------------------------------------------------------------- token profile --
@@ -596,6 +836,8 @@ fn an_initial_buy_sends_the_tokens_to_the_creator_not_the_factory() {
             &ExecuteMsg::CreateLaunch {
                 denom: TOKEN.into(),
                 fee_bps: 100,
+                fee_sell_bps: None,
+                reward_route: Default::default(),
                 quote_denom: None,
                 profile: Default::default(),
                 rules: Default::default(),
@@ -648,6 +890,8 @@ fn the_attached_quote_must_match_the_declared_initial_buy() {
             &ExecuteMsg::CreateLaunch {
                 denom: TOKEN.into(),
                 fee_bps: 100,
+                fee_sell_bps: None,
+                reward_route: Default::default(),
                 quote_denom: None,
                 profile: Default::default(),
                 rules: Default::default(),
@@ -671,6 +915,8 @@ fn a_launch_with_no_initial_buy_still_takes_exactly_the_seed() {
         &ExecuteMsg::CreateLaunch {
             denom: TOKEN.into(),
             fee_bps: 100,
+            fee_sell_bps: None,
+            reward_route: Default::default(),
                 quote_denom: None,
             profile: Default::default(),
             rules: Default::default(),
@@ -696,6 +942,8 @@ fn a_third_denom_is_refused_rather_than_kept() {
         &ExecuteMsg::CreateLaunch {
             denom: TOKEN.into(),
             fee_bps: 100,
+            fee_sell_bps: None,
+            reward_route: Default::default(),
                 quote_denom: None,
             profile: Default::default(),
             rules: Default::default(),
@@ -728,6 +976,8 @@ fn the_factory_refuses_a_bad_seed_itself_rather_than_leaving_it_to_the_curve() {
         &ExecuteMsg::CreateLaunch {
             denom: TOKEN.into(),
             fee_bps: 100,
+            fee_sell_bps: None,
+            reward_route: Default::default(),
                 quote_denom: None,
             profile: Default::default(),
             rules: Default::default(),
@@ -791,10 +1041,10 @@ fn every_launch_gets_the_same_curve_and_the_same_supply() {
     f.create(TOKEN).unwrap();
 
     let cfg = curve_config(&f, 1);
-    assert_eq!(cfg.curve.virtual_inj, amt(30), "opening reserve is not policy");
+    assert_eq!(cfg.curve.virtual_inj, amt(60), "opening reserve is not policy");
     assert_eq!(cfg.curve.virtual_tokens, amt(1_073_000_000));
     assert_eq!(cfg.curve.curve_supply, amt(800_000_000));
-    assert_eq!(cfg.curve.graduation_target, amt(85));
+    assert_eq!(cfg.curve.graduation_target, amt(170));
     assert_eq!(cfg.lp_reserve, amt(200_000_000));
     assert_eq!(
         cfg.curve.curve_supply + cfg.lp_reserve,
@@ -909,6 +1159,8 @@ fn create_with_dev_buy(f: &mut Fx, denom: &str, spend: Uint128) -> Result<(), St
             &ExecuteMsg::CreateLaunch {
                 denom: denom.into(),
                 fee_bps: 100,
+                fee_sell_bps: None,
+                reward_route: Default::default(),
                 quote_denom: None,
                 profile: Default::default(),
                 rules: Default::default(),
@@ -929,7 +1181,7 @@ fn a_creator_cannot_take_the_curve_in_their_own_opening_buy() {
      * address could see the token existed. 40 INJ against this curve takes 76.31% of
      * the supply, measured.
      */
-    let err = create_with_dev_buy(&mut f, TOKEN, amt(40)).expect_err("the dev took the curve");
+    let err = create_with_dev_buy(&mut f, TOKEN, amt(80)).expect_err("the dev took the curve");
     assert!(
         err.contains("the most a creator may take"),
         "the refusal does not name the cap: {err}"
@@ -941,7 +1193,7 @@ fn a_modest_opening_buy_is_still_allowed() {
     let mut f = setup();
     // 1 INJ takes 4.28% of supply on this curve, measured: comfortably inside the cap
     // and the sort of opening position a creator actually makes.
-    create_with_dev_buy(&mut f, TOKEN, amt(1)).unwrap();
+    create_with_dev_buy(&mut f, TOKEN, amt(2)).unwrap();
     let st: CurveState = f
         .app
         .wrap()
@@ -962,12 +1214,12 @@ fn the_opening_buy_cap_is_a_share_of_the_curve_not_of_the_total_supply() {
      * other test still passed, because none used an amount between the two bases.
      *
      * 10% of the curve is 80,000,000 tokens and 10% of the total is 100,000,000. A
-     * 2.5 INJ opening buy takes 81,775,982 (measured), which sits between them.
+     * 5 INJ opening buy takes 81,775,982 (measured), which sits between them.
      *
      * The curve supply is the right basis because it is what is actually purchasable:
      * the reserve is held back for the pool and nobody can buy it.
      */
-    let between = amt(25) / Uint128::new(10);
+    let between = amt(5);
     let err = create_with_dev_buy(&mut f, TOKEN, between)
         .expect_err("a buy above 10% of the curve was accepted");
     assert!(
@@ -1009,7 +1261,7 @@ fn the_curve_shape_is_identical_at_every_quote_decimals() {
      */
     let mut outs = vec![];
     for dec in [18u8, 8, 6] {
-        let cfg: launchpad_math::CurveConfig = (&factory::fixed_curve(100, dec)).into();
+        let cfg: launchpad_math::CurveConfig = (&factory::fixed_curve(100, 100, dec)).into();
         let one_whole = Uint128::new(10u128.pow(dec as u32));
         let q = launchpad_math::quote_buy(
             &cfg,
@@ -1031,9 +1283,9 @@ fn the_curve_shape_is_identical_at_every_quote_decimals() {
 fn a_six_decimal_quote_scales_the_curve_rather_than_inheriting_eighteen() {
     // The specific disaster: 18-decimal constants against a 6-decimal quote put the
     // graduation target at 85 trillion USDC. It must be 85.
-    let c = factory::fixed_curve(100, 6);
-    assert_eq!(c.graduation_target, Uint128::new(85_000_000));
-    assert_eq!(c.virtual_inj, Uint128::new(30_000_000));
+    let c = factory::fixed_curve(100, 100, 6);
+    assert_eq!(c.graduation_target, Uint128::new(170_000_000));
+    assert_eq!(c.virtual_inj, Uint128::new(60_000_000));
     // Token amounts do NOT scale: every launched token is 18 decimals.
     assert_eq!(c.curve_supply, amt(800_000_000));
     assert_eq!(c.virtual_tokens, amt(1_073_000_000));
@@ -1050,6 +1302,8 @@ fn a_quote_nobody_allowlisted_is_refused() {
             &ExecuteMsg::CreateLaunch {
                 denom: TOKEN.into(),
                 fee_bps: 100,
+                fee_sell_bps: None,
+                reward_route: Default::default(),
                 quote_denom: Some(USDC.into()),
                 profile: Default::default(),
                 rules: Default::default(),
@@ -1070,7 +1324,7 @@ fn an_allowlisted_quote_launches_with_its_own_scale() {
         .execute_contract(
             admin,
             f.factory.clone(),
-            &ExecuteMsg::SetQuote { denom: USDC.into(), decimals: 6 },
+            &ExecuteMsg::SetQuote { denom: USDC.into(), decimals: 6, symbol: None },
             &[],
         )
         .unwrap();
@@ -1082,6 +1336,8 @@ fn an_allowlisted_quote_launches_with_its_own_scale() {
             &ExecuteMsg::CreateLaunch {
                 denom: TOKEN.into(),
                 fee_bps: 100,
+                fee_sell_bps: None,
+                reward_route: Default::default(),
                 quote_denom: Some(USDC.into()),
                 profile: Default::default(),
                 rules: Default::default(),
@@ -1095,7 +1351,7 @@ fn an_allowlisted_quote_launches_with_its_own_scale() {
     assert_eq!(cfg.quote_denom, USDC, "the curve was given the wrong quote");
     assert_eq!(
         cfg.curve.graduation_target,
-        Uint128::new(85_000_000),
+        Uint128::new(170_000_000),
         "the curve kept 18-decimal constants against a 6-decimal quote"
     );
 }
@@ -1109,7 +1365,7 @@ fn only_the_admin_curates_quotes() {
         .execute_contract(
             creator,
             f.factory.clone(),
-            &ExecuteMsg::SetQuote { denom: USDC.into(), decimals: 6 },
+            &ExecuteMsg::SetQuote { denom: USDC.into(), decimals: 6, symbol: None },
             &[],
         )
         .map_err(|e| format!("{e:#}"))
@@ -1131,7 +1387,7 @@ fn absurd_decimals_are_refused_rather_than_silently_clamped() {
         .execute_contract(
             admin,
             f.factory.clone(),
-            &ExecuteMsg::SetQuote { denom: USDC.into(), decimals: 40 },
+            &ExecuteMsg::SetQuote { denom: USDC.into(), decimals: 40, symbol: None },
             &[],
         )
         .map_err(|e| format!("{e:#}"))
@@ -1185,7 +1441,7 @@ fn the_quote_list_is_readable_and_names_its_default() {
         .execute_contract(
             admin.clone(),
             f.factory.clone(),
-            &ExecuteMsg::SetQuote { denom: USDC.into(), decimals: 6 },
+            &ExecuteMsg::SetQuote { denom: USDC.into(), decimals: 6, symbol: None },
             &[],
         )
         .unwrap();
@@ -1214,4 +1470,286 @@ fn the_quote_list_is_readable_and_names_its_default() {
         .query_wasm_smart(f.factory.clone(), &QueryMsg::Quotes {})
         .unwrap();
     assert_eq!(gone.quotes.len(), 1);
+}
+
+// ------------------------------------------------ opening buy vs launch rules --
+
+fn create_with_buy(f: &mut Fx, rules: LaunchRules, spend: Uint128) -> anyhow::Result<()> {
+    f.app
+        .execute_contract(
+            f.creator.clone(),
+            f.factory.clone(),
+            &ExecuteMsg::CreateLaunch {
+                denom: TOKEN.into(),
+                fee_bps: 100,
+                fee_sell_bps: None,
+                reward_route: Default::default(),
+                quote_denom: None,
+                profile: Default::default(),
+                rules,
+                initial_buy: Some(spend),
+            },
+            &[coin(seed_total().u128(), TOKEN), coin(spend.u128(), QUOTE)],
+        )
+        .map(|_| ())
+        .map_err(|e| anyhow::anyhow!(format!("{e:#}")))
+}
+
+#[test]
+fn an_opening_buy_with_a_future_start_is_refused_by_name() {
+    // The curve would refuse the buy inside the reply and revert the launch anyway;
+    // refusing here names the reason and fails at simulation, before signing.
+    let mut f = setup();
+    let later = f.app.block_info().time.plus_seconds(3_600);
+    let rules = LaunchRules { max_per_wallet: None, trade_start: Some(later), early_fee: None };
+    let err = create_with_buy(&mut f, rules, amt(1)).unwrap_err().to_string();
+    assert!(err.contains("start time in the future"), "{err}");
+}
+
+#[test]
+fn an_opening_buy_over_the_wallet_cap_is_refused_by_name() {
+    let mut f = setup();
+    // 1 INJ buys ~34.6M tokens on this curve; a 10M cap cannot hold it.
+    let cap = Uint128::new(10_000_000) * one();
+    let rules = LaunchRules { max_per_wallet: Some(cap), trade_start: None, early_fee: None };
+    let err = create_with_buy(&mut f, rules, amt(1)).unwrap_err().to_string();
+    assert!(err.contains("over this launch's wallet cap"), "{err}");
+}
+
+#[test]
+fn an_opening_buy_within_the_rules_still_launches() {
+    let mut f = setup();
+    let cap = Uint128::new(100_000_000) * one();
+    let rules = LaunchRules { max_per_wallet: Some(cap), trade_start: None, early_fee: None };
+    create_with_buy(&mut f, rules, amt(1)).unwrap();
+    assert!(f.balance(&f.creator.clone(), TOKEN) > Uint128::zero());
+}
+
+#[test]
+fn a_quote_can_carry_a_display_symbol_and_bad_ones_are_refused() {
+    // Peggy and erc20 denoms are hex addresses; without a symbol the UI prints the hex.
+    let mut f = setup();
+    let admin = f.admin.clone();
+    let hex = "peggy0xdAC17F958D2ee523a2206206994597C13D831ec7";
+    for bad in ["", "WAY-TOO-LONG-SYMBOL", "US DT", "<b>"] {
+        assert!(f
+            .app
+            .execute_contract(
+                admin.clone(),
+                f.factory.clone(),
+                &ExecuteMsg::SetQuote { denom: hex.into(), decimals: 6, symbol: Some(bad.into()) },
+                &[],
+            )
+            .is_err(), "symbol {bad:?} was accepted");
+    }
+    f.app
+        .execute_contract(
+            admin.clone(),
+            f.factory.clone(),
+            &ExecuteMsg::SetQuote { denom: hex.into(), decimals: 6, symbol: Some("USDT".into()) },
+            &[],
+        )
+        .unwrap();
+    let q: factory::QuotesResponse =
+        f.app.wrap().query_wasm_smart(f.factory.clone(), &QueryMsg::Quotes {}).unwrap();
+    let usdt = q.quotes.iter().find(|x| x.denom == hex).unwrap();
+    assert_eq!(usdt.symbol.as_deref(), Some("USDT"));
+    // A later SetQuote without a symbol keeps the one already set.
+    f.app
+        .execute_contract(
+            admin,
+            f.factory.clone(),
+            &ExecuteMsg::SetQuote { denom: hex.into(), decimals: 6, symbol: None },
+            &[],
+        )
+        .unwrap();
+    let q: factory::QuotesResponse =
+        f.app.wrap().query_wasm_smart(f.factory.clone(), &QueryMsg::Quotes {}).unwrap();
+    assert_eq!(q.quotes.iter().find(|x| x.denom == hex).unwrap().symbol.as_deref(), Some("USDT"));
+}
+
+/*
+ * ---------------------------------------------------------------------------
+ * Per-side fees and reward routing.
+ * ---------------------------------------------------------------------------
+ */
+
+fn create_with_fees(
+    f: &mut Fx,
+    denom: &str,
+    buy: u16,
+    sell: Option<u16>,
+    route: curve::state::RewardRoute,
+) -> Result<(), String> {
+    f.app
+        .execute_contract(
+            f.creator.clone(),
+            f.factory.clone(),
+            &ExecuteMsg::CreateLaunch {
+                denom: denom.into(),
+                fee_bps: buy,
+                fee_sell_bps: sell,
+                reward_route: route,
+                quote_denom: None,
+                profile: Default::default(),
+                rules: Default::default(),
+                initial_buy: None,
+            },
+            &coins(seed_total().u128(), denom),
+        )
+        .map(|_| ())
+        .map_err(|e| format!("{e:#}"))
+}
+
+#[test]
+fn each_side_of_the_fee_is_capped_on_its_own() {
+    let mut f = setup();
+    /*
+     * Capped separately because entry and exit are not the same decision. A creator
+     * pricing them differently is making a real choice about their own launch; what
+     * they cannot do is make it unsellable, which an uncapped sell fee does without
+     * ever looking like a block.
+     */
+    let err = create_with_fees(&mut f, TOKEN, 1_001, None, Default::default())
+        .expect_err("a buy fee over 10% was accepted");
+    assert!(err.contains("buy fee is 1001 bps"), "unexpected: {err}");
+
+    let err = create_with_fees(&mut f, TOKEN, 100, Some(1_001), Default::default())
+        .expect_err("a sell fee over 10% was accepted");
+    assert!(err.contains("sell fee is 1001 bps"), "unexpected: {err}");
+}
+
+#[test]
+fn the_two_sides_can_differ_and_either_may_be_free() {
+    let mut f = setup();
+    // Free entry, taxed exit is a legitimate shape and must not be refused.
+    create_with_fees(&mut f, TOKEN, 0, Some(1_000), Default::default()).unwrap();
+    let c = curve_config(&f, 1);
+    assert_eq!(c.curve.fee_bps, 0);
+    assert_eq!(c.curve.fee_sell_bps, 1_000);
+}
+
+#[test]
+fn an_absent_sell_fee_mirrors_the_buy_fee() {
+    let mut f = setup();
+    // What every launch charged before the sides could differ, so an older caller
+    // that sends no sell fee still gets the symmetric launch it expects.
+    create_with_fees(&mut f, TOKEN, 250, None, Default::default()).unwrap();
+    let c = curve_config(&f, 1);
+    assert_eq!(c.curve.fee_bps, 250);
+    assert_eq!(c.curve.fee_sell_bps, 250);
+}
+
+#[test]
+fn routing_to_the_pool_sends_the_creators_share_there_instead() {
+    let mut f = setup();
+    create_with_fees(&mut f, TOKEN, 100, None, curve::state::RewardRoute::Pool).unwrap();
+    let curve = f.launch(1).curve;
+
+    f.app
+        .execute_contract(
+            f.buyer.clone(),
+            curve.clone(),
+            &CurveExec::Buy { min_tokens_out: Uint128::zero(), recipient: None },
+            &coins(amt(10).u128(), QUOTE),
+        )
+        .unwrap();
+
+    let st: CurveState = f
+        .app
+        .wrap()
+        .query_wasm_smart(curve, &CurveQuery::State {})
+        .unwrap();
+
+    /*
+     * The creator is owed NOTHING and the pool holds their share. The platform's cut
+     * is untouched: a creator routes their own portion, not the launchpad's.
+     */
+    assert!(st.creator_owed.is_zero(), "the creator was still credited");
+    assert!(!st.platform_owed.is_zero(), "the platform's share was routed away too");
+    assert!(!st.lp_bonus.is_zero(), "nothing reached the pool");
+    assert_eq!(
+        st.lp_bonus + st.platform_owed,
+        amt(10) / Uint128::new(100),
+        "the routed share plus the platform's is not the whole 1% fee"
+    );
+}
+
+#[test]
+fn the_default_route_still_credits_the_creator() {
+    let mut f = setup();
+    // The absence of a choice must behave exactly as the launchpad did before the
+    // choice existed, or every older caller silently changes behaviour.
+    create_with_fees(&mut f, TOKEN, 100, None, Default::default()).unwrap();
+    let curve = f.launch(1).curve;
+    f.app
+        .execute_contract(
+            f.buyer.clone(),
+            curve.clone(),
+            &CurveExec::Buy { min_tokens_out: Uint128::zero(), recipient: None },
+            &coins(amt(10).u128(), QUOTE),
+        )
+        .unwrap();
+    let st: CurveState = f.app.wrap().query_wasm_smart(curve, &CurveQuery::State {}).unwrap();
+    assert!(!st.creator_owed.is_zero(), "the creator was not credited");
+    assert!(st.lp_bonus.is_zero(), "the pool took a share it was not routed");
+}
+
+#[test]
+fn a_sell_is_charged_the_sell_fee_not_the_buy_fee() {
+    let mut f = setup();
+    /*
+     * ADDED AFTER A MUTATION ESCAPED. Every test above asserts the two fees are
+     * STORED separately; none made a sell, so swapping the sell quote back to
+     * `fee_bps` left the whole suite green while the feature did nothing.
+     *
+     * Asymmetric on purpose, and at the extremes: free entry, 10% exit. If the sell
+     * were charged the buy fee the seller would pay nothing, which is the exact
+     * shape of the escaped mutation.
+     */
+    create_with_fees(&mut f, TOKEN, 0, Some(1_000), Default::default()).unwrap();
+    let curve = f.launch(1).curve;
+
+    f.app
+        .execute_contract(
+            f.buyer.clone(),
+            curve.clone(),
+            &CurveExec::Buy { min_tokens_out: Uint128::zero(), recipient: None },
+            &coins(amt(10).u128(), QUOTE),
+        )
+        .unwrap();
+
+    let after_buy: CurveState = f
+        .app
+        .wrap()
+        .query_wasm_smart(curve.clone(), &CurveQuery::State {})
+        .unwrap();
+    // Free entry: the buy must have skimmed nothing at all.
+    assert!(
+        after_buy.creator_owed.is_zero() && after_buy.platform_owed.is_zero(),
+        "a 0 bps buy charged a fee"
+    );
+
+    let held = f.balance(&f.buyer, TOKEN);
+    assert!(!held.is_zero(), "the buy produced no tokens");
+
+    f.app
+        .execute_contract(
+            f.buyer.clone(),
+            curve.clone(),
+            &CurveExec::Sell { min_inj_out: Uint128::zero() },
+            &coins(held.u128(), TOKEN),
+        )
+        .unwrap();
+
+    let after_sell: CurveState = f
+        .app
+        .wrap()
+        .query_wasm_smart(curve, &CurveQuery::State {})
+        .unwrap();
+    let charged = after_sell.creator_owed + after_sell.platform_owed;
+    assert!(
+        !charged.is_zero(),
+        "the sell was charged the 0 bps BUY fee instead of the 10% sell fee"
+    );
 }

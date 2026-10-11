@@ -15,6 +15,7 @@
 import { EMPTY_PROFILE } from './tokenProfile.ts';
 import { NO_RULES } from './launchRules.ts';
 import { quoteBuy, type CurveConfig, type CurveState } from './curve.ts';
+import { fixedCurveFor, DEFAULT_FEE_BPS } from './launchLimits.ts';
 import type { Launch, LaunchDetail, Trade } from './chain.ts';
 
 /**
@@ -28,17 +29,23 @@ export const DEMO_HEIGHT = 12_000_000;
 
 const ONE = 1_000_000_000_000_000_000n;
 const amt = (n: bigint) => n * ONE;
+/** The 200M of the fixed 1B supply held back from the curve for the pool. */
+const DEMO_LP_RESERVE = amt(200_000_000n);
 
 export function isDemoMode(): boolean {
   return process.env.NEXT_PUBLIC_DEMO === '1';
 }
 
+/*
+ * The real shape, not a restatement of it. This file's whole claim is that the demo
+ * is "internally consistent and the curve chart is a true projection of the config",
+ * which stops being true the moment the config here is a copy: it still held the
+ * pre-rescale 30/85 curve after launches moved to 60/170, so the demo board drew a
+ * steeper curve than any launch has.
+ */
 const BASE_CONFIG: CurveConfig = {
-  virtualInj: amt(30n),
-  virtualTokens: amt(1_073_000_000n),
-  curveSupply: amt(800_000_000n),
-  graduationTarget: amt(85n),
-  feeBps: 100n,
+  ...fixedCurveFor(18),
+  feeBps: BigInt(DEFAULT_FEE_BPS),
 };
 
 interface Seed {
@@ -142,6 +149,17 @@ export function demoDetail(id: number): LaunchDetail | null {
     config: BASE_CONFIG,
     state,
     migrated: state.graduated,
+    /*
+     * Seeded exactly as the contract seeds it: the reserve against the 200M held back
+     * plus whatever the curve never sold. So the graduated demo launch trades against a
+     * pool with real arithmetic instead of showing a dead panel.
+     */
+    pool: state.graduated
+      ? {
+          quote: state.injCollected,
+          tokens: DEMO_LP_RESERVE + (BASE_CONFIG.curveSupply - state.tokensSold),
+        }
+      : null,
     platformOwed: 0n,
     creatorOwed: 0n,
     platformPaid: 0n,

@@ -249,8 +249,15 @@ export async function connect(name: WalletName): Promise<WalletAccount> {
      *
      * The retry is what proves it worked. Treating `suggestChain` as success without
      * re-enabling would report a connection that never happened.
+     *
+     * The wording is matched loosely on purpose. Current Keplr says "There is no
+     * modular chain info for injective-888" for a chain it does not carry; the earlier
+     * pattern looked for "no chain info" as one phrase and the word "modular" in the
+     * middle made it miss, so a testnet connect fell through to the generic "wallet did
+     * not open" instead of offering to add the chain. Observed on Keplr against
+     * injective-888.
      */
-    if (/no chain info|unknown chain|not supported|chain.*not.*found/i.test(msg)) {
+    if (/no (modular )?chain info|modular chain info|unknown chain|not supported|chain.*not.*found/i.test(msg)) {
       if (typeof ext.experimentalSuggestChain === 'function') {
         try {
           await ext.experimentalSuggestChain(chainSuggestion());
@@ -398,6 +405,33 @@ export async function denomBalance(address: string, denom: string): Promise<bigi
   const raw = json.balance?.amount;
   if (typeof raw !== 'string' || !/^[0-9]+$/.test(raw)) return null;
   return BigInt(raw);
+}
+
+/**
+ * Every denom the account holds, in one bank query, as a denom to base-unit map.
+ *
+ * `null` is not an empty wallet, for the same reason `denomBalance` returns one: an
+ * unreachable LCD must not read as "you hold nothing". One request rather than one per
+ * launch, because the portfolio cross-references these against the board's launches and
+ * a per-denom fan-out would be dozens of requests for a wallet in a handful of them.
+ */
+export async function allBalances(address: string): Promise<Record<string, bigint> | null> {
+  const url = `${getLcdUrl()}/cosmos/bank/v1beta1/balances/${address}?pagination.limit=1000`;
+  let res: Response;
+  try {
+    res = await fetch(url, { headers: { accept: 'application/json' } });
+  } catch {
+    return null;
+  }
+  if (!res.ok) return null;
+  const json = (await res.json()) as { balances?: Array<{ denom?: string; amount?: string }> };
+  const out: Record<string, bigint> = {};
+  for (const b of json.balances ?? []) {
+    if (typeof b.denom === 'string' && typeof b.amount === 'string' && /^[0-9]+$/.test(b.amount)) {
+      out[b.denom] = BigInt(b.amount);
+    }
+  }
+  return out;
 }
 
 /** Shorten an address for display without hiding which account it is. */

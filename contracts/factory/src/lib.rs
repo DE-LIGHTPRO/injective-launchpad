@@ -8,15 +8,15 @@
 
 use cosmwasm_schema::{cw_serde, QueryResponses};
 use cosmwasm_std::{
-    entry_point, to_json_binary, Addr, Binary, Coin, Deps, DepsMut, Env, MessageInfo, Order, Reply,
-    Response, StdResult, SubMsg, Uint128, WasmMsg, coins};
+    entry_point, to_json_binary, Addr, Binary, Coin, CosmosMsg, Deps, DepsMut, Env, MessageInfo,
+    Order, Reply, Response, StdResult, SubMsg, Uint128, WasmMsg, coins};
 use cw_storage_plus::{Item, Map};
 use launchpad_math::CurveConfig;
 use thiserror::Error;
 
 use curve::msg::ExecuteMsg as CurveExecuteMsg;
 use curve::msg::InstantiateMsg as CurveInstantiateMsg;
-use curve::state::{CurveConfigStored, LaunchRules};
+use curve::state::{RewardRoute, CurveConfigStored, LaunchRules};
 
 /// Every launch has exactly this many tokens, and a creator cannot change it.
 ///
@@ -63,6 +63,18 @@ pub const FIXED_TOTAL_SUPPLY: Uint128 = Uint128::new(1_000_000_000_000_000_000_0
 /// both sides nothing. That is their launch to make uneconomic.
 pub const CREATOR_FEE_SHARE_BPS: u16 = 7_000;
 
+/// The most a launch may charge per side, in bps.
+///
+/// 1_000 is 10%, applied to the buy fee and the sell fee independently, so a creator
+/// can price entry and exit differently and neither can exceed a tenth. Above that a
+/// "fee" stops being a cost and becomes a trap, and the launchpad's name is on every
+/// launch whether or not it set the number.
+///
+/// Zero is allowed on either side. A creator who wants free entry and a taxed exit,
+/// or the reverse, is making a real choice about their own launch; what they cannot
+/// do is make it unsellable.
+pub const MAX_FEE_BPS: u16 = 1_000;
+
 /// The curve every launch gets. Shape is policy; only the fee on it is chosen.
 ///
 /// WHY THE CREATOR DOES NOT PICK THIS. Fixing the supply was supposed to make market
@@ -105,8 +117,8 @@ pub const CREATOR_FEE_SHARE_BPS: u16 = 7_000;
 /// quote unit buys 34,612,903,225,806,451,612,903,226 tokens at 18, 8 and 6 decimals
 /// alike. Getting it wrong instead puts 1 USDC at 35,766,666,666,666 tokens, out by
 /// twelve orders of magnitude.
-pub const CURVE_VIRTUAL_QUOTE_WHOLE: u128 = 30;
-pub const CURVE_GRADUATION_QUOTE_WHOLE: u128 = 85;
+pub const CURVE_VIRTUAL_QUOTE_WHOLE: u128 = 60;
+pub const CURVE_GRADUATION_QUOTE_WHOLE: u128 = 170;
 
 /// Token-denominated, and therefore NOT scaled by the quote.
 ///
@@ -140,7 +152,7 @@ pub fn lp_reserve() -> Uint128 {
 /// Only the two QUOTE-denominated figures scale. `virtual_tokens` and `curve_supply`
 /// are token amounts and every token this factory launches is 18 decimals, so they
 /// are the same on every launch whatever it is priced in.
-pub fn fixed_curve(fee_bps: u16, quote_decimals: u8) -> CurveConfigStored {
+pub fn fixed_curve(fee_bps: u16, fee_sell_bps: u16, quote_decimals: u8) -> CurveConfigStored {
     let unit = quote_unit(quote_decimals);
     CurveConfigStored {
         virtual_inj: unit * Uint128::new(CURVE_VIRTUAL_QUOTE_WHOLE),
@@ -148,6 +160,7 @@ pub fn fixed_curve(fee_bps: u16, quote_decimals: u8) -> CurveConfigStored {
         curve_supply: Uint128::new(CURVE_SUPPLY),
         graduation_target: unit * Uint128::new(CURVE_GRADUATION_QUOTE_WHOLE),
         fee_bps,
+        fee_sell_bps,
     }
 }
 
@@ -235,8 +248,26 @@ pub enum FactoryError {
         max: cosmwasm_std::Uint128,
     },
 
+    /// The opening buy runs inside the launch transaction, so a start time in the
+    /// future would make the curve refuse it and revert the whole launch after signing.
+    #[error("an opening buy cannot be combined with a start time in the future: the curve would refuse it")]
+    InitialBuyBeforeStart,
+
+    #[error("quote symbol {symbol:?} must be 1 to 12 letters, digits, dot or dash")]
+    BadQuoteSymbol { symbol: String },
+
+    /// The opening buy is charged against the creator's own wallet cap, like anyone's.
+    #[error("the opening buy would deliver {tokens} tokens, over this launch's wallet cap of {cap}")]
+    InitialBuyOverCap {
+        tokens: cosmwasm_std::Uint128,
+        cap: cosmwasm_std::Uint128,
+    },
+
     #[error("token profile field `{field}` is invalid: {reason}")]
     BadProfile { field: String, reason: String },
+
+    #[error("the {side} fee is {got} bps; the maximum is {max}")]
+    FeeTooHigh { side: String, got: u16, max: u16 },
 
     #[error("quote asset `{denom}` is not allowed on this launchpad")]
     QuoteNotAllowed { denom: String },
@@ -282,8 +313,11 @@ pub struct Config {
     pub curve_code_id: u64,
     /// Fee recipient for every launch this factory creates.
     pub platform: Addr,
-    /// Where graduated liquidity is sent.
-    pub migration_target: Addr,
+    /// An admin handover in progress. Set by `UpdateAdmin`, completed only when the
+    /// named address sends `AcceptAdmin`, so a typo cannot hand the factory to an
+    /// address nobody controls (the same reason Pons uses `Ownable2Step`).
+    #[serde(default)]
+    pub pending_admin: Option<Addr>,
     /// What buyers pay with, normally "inj".
     pub quote_denom: String,
 }
@@ -432,6 +466,10 @@ pub const NEXT_ID: Item<u64> = Item::new("next_id");
 /// open quote field means a launch priced in a worthless token the creator minted
 /// that morning, which would read on the board exactly like a real pair.
 pub const QUOTES: Map<&str, u8> = Map::new("quotes");
+/// A display symbol per quote, set by the admin alongside the decimals. Optional: an
+/// Injective peggy or erc20 denom is a hex address (mainnet USDT is
+/// `peggy0xdAC17F95…`), and without this the UI can only print the address.
+pub const QUOTE_SYMBOLS: Map<&str, String> = Map::new("quote_symbols");
 const PENDING: Item<Pending> = Item::new("pending");
 
 fn default_quote_decimals() -> u8 {
@@ -443,7 +481,6 @@ pub struct InstantiateMsg {
     pub admin: String,
     pub curve_code_id: u64,
     pub platform: String,
-    pub migration_target: String,
     pub quote_denom: String,
     /// Decimals of the default quote. INJ is 18; Injective's USDC is 6, which is the
     /// reason this is asked for rather than assumed. Defaults to 18 so an existing
@@ -459,9 +496,16 @@ pub enum ExecuteMsg {
     /// curve contract, so the factory never holds launch funds itself.
     CreateLaunch {
         denom: String,
-        /// The trading fee, in bps. The only number about the curve a creator picks:
-        /// its shape is `fixed_curve()` and is identical on every launch in a quote.
+        /// The BUY fee, in bps. Capped at `MAX_FEE_BPS`.
         fee_bps: u16,
+        /// The SELL fee, in bps. Capped separately, because entry and exit are not
+        /// the same decision. Absent means the same as the buy fee, which is what
+        /// every launch charged before the sides could differ.
+        #[serde(default)]
+        fee_sell_bps: Option<u16>,
+        /// Where the creator's share of each fee goes.
+        #[serde(default)]
+        reward_route: RewardRoute,
         /// What buyers pay with. Must be allowlisted; absent means the factory's
         /// default, which is what every launch before this field existed used.
         #[serde(default)]
@@ -493,14 +537,24 @@ pub enum ExecuteMsg {
     /// thing in this contract's configuration, so it must be fixable without a
     /// redeploy. Launches already created keep the curve they were given, because the
     /// curve is stored on the child at instantiate and nothing here can reach it.
-    SetQuote { denom: String, decimals: u8 },
+    SetQuote {
+        denom: String,
+        decimals: u8,
+        /// What the UI prints for this quote, e.g. "USDT". Absent keeps any symbol
+        /// already set; 1 to 12 letters, digits, dot or dash.
+        #[serde(default)]
+        symbol: Option<String>,
+    },
     /// Stop new launches using a quote asset. Existing launches are untouched: their
     /// curve and their reserve are on the curve contract and keep working.
     RemoveQuote { denom: String },
     /// Point the factory at a new curve code id. Only affects future launches;
     /// existing ones are immutable by construction.
     SetCurveCodeId { code_id: u64 },
+    /// Propose a new admin. Takes effect only when that address sends `AcceptAdmin`.
     UpdateAdmin { admin: String },
+    /// Complete a handover proposed by `UpdateAdmin`. Only the proposed address may.
+    AcceptAdmin {},
 }
 
 #[cw_serde]
@@ -530,6 +584,9 @@ pub enum QueryMsg {
 pub struct QuoteAsset {
     pub denom: String,
     pub decimals: u8,
+    /// Display symbol, when the admin set one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub symbol: Option<String>,
 }
 
 #[cw_serde]
@@ -557,7 +614,7 @@ pub fn instantiate(
             admin: deps.api.addr_validate(&msg.admin)?,
             curve_code_id: msg.curve_code_id,
             platform: deps.api.addr_validate(&msg.platform)?,
-            migration_target: deps.api.addr_validate(&msg.migration_target)?,
+            pending_admin: None,
             quote_denom: msg.quote_denom.clone(),
         },
     )?;
@@ -590,6 +647,8 @@ pub fn execute(
         ExecuteMsg::CreateLaunch {
             denom,
             fee_bps,
+            fee_sell_bps,
+            reward_route,
             quote_denom,
             profile,
             rules,
@@ -600,12 +659,14 @@ pub fn execute(
             info,
             denom,
             fee_bps,
+            fee_sell_bps,
+            reward_route,
             quote_denom,
             profile,
             rules,
             initial_buy,
         ),
-        ExecuteMsg::SetQuote { denom, decimals } => {
+        ExecuteMsg::SetQuote { denom, decimals, symbol } => {
             let cfg = CONFIG.load(deps.storage)?;
             if info.sender != cfg.admin {
                 return Err(FactoryError::Unauthorised);
@@ -623,6 +684,14 @@ pub fn execute(
                 return Err(FactoryError::BadQuoteDenom);
             }
             QUOTES.save(deps.storage, &denom, &decimals)?;
+            if let Some(sym) = &symbol {
+                let ok = (1..=12).contains(&sym.len())
+                    && sym.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-');
+                if !ok {
+                    return Err(FactoryError::BadQuoteSymbol { symbol: sym.clone() });
+                }
+                QUOTE_SYMBOLS.save(deps.storage, &denom, sym)?;
+            }
             Ok(Response::new()
                 .add_attribute("action", "set_quote")
                 .add_attribute("denom", denom)
@@ -642,6 +711,7 @@ pub fn execute(
                 return Err(FactoryError::CannotRemoveDefaultQuote { denom });
             }
             QUOTES.remove(deps.storage, &denom);
+            QUOTE_SYMBOLS.remove(deps.storage, &denom);
             Ok(Response::new()
                 .add_attribute("action", "remove_quote")
                 .add_attribute("denom", denom))
@@ -662,9 +732,24 @@ pub fn execute(
             if info.sender != cfg.admin {
                 return Err(FactoryError::Unauthorised);
             }
-            cfg.admin = deps.api.addr_validate(&admin)?;
+            let proposed = deps.api.addr_validate(&admin)?;
+            cfg.pending_admin = Some(proposed.clone());
             CONFIG.save(deps.storage, &cfg)?;
-            Ok(Response::new().add_attribute("action", "update_admin"))
+            Ok(Response::new()
+                .add_attribute("action", "propose_admin")
+                .add_attribute("pending_admin", proposed.as_str()))
+        }
+        ExecuteMsg::AcceptAdmin {} => {
+            let mut cfg = CONFIG.load(deps.storage)?;
+            if cfg.pending_admin.as_ref() != Some(&info.sender) {
+                return Err(FactoryError::Unauthorised);
+            }
+            cfg.admin = info.sender.clone();
+            cfg.pending_admin = None;
+            CONFIG.save(deps.storage, &cfg)?;
+            Ok(Response::new()
+                .add_attribute("action", "accept_admin")
+                .add_attribute("admin", info.sender.as_str()))
         }
     }
 }
@@ -676,6 +761,8 @@ fn create_launch(
     info: MessageInfo,
     denom: String,
     fee_bps: u16,
+    fee_sell_bps: Option<u16>,
+    reward_route: RewardRoute,
     quote_denom: Option<String>,
     profile: TokenProfile,
     rules: LaunchRules,
@@ -714,7 +801,23 @@ fn create_launch(
         .may_load(deps.storage, &quote)?
         .ok_or_else(|| FactoryError::QuoteNotAllowed { denom: quote.clone() })?;
 
-    let curve = fixed_curve(fee_bps, quote_decimals);
+    /*
+     * BOTH SIDES CAPPED, INDEPENDENTLY. A creator pricing entry and exit differently
+     * is making a real choice about their own launch; what they cannot do is make it
+     * unsellable, which an uncapped sell fee does without ever looking like a block.
+     */
+    let sell_bps = fee_sell_bps.unwrap_or(fee_bps);
+    for (side, bps) in [("buy", fee_bps), ("sell", sell_bps)] {
+        if bps > MAX_FEE_BPS {
+            return Err(FactoryError::FeeTooHigh {
+                side: side.to_string(),
+                got: bps,
+                max: MAX_FEE_BPS,
+            });
+        }
+    }
+
+    let curve = fixed_curve(fee_bps, sell_bps, quote_decimals);
     let lp_reserve = lp_reserve();
     let parsed: CurveConfig = (&curve).into();
     parsed.validate()?;
@@ -760,6 +863,20 @@ fn create_launch(
             return Err(FactoryError::InitialBuyTooLarge {
                 tokens: quote.tokens_out,
                 max: ceiling,
+            });
+        }
+        /*
+         * Refused here, by name, rather than by the curve inside the reply. Both would
+         * revert the launch; only this one tells the creator why, and only this one
+         * fails at simulation, before a wallet prompt, instead of after signing.
+         */
+        if !rules.buying_open_at(env.block.time) {
+            return Err(FactoryError::InitialBuyBeforeStart);
+        }
+        if rules.would_exceed_cap(Uint128::zero(), quote.tokens_out) {
+            return Err(FactoryError::InitialBuyOverCap {
+                tokens: quote.tokens_out,
+                cap: rules.max_per_wallet.unwrap_or_default(),
             });
         }
     }
@@ -846,12 +963,12 @@ fn create_launch(
         quote_denom: quote.clone(),
         creator: info.sender.to_string(),
         platform: cfg.platform.to_string(),
-        migration_target: cfg.migration_target.to_string(),
         lp_reserve,
         // Policy, not a parameter: the creator never had a say and the curve stores
         // the figure it was launched under, so a later change to this constant does
         // not re-price a launch that is already running.
         creator_fee_share_bps: CREATOR_FEE_SHARE_BPS,
+        reward_route,
         curve,
     };
 
@@ -859,7 +976,16 @@ fn create_launch(
     // custodian of launch funds even for one block.
     let sub = SubMsg::reply_on_success(
         WasmMsg::Instantiate {
-            admin: Some(env.contract.address.to_string()),
+            /*
+             * NO ADMIN, so the curve can never be migrated by anyone.
+             *
+             * This was `Some(factory)`. The factory has no migrate message, but the
+             * factory itself is upgradeable by whoever holds ITS wasm admin, and new
+             * factory code could then migrate every curve it administers to code that
+             * drains the reserve and the locked pool. "Liquidity locked forever" is
+             * only true if no key on earth can replace the code holding it.
+             */
+            admin: None,
             code_id: cfg.curve_code_id,
             msg: to_json_binary(&init)?,
             funds: vec![Coin {
@@ -880,7 +1006,7 @@ fn create_launch(
 }
 
 #[entry_point]
-pub fn reply(deps: DepsMut, _env: Env, msg: Reply) -> Result<Response, FactoryError> {
+pub fn reply(deps: DepsMut, env: Env, msg: Reply) -> Result<Response, FactoryError> {
     if msg.id != REPLY_INSTANTIATE_CURVE {
         return Err(FactoryError::UnknownReply { id: msg.id });
     }
@@ -902,10 +1028,40 @@ pub fn reply(deps: DepsMut, _env: Env, msg: Reply) -> Result<Response, FactoryEr
     LAUNCHES.save(deps.storage, pending.id, &launch)?;
     BY_DENOM.save(deps.storage, &pending.denom, &pending.id)?;
 
+    /*
+     * THE MINT KEY GOES TO THE CURVE, where no code can use it.
+     *
+     * A tokenfactory denom's admin can mint without limit. Left with the creator, that
+     * is a drain on every launch: mint a billion more after graduation and sell them
+     * into the locked pool until it is empty. Pons's tokens are fixed-supply ERC-20s
+     * with no mint function at all; this is the Injective equivalent.
+     *
+     * The creator hands admin to this factory in the launch transaction (the app's
+     * `MsgChangeAdmin` before `CreateLaunch`), and this hands it on to the curve. The
+     * curve has no message that mints and no wasm admin to give it one, so the supply
+     * is fixed for good, and anyone can verify it: the denom's authority metadata names
+     * the curve.
+     *
+     * ENFORCED BY FAILURE rather than by a query. If the creator did not hand admin to
+     * the factory, this message is refused by the tokenfactory module and the whole
+     * launch reverts, so a launch whose creator kept the mint key cannot exist.
+     */
+    #[allow(deprecated)]
+    let hand_over = CosmosMsg::Stargate {
+        type_url: MSG_CHANGE_ADMIN.to_string(),
+        value: encode_change_admin(
+            env.contract.address.as_str(),
+            &pending.denom,
+            curve.as_str(),
+        ),
+    };
+
     let mut res = Response::new()
+        .add_message(hand_over)
         .add_attribute("action", "launch_created")
         .add_attribute("id", pending.id.to_string())
-        .add_attribute("curve", curve.as_str());
+        .add_attribute("curve", curve.as_str())
+        .add_attribute("denom_admin", curve.as_str());
 
     /*
      * The creator's opening buy, spent on the curve that was just created.
@@ -938,6 +1094,31 @@ pub fn reply(deps: DepsMut, _env: Env, msg: Reply) -> Result<Response, FactoryEr
     Ok(res)
 }
 
+/// Injective tokenfactory's admin handover. Fields, from
+/// `injective/tokenfactory/v1beta1/tx.proto`: `sender = 1`, `denom = 2`, `new_admin = 3`.
+pub const MSG_CHANGE_ADMIN: &str = "/injective.tokenfactory.v1beta1.MsgChangeAdmin";
+
+/// Protobuf-encode a `MsgChangeAdmin`. Three length-delimited strings, so it is written
+/// out by hand rather than pulling a protobuf crate into the contract.
+pub fn encode_change_admin(sender: &str, denom: &str, new_admin: &str) -> Binary {
+    let mut out = Vec::with_capacity(sender.len() + denom.len() + new_admin.len() + 12);
+    for (tag, s) in [(0x0au8, sender), (0x12, denom), (0x1a, new_admin)] {
+        out.push(tag);
+        let mut n = s.len();
+        loop {
+            let byte = (n & 0x7f) as u8;
+            n >>= 7;
+            if n == 0 {
+                out.push(byte);
+                break;
+            }
+            out.push(byte | 0x80);
+        }
+        out.extend_from_slice(s.as_bytes());
+    }
+    Binary::from(out)
+}
+
 /// Dig the new contract address out of the instantiate reply. Reading the
 /// event rather than the response data keeps this working whether or not the
 /// child sets `data`.
@@ -957,6 +1138,22 @@ fn instantiated_address(msg: &Reply) -> Option<String> {
         .map(|a| a.value.clone())
 }
 
+#[cfg(test)]
+mod unit {
+    use super::*;
+
+    #[test]
+    fn change_admin_encodes_as_the_protobuf_the_chain_expects() {
+        // Hand-checked bytes: tag, length, payload, for each of the three fields.
+        let b = encode_change_admin("ab", "c", "");
+        assert_eq!(b.as_slice(), &[0x0a, 2, b'a', b'b', 0x12, 1, b'c', 0x1a, 0]);
+        // A length past 127 takes a two-byte varint.
+        let long = "x".repeat(200);
+        let b = encode_change_admin(&long, "", "");
+        assert_eq!(&b.as_slice()[..3], &[0x0a, 0xc8, 0x01]);
+    }
+}
+
 #[entry_point]
 pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
@@ -965,7 +1162,12 @@ pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
             let cfg = CONFIG.load(deps.storage)?;
             let quotes = QUOTES
                 .range(deps.storage, None, None, cosmwasm_std::Order::Ascending)
-                .map(|r| r.map(|(denom, decimals)| QuoteAsset { denom, decimals }))
+                .map(|r| {
+                    r.map(|(denom, decimals)| {
+                        let symbol = QUOTE_SYMBOLS.may_load(deps.storage, &denom).ok().flatten();
+                        QuoteAsset { denom, decimals, symbol }
+                    })
+                })
                 .collect::<Result<Vec<_>, _>>()?;
             to_json_binary(&QuotesResponse { quotes, default_denom: cfg.quote_denom })
         }

@@ -1,7 +1,16 @@
 import Link from 'next/link';
 import type { Metadata } from 'next';
-import { notFound } from 'next/navigation';
-import { getLaunch, getLaunchDetail, resolveQuote, symbolOf, short, ChainError } from '@/lib/chain';
+import { notFound, redirect } from 'next/navigation';
+import { getLaunch, listLaunches, getLaunchDetail, resolveQuote, symbolOf, short, ChainError, contractFacts } from '@/lib/chain';
+import { resolveLaunchSlug, launchPath, pathForSlug, parseLaunchRef } from '@/lib/launchPath';
+import { assessCurveCode, blocksTrading, pinnedCodeIds } from '@/lib/codeCheck';
+import { CodeCheck } from '@/components/CodeCheck';
+import { TrustBadges } from '@/components/TrustBadges';
+import { ShareRow } from '@/components/ShareRow';
+import { WatchButton } from '@/components/WatchButton';
+import { Price } from '@/components/Price';
+import { BRAND_NAME } from '@/lib/brand';
+import { ArrowLeftIcon } from '@/components/Icons';
 import { TokenLogo } from '@/components/TokenLogo';
 import { visibleLinks } from '@/lib/tokenProfile';
 import { describeRules, hasAnyRule } from '@/lib/launchRules';
@@ -11,8 +20,8 @@ import { StatusChip } from '@/components/StatusChip';
 import { CreatorPosition } from '@/components/CreatorPosition';
 import { FeeEarnings } from '@/components/FeeEarnings';
 import { CopyButton } from '@/components/CopyButton';
-import { graduationProgress, fmt, spotPrice, maxCollectable } from '@/lib/curve';
-import { NETWORK, isDeployed, isDevBuild } from '@/lib/config';
+import { graduationProgress, fmt, spotPriceWad, maxCollectable } from '@/lib/curve';
+import { NETWORK, isDeployed, isDevBuild, getPinnedCurveCodeIdsRaw } from '@/lib/config';
 import { isDemoMode } from '@/lib/demo';
 import { CurveChart } from '@/components/CurveChart';
 import { DemoBanner } from '@/components/DemoBanner';
@@ -37,14 +46,13 @@ export const dynamic = 'force-dynamic';
 export async function generateMetadata({
   params,
 }: {
-  params: Promise<{ id: string }>;
+  params: Promise<{ slug: string }>;
 }): Promise<Metadata> {
-  const { id } = await params;
-  const numericId = Number(id);
-  if (!Number.isInteger(numericId)) return { title: 'Launch' };
+  const { slug } = await params;
 
   try {
-    const launch = await getLaunch(numericId);
+    const launch = await launchForSlug(slug);
+    if (!launch) return { title: 'Launch' };
     const detail = await getLaunchDetail(launch.curve);
     const sym = symbolOf(detail.denom);
     const pct = (graduationProgress(detail.config, detail.state) * 100).toFixed(1);
@@ -54,11 +62,11 @@ export async function generateMetadata({
      * in a chat, where nobody can click through to check the units.
      */
     const q = await resolveQuote(detail.quoteDenom);
-    const raised = fmt(detail.state.injCollected, q.decimals, 2);
+    const raised = fmt(detail.pool ? detail.pool.quote : detail.state.injCollected, q.decimals, 2);
     const target = fmt(detail.config.graduationTarget, q.decimals, 0);
 
     const state = detail.state.graduated
-      ? 'Graduated'
+      ? `Graduated: trading against a locked pool of ${raised} ${q.label}`
       : `${pct}% to graduation, ${raised} of ${target} ${q.label} raised`;
     const description = `${state}. One-sided bonding curve on Injective: the creator supplies tokens, buyers bring ${q.label}.`;
 
@@ -71,10 +79,17 @@ export async function generateMetadata({
      * destination ours to vouch for.
      */
     return {
-      title: `${sym} on inj·pad`,
+      // Absolute: the layout template would otherwise append the name a second time.
+      title: { absolute: `${sym} on ${BRAND_NAME}` },
       description,
-      openGraph: { title: `${sym} on inj·pad`, description, type: 'website' },
-      twitter: { card: 'summary', title: `${sym} on inj·pad`, description },
+      /*
+       * Which of the forms a crawler should index. The redirect is deliberately
+       * temporary (see the page body), so this is what keeps `/launch/7` and
+       * `/launch/INJINU` from competing with each other in search.
+       */
+      alternates: { canonical: launchPath(launch, await listLaunches().catch(() => [launch])) },
+      openGraph: { title: `${sym} on ${BRAND_NAME}`, description, type: 'website' },
+      twitter: { card: 'summary', title: `${sym} on ${BRAND_NAME}`, description },
     };
   } catch {
     // A launch that cannot be read still needs a title, and it must not be the
@@ -85,11 +100,34 @@ export async function generateMetadata({
 
 const ONE = 1_000_000_000_000_000_000n;
 
-export default async function LaunchPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params;
-  const numericId = Number(id);
+/**
+ * The launch a path segment names, or null.
+ *
+ * USED BY THE METADATA TOO, which is why it is a function rather than inline: a share
+ * card built from a different launch than the page renders is the quietest way to
+ * mislead somebody, and two separate resolutions is exactly how that happens.
+ *
+ * The numeric fast path exists because an id needs no board read, and `/launch/<id>`
+ * is what every link shared before this change looks like.
+ */
+async function launchForSlug(slug: string) {
+  const ref = parseLaunchRef(slug);
+  if (!ref) return null;
+  if (ref.kind === 'id') {
+    try {
+      return await getLaunch(ref.id);
+    } catch {
+      return null;
+    }
+  }
+  return resolveLaunchSlug(slug, await listLaunches()).launch;
+}
 
-  if ((!isDeployed() && !isDemoMode()) || !Number.isFinite(numericId)) {
+
+export default async function LaunchPage({ params }: { params: Promise<{ slug: string }> }) {
+  const { slug } = await params;
+
+  if (!isDeployed() && !isDemoMode()) {
     return (
       <div className="empty">
         <p>No factory is configured, so this launch cannot be loaded.</p>
@@ -100,10 +138,64 @@ export default async function LaunchPage({ params }: { params: Promise<{ id: str
     );
   }
 
-  let launch, detail;
+  /*
+   * Resolved against the board, because whether a ticker is ambiguous is a property
+   * of the board rather than of the launch. One read, reused for the redirect
+   * decision and for the clash list.
+   */
+  const board = await listLaunches().catch(() => []);
+  const { launch: resolved, candidates, canonical } = resolveLaunchSlug(slug, board);
+
+  /*
+   * One launch, one URL. `/launch/7` and `/launch/injinu` both land on
+   * `/launch/INJINU`: serving the same page at three addresses splits its search
+   * ranking and makes a shared link look unlike the one in the address bar. A
+   * permanent redirect is right because the canonical form does not change back.
+   */
+  /*
+   * TEMPORARY (307), not permanent, and that is deliberate. Which slug is canonical
+   * depends on the board: `/launch/INJINU` is canonical until a second creator uses
+   * the ticker, at which point `/launch/INJINU-1` becomes canonical instead. A 308 is
+   * cached by browsers for ever, so it would promise something this page cannot keep.
+   * `rel="canonical"` in the metadata is what tells a crawler which form to index.
+   */
+  if (resolved && canonical) redirect(pathForSlug(canonical));
+
+  /*
+   * A ticker two creators both used. The page lists them instead of choosing: sending
+   * someone to a different token than the one they were linked to is the worst thing
+   * a launchpad can do with a URL, and it would look like it worked.
+   */
+  if (!resolved && candidates.length > 1) {
+    return (
+      <div className="empty">
+        <h1>{symbolOf(candidates[0].denom)}</h1>
+        <p>
+          More than one launch uses this ticker. A ticker is not unique on Injective,
+          so pick the one you meant.
+        </p>
+        <ul className="plain-list" style={{ marginTop: 'var(--space-4)' }}>
+          {candidates.map((c) => (
+            <li key={c.id}>
+              <Link href={launchPath(c, board)}>
+                {symbolOf(c.denom)} by {short(c.creator)}
+              </Link>
+            </li>
+          ))}
+        </ul>
+      </div>
+    );
+  }
+
+  if (!resolved) notFound();
+
+  let launch, detail, facts;
   try {
-    launch = await getLaunch(numericId);
-    detail = await getLaunchDetail(launch.curve);
+    launch = resolved;
+    [detail, facts] = await Promise.all([
+      getLaunchDetail(launch.curve),
+      contractFacts(launch.curve, launch.denom),
+    ]);
   } catch (e) {
     /*
      * A launch that does not exist is a 404, not a rendered error at 200.
@@ -126,6 +218,11 @@ export default async function LaunchPage({ params }: { params: Promise<{ id: str
     );
   }
 
+  const codeStatus = assessCurveCode(
+    facts ?? null,
+    pinnedCodeIds(getPinnedCurveCodeIdsRaw()),
+    launch.curve,
+  );
   const symbol = symbolOf(detail.denom);
   // Only the links that survive the scheme allowlist, so nothing hostile reaches an
   // href even if the chain the UI is pointed at never checked them.
@@ -157,31 +254,44 @@ export default async function LaunchPage({ params }: { params: Promise<{ id: str
     (secs) => `${new Date(secs * 1000).toISOString().slice(0, 16).replace('T', ' ')} UTC`,
   );
   const progress = graduationProgress(detail.config, detail.state);
-  const price = spotPrice(detail.config, detail.state, ONE);
+  // Wad precision: on a 6-decimal quote a whole-unit price floors to 0.
+  const price = spotPriceWad(detail.config, detail.state, detail.pool, ONE);
+  const reserveNow = detail.pool ? detail.pool.quote : detail.state.injCollected;
   const ceiling = maxCollectable(detail.config);
   const remaining = detail.config.curveSupply - detail.state.tokensSold;
 
   return (
     <>
       <DemoBanner />
-      <p className="note" style={{ marginBottom: 'var(--space-3)' }}>
-        <Link href="/">← launches</Link>
+      <p className="note" style={{ marginBottom: 'var(--space-4)' }}>
+        <Link href="/" className="back-link">
+          <ArrowLeftIcon size={14} /> All launches
+        </Link>
       </p>
 
-      <div className="metric-row" style={{ alignItems: 'center' }}>
-        <div className="sym-row">
-          <TokenLogo profile={launch.profile} symbol={symbol} size={48} />
-          <h1>{symbol}</h1>
+      <div className="token-head">
+        <TokenLogo profile={launch.profile} symbol={symbol} size={48} />
+        <div>
+          <div className="token-title">
+            <h1>{symbol}</h1>
+            <StatusChip
+              graduated={detail.state.graduated}
+              migrated={detail.migrated}
+              rules={detail.rules}
+            />
+          </div>
+          <div className="denom-row mono">
+            <span>{detail.denom}</span>
+            <CopyButton value={detail.denom} label="Copy" />
+          </div>
         </div>
-        <StatusChip
-          graduated={detail.state.graduated}
-          migrated={detail.migrated}
-          rules={detail.rules}
-        />
       </div>
-      <p className="sub mono" style={{ fontSize: 'var(--text-xs)', wordBreak: 'break-all' }}>
-        {detail.denom} <CopyButton value={detail.denom} label="Copy" />
-      </p>
+      <TrustBadges status={codeStatus} migrated={detail.migrated} demo={isDemoMode()} />
+      <CodeCheck status={codeStatus} curve={launch.curve} />
+      <div className="share-row" style={{ margin: 'var(--space-4) 0' }}>
+        <WatchButton id={launch.id} symbol={symbol} />
+        <ShareRow symbol={symbol} path={launchPath(launch, board)} />
+      </div>
 
       {links.length > 0 && (
         <>
@@ -232,13 +342,13 @@ export default async function LaunchPage({ params }: { params: Promise<{ id: str
         <div>
           <span className="k">Market cap</span>
           <span className="v mono">
-            {compact(marketCap(detail.config, detail.state, totalSupply), quote.decimals)} {quote.label}
+            {compact(marketCap(detail.config, detail.state, totalSupply, detail.pool), quote.decimals)} {quote.label}
           </span>
         </div>
         <div>
           <span className="k">Price</span>
           <span className="v mono">
-            {fmt(price, quote.decimals, 10)} {quote.label}
+            <Price raw={price} decimals={quote.decimals + 18} unit={quote.label} />
           </span>
         </div>
         <div>
@@ -247,9 +357,9 @@ export default async function LaunchPage({ params }: { params: Promise<{ id: str
               reserve is what backs sells on the curve, and calling it liquidity would
               borrow the word from a thing that does not exist yet.
             */}
-          <span className="k">Curve reserve</span>
+          <span className="k">{detail.pool ? 'Locked liquidity' : 'Curve reserve'}</span>
           <span className="v mono">
-            {fmt(detail.state.injCollected, quote.decimals, 2)} {quote.label}
+            {fmt(reserveNow, quote.decimals, 2)} {quote.label}
           </span>
         </div>
         <div>
@@ -268,40 +378,6 @@ export default async function LaunchPage({ params }: { params: Promise<{ id: str
           <span className="v">{ageLabel(detail.rules.openedAt, nowSeconds) ?? 'not recorded'}</span>
         </div>
       </div>
-
-      {hasAnyRule(detail.rules) && (
-        <div className="card" style={{ marginTop: 'var(--space-5)' }}>
-          <h2>Launch rules</h2>
-          <ul className="plan">
-            {ruleCopy.lines.map((l) => (
-              <li key={l}>{l}</li>
-            ))}
-          </ul>
-          {/*
-              The scope sentence is not optional decoration. These rules stop at
-              graduation, and a buyer reading a cap without that is being told
-              something about the token rather than about this curve.
-            */}
-          <p className="note">{ruleCopy.scope}</p>
-        </div>
-      )}
-
-      <CreatorPosition
-        creator={detail.creator}
-        denom={detail.denom}
-        totalSupply={(detail.config.curveSupply + detail.lpReserve).toString()}
-      />
-
-      <FeeEarnings
-        curve={launch.curve}
-        creator={detail.creator}
-        creatorOwed={detail.creatorOwed}
-        platformOwed={detail.platformOwed}
-        creatorPaid={detail.creatorPaid}
-        platformPaid={detail.platformPaid}
-        feeBps={detail.config.feeBps}
-        quote={quote}
-      />
 
       <div className="cols" style={{ marginTop: 'var(--space-5)' }}>
         <div>
@@ -327,13 +403,13 @@ export default async function LaunchPage({ params }: { params: Promise<{ id: str
             <div className="metric-row">
               <span className="k">Spot price</span>
               <span className="v mono">
-                {fmt(price, quote.decimals, 10)} {quote.label} / {symbol}
+                <Price raw={price} decimals={quote.decimals + 18} unit={`${quote.label} / ${symbol}`} />
               </span>
             </div>
             <div className="metric-row">
-              <span className="k">Raised</span>
+              <span className="k">{detail.pool ? 'Pool liquidity' : 'Raised'}</span>
               <span className="v mono">
-                {fmt(detail.state.injCollected, quote.decimals, 3)} {quote.label}
+                {fmt(reserveNow, quote.decimals, 3)} {quote.label}
               </span>
             </div>
             <div className="metric-row">
@@ -364,7 +440,11 @@ export default async function LaunchPage({ params }: { params: Promise<{ id: str
             </div>
             <div className="metric-row">
               <span className="k">Creator</span>
-              <span className="v mono">{short(detail.creator)}</span>
+              <span className="v mono">
+                <Link href={`/creator/${detail.creator}`} title="Everything this address has launched">
+                  {short(detail.creator)}
+                </Link>
+              </span>
             </div>
             <div className="metric-row">
               <span className="k">Curve contract</span>
@@ -379,25 +459,65 @@ export default async function LaunchPage({ params }: { params: Promise<{ id: str
               </span>
             </div>
           </div>
+          <div style={{ marginTop: 'var(--space-4)' }}>
+            <Trades
+              quote={quote}
+              curve={launch.curve}
+              denom={launch.denom}
+              totalSupply={(detail.config.curveSupply + detail.lpReserve).toString()}
+            />
+          </div>
         </div>
 
-        <TradePanel
-          curve={launch.curve}
-          quoteAsset={quote}
-          config={detail.config}
-          state={detail.state}
-          symbol={symbol}
+        <aside className="trade-col" aria-label="Trade">
+          <TradePanel
+            curve={launch.curve}
+            quoteAsset={quote}
+            config={detail.config}
+            state={detail.state}
+            symbol={symbol}
+            denom={detail.denom}
+            tradingClosed={detail.state.graduated}
+            pool={detail.pool}
+            rules={detail.rules}
+            blocked={blocksTrading(codeStatus)}
+          />
+          {hasAnyRule(detail.rules) && (
+            <div className="card" style={{ marginTop: 'var(--space-4)' }}>
+              <h2>Launch rules</h2>
+              <ul className="plan">
+                {ruleCopy.lines.map((l) => (
+                  <li key={l}>{l}</li>
+                ))}
+              </ul>
+              {/*
+                  The scope sentence is not optional decoration. These rules stop at
+                  graduation, and a buyer reading a cap without that is being told
+                  something about the token rather than about this curve.
+                */}
+              <p className="note">{ruleCopy.scope}</p>
+            </div>
+          )}
+        </aside>
+      </div>
+
+      <div className="stack-below">
+        <CreatorPosition
+          creator={detail.creator}
           denom={detail.denom}
-          tradingClosed={detail.state.graduated}
-          rules={detail.rules}
+          totalSupply={(detail.config.curveSupply + detail.lpReserve).toString()}
         />
 
-      <Trades
-        quote={quote}
-        curve={launch.curve}
-        denom={launch.denom}
-        totalSupply={(detail.config.curveSupply + detail.lpReserve).toString()}
-      />
+        <FeeEarnings
+          curve={launch.curve}
+          creator={detail.creator}
+          creatorOwed={detail.creatorOwed}
+          platformOwed={detail.platformOwed}
+          creatorPaid={detail.creatorPaid}
+          platformPaid={detail.platformPaid}
+          feeBps={detail.config.feeBps}
+          quote={quote}
+        />
       </div>
     </>
   );

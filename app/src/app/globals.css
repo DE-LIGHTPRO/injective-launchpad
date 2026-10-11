@@ -21,17 +21,21 @@
   color-scheme: dark;
   accent-color: var(--accent);
 
-  /* Surfaces, darkest to lightest */
-  --bg: #070910;
-  --surface-1: #0b0d14;
-  --surface-2: #11141d;
-  --surface-3: #171b26;
-  --line: #1f2430;
-  --line-strong: #2b3242;
+  /*
+   * Surfaces, darkest to lightest. Near-neutral with a faint cool cast, solid, no
+   * transparency: professional trading interfaces separate regions with hairlines and
+   * one step of lightness, not with blur and glow.
+   */
+  --bg: #0a0b0d;
+  --surface-1: #101114;
+  --surface-2: #15171b;
+  --surface-3: #1b1e23;
+  --line: #22252b;
+  --line-strong: #2d3138;
 
   /* Text */
-  --text: #eef1f7;
-  --text-dim: #9aa3b8;
+  --text: #ececef;
+  --text-dim: #a1a6b0;
   /*
    * Measured, not chosen. #68718a was 3.99:1 on the old opaque surface and
    * 2.95:1 once glass let the ambient through, against a 4.5:1 floor for text
@@ -39,14 +43,28 @@
    * This value is the lightest point of the sampled backdrop solved for 4.5:1,
    * then re-measured on the rendered pixels rather than trusted.
    */
-  --text-faint: #8c95ac;
+  --text-faint: #858a94;
 
-  /* Accent */
-  --accent: #14e2ad;
-  --accent-deep: #0b9c78;
-  --accent-wash: rgba(20, 226, 173, 0.08);
-  --warn: #f2b45c;
-  --danger: #f06a76;
+  /*
+   * One accent, solid. `--accent` fills primary actions (white text on it measures
+   * 4.8:1); `--accent-text` is the lighter tint for links and active states on the dark
+   * ground (6.4:1). No gradients anywhere in the interface: a gradient on every button
+   * is the quickest tell of a template.
+   */
+  --accent: #2f6bf0;
+  --accent-deep: #2557c7;
+  --accent-text: #73a2ff;
+  --accent-wash: rgba(47, 107, 240, 0.12);
+  --buy: #2ebd85;
+  --sell: #f6465d;
+  --gold: #d9ad55;
+  --warn: #e3a23b;
+  --danger: #f6465d;
+
+  /* Faces, from next/font in layout.tsx; the stacks are the fallback while loading. */
+  --face-display: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+  --face-sans: var(--font-sans), ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --face-mono: var(--font-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
 
   /* Type scale */
   --text-micro: 0.6875rem; /* 11px */
@@ -152,9 +170,27 @@
     0 16px 40px -20px rgba(0, 0, 0, 0.8),
     0 2px 8px -4px rgba(0, 0, 0, 0.5);
 
-  --ring: 0 0 0 3px rgba(20, 226, 173, 0.22);
+  --ring: 0 0 0 2px var(--bg), 0 0 0 4px rgba(115, 162, 255, 0.7);
   --shadow: 0 12px 32px -18px rgba(0, 0, 0, 0.9);
   --ease: cubic-bezier(0.2, 0.7, 0.3, 1);
+
+  /*
+   * Glass, retired. The variables stay so every component that used them keeps
+   * working, but they now resolve to flat surfaces: frosted blur over coloured orbs is
+   * the signature look of generated UI, and it cost legibility (contrast varied with
+   * whatever happened to be behind a card).
+   */
+  --glass-fill: var(--surface-1);
+  --glass-fill-strong: var(--surface-2);
+  --glass-raised: var(--surface-2);
+  --glass-border: var(--line);
+  --glass-border-lit: var(--line-strong);
+  --glass-highlight: transparent;
+  --glass-blur: none;
+  --glass-blur-heavy: none;
+  --glass-well: var(--bg);
+  --glass-well-inset: none;
+  --glass-shadow: none;
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -164,7 +200,7 @@ html { scroll-behavior: smooth; }
 body {
   background: var(--bg);
   color: var(--text);
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-family: var(--face-sans);
   font-size: var(--text-base);
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
@@ -184,17 +220,18 @@ body {
  * swallows every click on the page without it.
  */
 body::before {
+  display: none;
   content: '';
   position: fixed;
   inset: 0;
   z-index: -1;
   pointer-events: none;
   background:
-    radial-gradient(880px 600px at 6% -6%, rgba(20, 226, 173, 0.38), transparent 58%),
-    radial-gradient(820px 560px at 96% 6%, rgba(96, 126, 255, 0.32), transparent 56%),
-    radial-gradient(760px 620px at 78% 58%, rgba(168, 92, 255, 0.20), transparent 58%),
-    radial-gradient(820px 640px at 4% 72%, rgba(20, 226, 173, 0.17), transparent 58%),
-    radial-gradient(1200px 800px at 48% 112%, rgba(96, 126, 255, 0.16), transparent 60%);
+    radial-gradient(900px 620px at 8% -8%, rgba(60, 224, 255, 0.22), transparent 60%),
+    radial-gradient(860px 600px at 94% 0%, rgba(91, 157, 255, 0.26), transparent 58%),
+    radial-gradient(760px 620px at 80% 60%, rgba(157, 123, 255, 0.16), transparent 58%),
+    radial-gradient(820px 640px at 2% 74%, rgba(60, 224, 255, 0.08), transparent 58%),
+    radial-gradient(1200px 800px at 48% 115%, rgba(91, 157, 255, 0.12), transparent 60%);
 }
 
 /*
@@ -208,6 +245,7 @@ body::before {
  * while scrolling.
  */
 body::after {
+  display: none;
   content: '';
   position: fixed;
   inset: 0;
@@ -309,7 +347,15 @@ h3 { font-size: var(--text-base); font-weight: 600; }
 
 /* ----------------------------------------------------------------- cards -- */
 
-.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: var(--space-4); }
+/* `min(290px, 100%)` so a track collapses on a narrow screen instead of forcing the
+   page sideways. It was a bare 290px, which on a 320px phone with gutters overflows:
+   the only hard grid floor left in this stylesheet, found by a source guard after a
+   browser measurement turned out to be unavailable. */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(290px, 100%), 1fr));
+  gap: var(--space-4);
+}
 
 .card {
   position: relative;
@@ -389,7 +435,7 @@ a.card:hover {
   box-shadow:
     0 1px 0 0 rgba(255, 255, 255, 0.2) inset,
     0 22px 48px -22px rgba(0, 0, 0, 0.9),
-    0 0 0 1px rgba(20, 226, 173, 0.08);
+    0 0 0 1px rgba(91, 157, 255, 0.14);
 }
 a.card:focus-visible { border-color: var(--accent-deep); }
 
@@ -468,7 +514,7 @@ a.card:focus-visible { border-color: var(--accent-deep); }
 .segmented button:hover { color: var(--text); }
 .segmented button[aria-pressed="true"] {
   background: var(--accent);
-  color: #04221b;
+  color: #050a1a;
   font-weight: 620;
 }
 
@@ -514,7 +560,7 @@ input.amount:focus { outline: none; border-color: var(--accent-deep); box-shadow
   width: 100%;
   margin-top: var(--space-4);
   background: var(--accent);
-  color: #04221b;
+  color: #050a1a;
   border: none;
   border-radius: var(--radius-md);
   padding: var(--space-4);
@@ -524,7 +570,7 @@ input.amount:focus { outline: none; border-color: var(--accent-deep); box-shadow
   cursor: pointer;
   transition: filter 0.18s var(--ease);
 }
-.go { box-shadow: 0 1px 0 0 rgba(255, 255, 255, 0.22) inset, 0 8px 20px -10px rgba(20, 226, 173, 0.5); }
+.go { box-shadow: 0 1px 0 0 rgba(255, 255, 255, 0.22) inset, 0 8px 20px -10px rgba(91, 157, 255, 0.5); }
 .go:hover:not(:disabled) { filter: brightness(1.08); }
 .go:disabled { background: var(--surface-3); color: var(--text-faint); cursor: not-allowed; }
 .go.ghost {
@@ -816,7 +862,7 @@ button.ghost { background: transparent; border: 1px solid var(--line); color: va
 .wallet > button:not(.ghost) {
   background: linear-gradient(180deg, var(--accent), var(--accent-deep));
   border-color: transparent;
-  color: #04221b;
+  color: #050a1a;
   font-weight: 650;
   box-shadow: 0 1px 0 0 rgba(255, 255, 255, 0.22) inset;
 }
@@ -938,8 +984,8 @@ button.ghost { background: transparent; border: 1px solid var(--line); color: va
 .trades li { display: grid; grid-template-columns: 3.2rem 1fr auto; gap: var(--space-3); align-items: baseline; padding: var(--space-2) 0; border-top: 1px solid var(--line); }
 .trades li:first-child { border-top: none; }
 .trade-side { font-size: var(--text-micro); text-transform: uppercase; letter-spacing: 0.06em; }
-.trade-side.buy { color: var(--accent); }
-.trade-side.sell { color: var(--warn); }
+.trade-side.buy { color: var(--buy); }
+.trade-side.sell { color: var(--sell); }
 .trade-side.graduate { color: var(--text-dim); }
 .nav-create {
   font-size: var(--text-sm);
@@ -954,7 +1000,7 @@ button.ghost { background: transparent; border: 1px solid var(--line); color: va
 .spark { margin-bottom: var(--space-4); }
 .spark-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-3); }
 .spark-change { font-size: var(--text-sm); }
-.spark-change.up { color: var(--accent); }
+.spark-change.up { color: var(--buy); }
 .spark-change.down { color: var(--danger); }
 .spark-foot { display: flex; justify-content: space-between; font-size: var(--text-micro); color: var(--text-faint); }
 
@@ -1158,8 +1204,8 @@ button.ghost { background: transparent; border: 1px solid var(--line); color: va
   font-size: var(--text-xs);
 }
 .ticker li + li { border-top: 1px solid var(--line-soft, var(--glass-border)); }
-.side-buy { color: var(--accent); text-transform: uppercase; font-size: var(--text-micro); letter-spacing: 0.08em; }
-.side-sell { color: var(--danger); text-transform: uppercase; font-size: var(--text-micro); letter-spacing: 0.08em; }
+.side-buy { color: var(--buy); text-transform: uppercase; font-size: var(--text-micro); letter-spacing: 0.08em; }
+.side-sell { color: var(--sell); text-transform: uppercase; font-size: var(--text-micro); letter-spacing: 0.08em; }
 .ticker-sym { font-weight: 620; color: var(--text); text-decoration: none; }
 .ticker-sym:hover { color: var(--accent); }
 .ticker-amt { color: var(--text-dim); text-align: right; }
@@ -1571,3 +1617,396 @@ header.top .brand { display: inline-flex; align-items: center; gap: var(--space-
 }
 .pairs-row strong { flex: 1; min-width: 0; font-size: var(--text-sm); }
 .pairs-row:hover strong { color: var(--accent); }
+
+/* ============================================================ system layer -- */
+/*
+ * The professional layer. Last in the file so it wins over the component rules above
+ * without editing each of them. Principles, so the next change keeps to them:
+ *
+ *   - Flat, solid surfaces; regions separated by 1px hairlines and one step of
+ *     lightness. No blur, glow, grain or gradients.
+ *   - One accent, used for the primary action, links and the active state. Green and
+ *     red mean buy and sell and nothing else.
+ *   - One typeface (Inter) with tabular figures for every number; monospace only for
+ *     strings a user might copy (addresses, denoms).
+ *   - Density over decoration: a trader scans columns, so the board is a table.
+ */
+
+body { font-feature-settings: 'cv11', 'ss01'; letter-spacing: -0.006em; }
+.mono { font-family: var(--face-mono); font-size: 0.92em; letter-spacing: -0.01em; }
+.num, .v, .mc-value, .totals .v, .metric-strip .v, .explorer-read .v, .stat .v,
+.ticker-amt, .trades, input.amount {
+  font-variant-numeric: tabular-nums;
+}
+.metric-row .v.mono, .metric-strip .v.mono, .totals .v.mono, .mc-value.mono, .explorer-read .v {
+  font-family: var(--face-sans);
+  font-size: inherit;
+  letter-spacing: -0.01em;
+}
+
+h1 { font-size: 1.875rem; font-weight: 640; letter-spacing: -0.025em; line-height: 1.2; }
+h2 { font-size: var(--text-lg); font-weight: 600; letter-spacing: -0.015em; }
+h3 { font-weight: 600; }
+.sub { color: var(--text-dim); }
+.note { color: var(--text-faint); font-size: var(--text-sm); line-height: 1.55; }
+a.text-link, .note a, .sub a { color: var(--accent-text); }
+
+.card { border-radius: 12px; padding: var(--space-5); }
+a.card:hover { background: var(--surface-2); border-color: var(--line-strong); transform: none; box-shadow: none; }
+
+/* ---------------------------------------------------------------- header -- */
+header.top {
+  background: rgba(10, 11, 13, 0.92);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  box-shadow: none;
+  padding: 0;
+  height: 60px;
+  display: flex;
+  align-items: center;
+  margin-bottom: var(--space-6);
+}
+header.top .inner { gap: var(--space-2); width: 100%; }
+header.top .brand { gap: 10px; margin-right: var(--space-4); }
+.wordmark { font-weight: 650; font-size: 1.0625rem; letter-spacing: -0.02em; }
+.wordmark em { font-style: normal; color: var(--text-faint); }
+.top-nav { display: flex; gap: 2px; }
+.top-nav a {
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--text-dim);
+  padding: 6px 10px;
+  border-radius: 6px;
+}
+.top-nav a:hover { color: var(--text); background: var(--surface-2); }
+header.top .chip { font-size: 11px; letter-spacing: 0.04em; padding: 3px 8px; border-radius: 6px; text-transform: none; }
+
+.btn, .nav-create {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 14px;
+  border-radius: 8px;
+  font-size: var(--text-sm);
+  font-weight: 560;
+  white-space: nowrap;
+  border: 1px solid var(--line-strong);
+  background: var(--surface-1);
+  color: var(--text);
+  transition: background 0.15s var(--ease), border-color 0.15s var(--ease);
+}
+.btn:hover, .nav-create:hover { background: var(--surface-2); border-color: #3a3f48; }
+
+.go,
+.wallet > button:not(.ghost),
+.segmented button[aria-pressed="true"] {
+  background: var(--accent);
+  color: #fff;
+  box-shadow: none;
+  filter: none;
+}
+.go {
+  font-family: var(--face-sans);
+  font-weight: 580;
+  border-radius: 8px;
+  letter-spacing: -0.005em;
+}
+.go:hover:not(:disabled),
+.wallet > button:not(.ghost):hover { background: #3a76f5; filter: none; }
+.go:disabled { background: var(--surface-3); color: var(--text-faint); }
+.go.ghost { background: var(--surface-1); border: 1px solid var(--line-strong); color: var(--text); }
+.go.ghost:hover:not(:disabled) { background: var(--surface-2); border-color: #3a3f48; }
+.wallet > button:not(.ghost) { height: 36px; padding: 0 14px; border-radius: 8px; font-size: var(--text-sm); }
+
+@media (max-width: 720px) { .top-nav { display: none; } }
+@media (max-width: 640px) {
+  .hide-sm { display: none !important; }
+  header.top .wordmark { display: none; }
+  .wrap { padding: 0 var(--space-4); }
+}
+@media (max-width: 900px) { .hide-md { display: none !important; } }
+
+.skip-link {
+  position: absolute; left: var(--space-4); top: -48px; z-index: 20;
+  background: var(--surface-3); color: var(--text); padding: 8px 12px; border-radius: 6px;
+}
+.skip-link:focus { top: 12px; }
+
+/* --------------------------------------------------------------- chips -- */
+.chip { border-radius: 6px; letter-spacing: 0.02em; text-transform: none; font-size: 11px; font-weight: 550; padding: 2px 8px; }
+.chip.accent { color: var(--buy); border-color: rgba(46, 189, 133, 0.35); background: rgba(46, 189, 133, 0.08); }
+.chip.warn { color: var(--warn); border-color: rgba(227, 162, 59, 0.35); background: rgba(227, 162, 59, 0.06); }
+.chip.muted { background: transparent; }
+.tag {
+  display: inline-flex; align-items: center; height: 18px; padding: 0 6px; border-radius: 4px;
+  font-size: 10.5px; font-weight: 600; letter-spacing: 0.02em;
+}
+.tag-pool { color: var(--accent-text); background: var(--accent-wash); }
+
+/* ------------------------------------------------------------------ hero -- */
+.hero { padding: var(--space-6) 0 var(--space-5); border-bottom: 1px solid var(--line); margin-bottom: var(--space-6); }
+.hero-eyebrow { font-size: var(--text-xs); font-weight: 550; color: var(--text-faint); letter-spacing: 0.02em; margin-bottom: var(--space-3); display: block; }
+.hero h1 { font-size: clamp(2rem, 4.2vw, 2.875rem); line-height: 1.08; letter-spacing: -0.035em; max-width: 20ch; font-weight: 650; }
+.hero .sub { font-size: 1.0625rem; max-width: 52ch; margin-top: var(--space-3); line-height: 1.55; }
+.hero-cta { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-5); }
+.hero-cta .go { width: auto; margin: 0; height: 40px; padding: 0 18px; }
+.stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-top: var(--space-6);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-1);
+}
+.stat { padding: 14px 18px; }
+.stat + .stat { border-left: 1px solid var(--line); }
+.stat .k { display: block; font-size: var(--text-xs); color: var(--text-faint); font-weight: 500; }
+.stat .v { display: block; font-size: 1.25rem; font-weight: 600; letter-spacing: -0.02em; margin-top: 2px; }
+@media (max-width: 720px) {
+  .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .stat:nth-child(3) { border-left: none; }
+  .stat:nth-child(n + 3) { border-top: 1px solid var(--line); }
+}
+
+.section-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-3); margin: var(--space-7) 0 var(--space-3); }
+.section-head h2 { margin: 0; font-size: 1.125rem; }
+.section-head .note { margin: 0; }
+
+/* ----------------------------------------------------------------- board -- */
+/* Stage tabs: flat, hairline-separated, one solid accent on the active tab. No pills
+   or gradients, per the design system. The count rides each tab as a dim figure. */
+.board-tabs {
+  display: flex; flex-wrap: wrap; gap: var(--space-1);
+  border-bottom: 1px solid var(--line); margin-bottom: var(--space-3);
+}
+.board-tab {
+  display: inline-flex; align-items: center; gap: 7px;
+  background: none; border: none; border-bottom: 2px solid transparent;
+  padding: 8px 12px; margin-bottom: -1px;
+  font: inherit; font-size: var(--text-sm); color: var(--text-dim); cursor: pointer;
+}
+.board-tab:hover { color: var(--text); }
+.board-tab.is-active { color: var(--text); border-bottom-color: var(--accent); }
+.board-tab-count {
+  font-size: var(--text-xs); color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+.board-tab.is-active .board-tab-count { color: var(--accent-text); }
+.board-tab:focus-visible { outline: none; box-shadow: var(--ring); border-radius: 6px; }
+.board-bar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin-bottom: var(--space-3); }
+.search { position: relative; flex: 1 1 260px; display: flex; align-items: center; }
+.search svg { position: absolute; left: 11px; color: var(--text-faint); pointer-events: none; }
+.search input {
+  width: 100%; height: 36px; padding: 0 12px 0 34px; border-radius: 8px;
+  background: var(--surface-1); border: 1px solid var(--line); color: var(--text); font: inherit; font-size: var(--text-sm);
+}
+.search input:focus-visible { border-color: var(--accent); box-shadow: var(--ring); outline: none; }
+.select select {
+  height: 36px; padding: 0 30px 0 12px; border-radius: 8px; font: inherit; font-size: var(--text-sm);
+  background: var(--surface-1) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%23858a94' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E") no-repeat right 12px center;
+  border: 1px solid var(--line); color: var(--text); appearance: none; cursor: pointer;
+}
+.board-bar .toggle { font-size: var(--text-sm); color: var(--text-dim); margin: 0 var(--space-2); }
+.board-count { margin-left: auto; font-size: var(--text-xs); color: var(--text-faint); }
+
+.table-wrap { border: 1px solid var(--line); border-radius: 12px; background: var(--surface-1); overflow-x: auto; }
+table.board { width: 100%; border-collapse: collapse; font-size: var(--text-sm); }
+table.board th {
+  text-align: left; font-weight: 500; font-size: var(--text-xs); color: var(--text-faint);
+  padding: 10px 16px; border-bottom: 1px solid var(--line); white-space: nowrap; background: var(--surface-1);
+}
+table.board td { padding: 12px 16px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+table.board tbody tr:last-child td { border-bottom: none; }
+table.board tbody tr { position: relative; transition: background 0.12s var(--ease); }
+table.board tbody tr:hover { background: var(--surface-2); }
+table.board .num { text-align: right; }
+table.board th.num { text-align: right; }
+table.board .strong { font-weight: 600; color: var(--text); }
+table.board .unit { color: var(--text-faint); font-weight: 400; font-size: 0.92em; }
+table.board .dim { color: var(--text-faint); }
+.c-rank { width: 40px; color: var(--text-faint); padding-right: 0 !important; }
+.tok { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.tok-text { display: flex; flex-direction: column; min-width: 0; }
+.row-link { font-weight: 600; color: var(--text); }
+/* Stretched link: the whole row navigates, the table stays a table. */
+.row-link::after { content: ''; position: absolute; inset: 0; }
+.row-link:focus-visible { box-shadow: none; }
+.row-link:focus-visible::after { box-shadow: inset 0 0 0 2px var(--accent-text); border-radius: 0; }
+.tok-sub { display: inline-flex; align-items: center; gap: 8px; font-size: var(--text-xs); color: var(--text-faint); }
+.tok-sub .chip { padding: 0 6px; height: 18px; display: inline-flex; align-items: center; font-size: 10.5px; }
+.c-progress { width: 150px; }
+.prog { display: flex; align-items: center; gap: 10px; }
+.prog-track { flex: 1; height: 4px; border-radius: 2px; background: var(--surface-3); overflow: hidden; }
+.prog-track i { display: block; height: 100%; background: var(--accent); border-radius: 2px; }
+.prog span { font-size: var(--text-xs); color: var(--text-dim); width: 34px; text-align: right; font-variant-numeric: tabular-nums; }
+
+.bar, .bar-thin { height: 4px; background: var(--surface-3); }
+.bar > i, .bar-thin > i { background: var(--accent); }
+
+/* ------------------------------------------------------ token identity -- */
+.token-logo { border-radius: 50%; }
+.token-logo-fallback {
+  color: #fff;
+  background: hsl(var(--h, 215) 42% 34%);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+  font-weight: 600;
+  letter-spacing: 0;
+}
+
+/* --------------------------------------------------------- top movers -- */
+.hill { margin-top: 0; }
+.hill-head h2 { font-size: 1.125rem; }
+.hill-king { border-color: var(--line); box-shadow: none; background: var(--surface-1); }
+.hill-king:hover { border-color: var(--line-strong); background: var(--surface-2); }
+.hill-crown { color: var(--gold); letter-spacing: 0.06em; font-weight: 600; }
+
+/* ------------------------------------------------------------ ticker -- */
+.ticker { border-radius: 12px; background: var(--surface-1); }
+
+/* ------------------------------------------------------- trust, share -- */
+.trust { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: var(--space-3); }
+.trust span { display: inline-flex; align-items: center; gap: 6px; font-size: var(--text-xs); color: var(--text-dim); }
+.trust svg { color: var(--buy); }
+.share-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.icon-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  height: 32px; padding: 0 10px; border-radius: 8px; font-size: var(--text-xs); font-weight: 550;
+  border: 1px solid var(--line); background: var(--surface-1); color: var(--text-dim);
+}
+.icon-btn:hover { color: var(--text); background: var(--surface-2); border-color: var(--line-strong); }
+.icon-btn[aria-pressed="true"] { color: var(--gold); border-color: rgba(217, 173, 85, 0.4); }
+
+.back-link { display: inline-flex; align-items: center; gap: 6px; font-size: var(--text-sm); color: var(--text-dim); }
+.back-link:hover { color: var(--text); }
+
+/* ------------------------------------------------------------- footer -- */
+.site-footer { border-top: 1px solid var(--line); margin-top: var(--space-8); padding: var(--space-6) 0 var(--space-7); }
+.footer-inner { display: flex; flex-wrap: wrap; justify-content: space-between; gap: var(--space-5); }
+.footer-nav { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-5); }
+.footer-nav a { font-size: var(--text-sm); color: var(--text-dim); }
+.footer-nav a:hover { color: var(--text); }
+
+.demo-banner { background: rgba(227, 162, 59, 0.06); border-color: rgba(227, 162, 59, 0.25); border-radius: 10px; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition: none !important; animation: none !important; scroll-behavior: auto !important; }
+}
+.trust { list-style: none; padding: 0; }
+.stats dt, .stats dd { margin: 0; }
+/* Subscript zeros for tiny prices: 0.0₆2942 instead of 0.0000002942. */
+.px-zeros { font-size: 0.72em; vertical-align: -0.25em; margin: 0 0.04em; color: var(--text-dim); }
+.back-link { min-height: 28px; }
+
+/*
+ * Labels in sentence case. Tiny uppercase letter-spaced labels on every figure are a
+ * template habit; professional data UIs label in plain small text and let the numbers
+ * carry the weight.
+ */
+.ticker-head .k, .metric-strip .k, .explorer-read .k, .totals .k, .mc-label, .hill-crown,
+.side-buy, .side-sell, .trade-side {
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: var(--text-xs);
+  font-weight: 500;
+}
+.ticker-head .k { color: var(--text); font-weight: 600; font-size: var(--text-sm); }
+.metric-strip .k, .explorer-read .k, .totals .k { color: var(--text-faint); }
+.side-buy, .side-sell { font-weight: 600; }
+
+/* Numbers are set in Inter with tabular figures everywhere, including these. */
+.ticker .mono, .hill .mono, .ticker-amt, .explorer-axis, .trades .mono {
+  font-family: var(--face-sans);
+  font-size: inherit;
+  letter-spacing: -0.005em;
+}
+.explorer-axis { font-size: 11px; }
+
+.ticker { margin: 0 0 var(--space-7); }
+.ticker li { padding-top: 9px; padding-bottom: 9px; font-size: var(--text-sm); }
+.hill { margin-bottom: var(--space-2); }
+.metric-strip { border-radius: 12px; background: var(--surface-1); }
+.metric-strip > div { background: transparent; }
+
+/* Launch page: chart and history left, the trade panel pinned right like an exchange. */
+.cols { grid-template-columns: minmax(0, 1fr) 380px; gap: var(--space-4); }
+@media (max-width: 960px) { .cols { grid-template-columns: 1fr; } }
+.trade-col { position: sticky; top: 76px; align-self: start; }
+@media (max-width: 960px) { .trade-col { position: static; } }
+.stack-below > * { margin-top: var(--space-4); }
+
+.token-head { display: flex; align-items: center; gap: 14px; }
+.token-title { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.denom-row { display: flex; align-items: center; gap: 8px; margin-top: 4px; font-size: var(--text-xs); color: var(--text-faint); min-width: 0; }
+.denom-row span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.token-head + .trust { margin-top: var(--space-4); }
+
+/* Buy and sell take their own colours when chosen, as on every exchange. */
+.segmented[aria-label="Trade side"] button:first-child[aria-pressed="true"] { background: var(--buy); color: #04140d; }
+.segmented[aria-label="Trade side"] button:last-child[aria-pressed="true"] { background: #d42f45; color: #fff; }
+.explorer-axis, .chart-axis, svg text { font-family: var(--face-sans); }
+/* Links inside running text are underlined: colour alone is not enough to tell them apart. */
+.sub a:not(.back-link), .note a:not(.back-link) { text-decoration: underline; text-underline-offset: 2px; text-decoration-thickness: 1px; }
+.token-head > div { min-width: 0; flex: 1; }
+
+/*
+ * Trending. Ranked by trade COUNT, which is the only activity measure that survives
+ * crossing a pair boundary, so the rows carry a pair chip and no amount.
+ */
+.trending { margin-bottom: var(--space-4); }
+.trending-head h2 { margin: 0 0 var(--space-1); }
+.trending-list { list-style: none; margin: var(--space-2) 0 0; padding: 0; }
+
+/* The ticker-clash chooser on a launch page: a plain stack of links, no markers. */
+.plain-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-2); }
+.plain-list a { color: var(--accent); }
+.trending-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  text-decoration: none;
+  color: inherit;
+  min-width: 0;
+}
+.trending-row:hover { background: var(--glass-well); }
+.trending-row strong { flex: 1; min-width: 0; font-size: var(--text-sm); }
+.trending-rank { color: var(--text-faint); font-size: var(--text-xs); min-width: 14px; }
+
+/* Claimable-fee rows on /claim. Spaced from the button below so a sweep is not
+   one keystroke away from a misread row. */
+.claim-rows { margin-bottom: var(--space-4); }
+
+/*
+ * Launches-per-day bars. Deliberately unlabelled per bar: the shape is the point and
+ * a number on each would be false precision on a 14-bucket histogram.
+ */
+.daybars {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 72px;
+  margin-top: var(--space-3);
+}
+.daybar { flex: 1; min-width: 0; display: flex; align-items: flex-end; height: 100%; }
+.daybar > i {
+  display: block;
+  width: 100%;
+  min-height: 2px;
+  border-radius: 2px 2px 0 0;
+  background: var(--accent);
+  opacity: 0.75;
+}
+
+/*
+ * Launch preview. Visually distinct from the form above it: it is a restatement, not
+ * another set of fields, and a reader skimming back should not mistake one for the
+ * other.
+ */
+.preview-card { border-color: var(--accent-deep); }
+.preview-head { display: flex; align-items: center; gap: var(--space-3); margin-bottom: var(--space-3); min-width: 0; }
+.preview-head strong { display: block; font-size: var(--text-lg); }
+.preview-logo { width: 44px; height: 44px; border-radius: var(--radius-md); object-fit: cover; flex: none; }
+.preview-logo-empty { background: var(--glass-well); border: 1px dashed var(--line-strong); }

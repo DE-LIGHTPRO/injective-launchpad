@@ -57,13 +57,13 @@ export function PairPanels({ rows }: { rows: LaunchRow[] }) {
           return (
             <div className="pairs-card" key={denom}>
               <div className="pairs-head">
-                <strong>{denomLabel(denom)}</strong>
+                <strong>{list[0]?.quoteLabel ?? denomLabel(denom)}</strong>
                 <span className="note">
                   {list.length} {list.length === 1 ? 'launch' : 'launches'}
                 </span>
               </div>
               {top.map((r) => (
-                <Link key={r.id} href={`/launch/${r.id}`} className="pairs-row">
+                <Link key={r.id} href={r.path} className="pairs-row">
                   <TokenLogo profile={r.profile} symbol={symbolOf(r.denom)} size={24} />
                   <strong>{symbolOf(r.denom)}</strong>
                   {/*

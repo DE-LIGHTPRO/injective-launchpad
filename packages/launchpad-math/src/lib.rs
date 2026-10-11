@@ -19,6 +19,12 @@
 use cosmwasm_std::{Uint128, Uint256};
 use thiserror::Error;
 
+pub mod pool;
+pub use pool::{
+    pool_buy_impact_bps, pool_quote_buy, pool_quote_sell, pool_sell_impact_bps, pool_spot_price,
+    PoolBuyQuote, PoolReserves, PoolSellQuote,
+};
+
 #[derive(Error, Debug, PartialEq)]
 pub enum CurveError {
     #[error("curve is not configured with non-zero virtual reserves")]
@@ -167,7 +173,7 @@ pub struct SellQuote {
 
 /// Ceiling division in 256-bit space. Used wherever rounding must favour the
 /// pool: a larger remaining reserve means a smaller payout to the trader.
-fn ceil_div(num: Uint256, den: Uint256) -> Result<Uint256, CurveError> {
+pub(crate) fn ceil_div(num: Uint256, den: Uint256) -> Result<Uint256, CurveError> {
     if den.is_zero() {
         return Err(CurveError::Overflow);
     }
@@ -179,12 +185,12 @@ fn ceil_div(num: Uint256, den: Uint256) -> Result<Uint256, CurveError> {
     }
 }
 
-fn to_u128(v: Uint256) -> Result<Uint128, CurveError> {
+pub(crate) fn to_u128(v: Uint256) -> Result<Uint128, CurveError> {
     Uint128::try_from(v).map_err(|_| CurveError::Overflow)
 }
 
 /// Fee taken off an input amount, rounded up so the pool is never short.
-fn fee_on(amount: Uint128, bps: u16) -> Result<Uint128, CurveError> {
+pub(crate) fn fee_on(amount: Uint128, bps: u16) -> Result<Uint128, CurveError> {
     if bps == 0 {
         return Ok(Uint128::zero());
     }
@@ -1049,7 +1055,7 @@ mod tests {
         let mut no_fee = cfg();
         no_fee.fee_bps = 0;
         let with_fee = cfg();
-        let st = |c: &CurveConfig| CurveState {
+        let st = |_c: &CurveConfig| CurveState {
             inj_collected: Uint128::new(2_970_000_000_000_000_000),
             tokens_sold: inj(96_657_870),
             graduated: false,

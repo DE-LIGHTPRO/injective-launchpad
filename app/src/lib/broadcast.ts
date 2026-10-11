@@ -2,17 +2,19 @@ import {
   MsgCreateDenom,
   MsgMint,
   MsgSetDenomMetadata,
+  MsgChangeAdmin,
   MsgExecuteContract,
   createTransaction,
   ChainRestAuthApi,
-  TxRestApi,
 } from '@injectivelabs/sdk-ts';
 import { NETWORK, getLcdUrl } from './config.ts';
 import {
   MSG_CREATE_DENOM,
   MSG_MINT,
   MSG_SET_METADATA,
+  MSG_CHANGE_ADMIN,
   MSG_EXECUTE,
+  TOKEN_DECIMALS,
   type LaunchPlan,
 } from './createLaunch.ts';
 
@@ -105,8 +107,43 @@ export function composeMessages(plan: LaunchPlan, sender: string) {
           amount: (v as { amount: { denom: string; amount: string } }).amount,
         });
       case MSG_SET_METADATA: {
+        /*
+         * The plan holds metadata in the chain's snake_case JSON shape (`denom_units`,
+         * `uri_hash`), but the SDK's `fromJSON` reads camelCase and does
+         * `metadata.denomUnits.map(...)`. Passed the snake_case object directly it found
+         * `denomUnits` undefined and threw "Cannot read properties of undefined
+         * (reading 'map')" at broadcast time, after the user had clicked Create. This is
+         * the first time this path ran against a chain. Translate at the SDK boundary and
+         * keep the plan canonical. Shape mirrors scripts/e2e-testnet.mjs.
+         */
         const meta = (v as { metadata: Record<string, unknown> }).metadata;
-        return MsgSetDenomMetadata.fromJSON({ sender, metadata: meta as never });
+        const units = (meta.denom_units ?? meta.denomUnits ?? []) as Array<{
+          denom: string;
+          exponent: number;
+          aliases?: string[];
+        }>;
+        return MsgSetDenomMetadata.fromJSON({
+          sender,
+          metadata: {
+            description: (meta.description as string) ?? '',
+            denomUnits: units.map((u) => ({
+              denom: u.denom,
+              exponent: u.exponent,
+              aliases: u.aliases ?? [],
+            })),
+            base: meta.base as string,
+            display: meta.display as string,
+            name: (meta.name as string) ?? '',
+            symbol: meta.symbol as string,
+            uri: (meta.uri as string) ?? '',
+            uriHash: (meta.uri_hash as string) ?? (meta.uriHash as string) ?? '',
+            decimals: (meta.decimals as number) ?? TOKEN_DECIMALS,
+          } as never,
+        });
+      }
+      case MSG_CHANGE_ADMIN: {
+        const c = v as { denom: string; new_admin: string };
+        return MsgChangeAdmin.fromJSON({ sender, denom: c.denom, newAdmin: c.new_admin });
       }
       case MSG_EXECUTE: {
         const e = v as unknown as {
@@ -136,7 +173,15 @@ interface InjectedSigner {
     signDirect: (
       address: string,
       doc: { bodyBytes: Uint8Array; authInfoBytes: Uint8Array; chainId: string; accountNumber: bigint },
-    ) => Promise<{ signature: { signature: string } }>;
+    ) => Promise<{
+      /*
+       * What the wallet ACTUALLY signed. Keplr (and the others) may re-encode the doc
+       * before signing it, so the signature is over THESE bytes, not the ones passed in.
+       * Broadcasting the original bytes with this signature fails verification. Use these.
+       */
+      signed?: { bodyBytes: Uint8Array; authInfoBytes: Uint8Array };
+      signature: { signature: string };
+    }>;
   };
   getKey: (chainId: string) => Promise<{ pubKey: Uint8Array }>;
 }
@@ -226,6 +271,21 @@ async function signAndBroadcast(opts: {
       accountNumber: BigInt(base.account_number),
     });
     signature = res.signature.signature;
+    /*
+     * Broadcast the bytes the WALLET signed, not the ones we handed it.
+     *
+     * Keplr and the others re-encode the sign doc before signing (field ordering, the
+     * pubkey Any, sometimes the fee), so the signature covers `res.signed`, not our
+     * `txRaw`. Attaching the signature to our original bytes produced
+     * "unable to verify single signer signature: unauthorized" (code 4) on testnet: the
+     * signature was valid, just over a slightly different encoding than what we sent.
+     * When a wallet returns `signed` (all of them do for signDirect), those bytes are
+     * authoritative.
+     */
+    if (res.signed?.bodyBytes && res.signed?.authInfoBytes) {
+      txRaw.bodyBytes = res.signed.bodyBytes;
+      txRaw.authInfoBytes = res.signed.authInfoBytes;
+    }
   } catch (e) {
     const msg = (e as Error).message ?? '';
     if (/reject|denied|closed/i.test(msg)) {
@@ -236,27 +296,49 @@ async function signAndBroadcast(opts: {
 
   txRaw.signatures = [Buffer.from(signature, 'base64')];
 
+  /*
+   * Broadcast through our own origin, never straight to the LCD from the browser.
+   *
+   * Only the finished, signed bytes leave here; the key stayed in the wallet. A direct
+   * browser POST to the LCD is cross-origin with a JSON body, so it triggers a CORS
+   * preflight the public LCD does not answer, and the request is blocked before it is
+   * sent, with nothing the page can catch: a launch "did nothing" after signing. The GET
+   * reads elsewhere are simple requests that skip the preflight, which is why the rest of
+   * the app worked. `/api/broadcast` forwards the bytes server-side, where the inclusion
+   * poll is also reliable. See lib/txBroadcast.ts.
+   */
+  const toB64 = (b: Uint8Array) => Buffer.from(b).toString('base64');
+  let data: { txHash?: string; error?: string; detail?: string };
   try {
-    const api = new TxRestApi(getLcdUrl());
-    const result = await api.broadcast(txRaw);
-    /*
-     * A 200 from the node is not a landed transaction. `broadcast` returns a result
-     * carrying the chain's own `code`, and anything but zero is a refusal that arrived
-     * with a success status: the exact shape of defect this project records as "a 200
-     * is not a success".
-     */
-    if (result.code !== 0) {
-      throw new BroadcastError(
-        'broadcast',
-        describeBroadcastFailure(result.rawLog ?? ''),
-        result.rawLog,
-      );
+    const resp = await fetch('/api/broadcast', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        bodyBytes: toB64(txRaw.bodyBytes),
+        authInfoBytes: toB64(txRaw.authInfoBytes),
+        signatures: (txRaw.signatures as Uint8Array[]).map(toB64),
+      }),
+    });
+    data = (await resp.json().catch(() => ({}))) as typeof data;
+    if (!resp.ok && !data?.error) {
+      throw new BroadcastError('broadcast', describeBroadcastFailure(''), `broadcast service returned ${resp.status}`);
     }
-    return { txHash: result.txHash };
   } catch (e) {
     if (e instanceof BroadcastError) throw e;
-    throw new BroadcastError('broadcast', describeBroadcastFailure((e as Error).message ?? ''), (e as Error).message);
+    throw new BroadcastError(
+      'broadcast',
+      'The transaction was signed but could not be sent. Check your connection and try again; nothing was created.',
+      (e as Error).message,
+    );
   }
+
+  if (data?.error) {
+    throw new BroadcastError('broadcast', data.error, data.detail);
+  }
+  if (!data?.txHash) {
+    throw new BroadcastError('broadcast', describeBroadcastFailure(''), 'the broadcast service returned no transaction hash');
+  }
+  return { txHash: data.txHash };
 }
 
 /** Signs and broadcasts a launch. */
@@ -305,5 +387,51 @@ export async function broadcastExecute(opts: {
     sender: opts.sender,
     wallet: opts.wallet,
     gas: opts.gas ?? GAS.trade,
+  });
+}
+
+/**
+ * Several contract calls, in ONE transaction the wallet prompts for once.
+ *
+ * WHY BATCHED. A creator with five launches has five separate fee balances, and
+ * claiming them one at a time is five wallet prompts, five fees and five chances to
+ * stop halfway. Cosmos puts many messages in one transaction natively, so the batch
+ * is the natural shape and the loop was the unnatural one.
+ *
+ * It is also ATOMIC, which matters more than the convenience: either every claim
+ * lands or none does. A partial sweep leaves a creator guessing which of their
+ * launches paid out, and the answer is only discoverable by checking each one.
+ *
+ * Gas scales with the number of messages. A flat limit sized for one would fail a
+ * batch of five AFTER the user approved it, which is the failure mode worth avoiding:
+ * a ceiling costs nothing on Injective's fee market, a ceiling that is too low costs
+ * a signature.
+ */
+export async function broadcastExecuteMany(opts: {
+  calls: Array<{
+    contract: string;
+    msg: Record<string, unknown>;
+    funds?: Array<{ denom: string; amount: string }>;
+  }>;
+  sender: string;
+  wallet: unknown;
+  gasPerCall?: number;
+}): Promise<{ txHash: string }> {
+  if (opts.calls.length === 0) throw new BroadcastError('simulate', 'Nothing to send.');
+  const perCall = opts.gasPerCall ?? GAS.claim;
+  return signAndBroadcast({
+    msgs: composeMessages(
+      {
+        messages: opts.calls.map((c) => ({
+          typeUrl: MSG_EXECUTE,
+          value: { contract: c.contract, msg: c.msg, funds: c.funds ?? [] },
+        })),
+      } as unknown as LaunchPlan,
+      opts.sender,
+    ),
+    sender: opts.sender,
+    wallet: opts.wallet,
+    // A base for the transaction itself plus room per message.
+    gas: 150_000 + perCall * opts.calls.length,
   });
 }

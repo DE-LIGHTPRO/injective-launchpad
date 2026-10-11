@@ -23,38 +23,37 @@ export function HowItWorks() {
   return (
     <>
       <section className="explain" aria-labelledby="how-heading">
-        <h2 id="how-heading">How a launch works</h2>
+        <h2 id="how-heading" className="sr-only">
+          How a launch works
+        </h2>
         <ol className="steps">
           <li>
             <span className="step-n">1</span>
             <div>
-              <strong>The creator supplies the tokens</strong>
+              <strong>Create</strong>
               <p className="note">
-                All of them, in one transaction. The whole supply goes to the curve and
-                nothing can mint more afterwards, because the launch hands away the
-                denom&rsquo;s entire issuance at creation.
+                The creator mints a fixed 1B supply and hands all of it, and the mint key,
+                to the launch contract.
               </p>
             </div>
           </li>
           <li>
             <span className="step-n">2</span>
             <div>
-              <strong>Buyers bring {q}, and the curve sets the price</strong>
+              <strong>Trade on the curve</strong>
               <p className="note">
-                There is no order book and no market maker. Each purchase moves along a
-                fixed curve the creator chose and cannot edit, so the price of the next
-                token is arithmetic rather than a quote from anyone.
+                Buyers pay {q}. A fixed bonding curve sets every price; there is no order
+                book and no market maker.
               </p>
             </div>
           </li>
           <li>
             <span className="step-n">3</span>
             <div>
-              <strong>It graduates to a pool</strong>
+              <strong>Graduate</strong>
               <p className="note">
-                When the curve reaches its target, the {q} it collected and the tokens
-                held back move out together as liquidity. Trading continues there, and
-                the launch rules below stop applying at that point.
+                At the target, the reserve seeds a pool inside the same contract. It has no
+                withdraw function and no upgrade key.
               </p>
             </div>
           </li>
@@ -62,59 +61,34 @@ export function HowItWorks() {
       </section>
 
       <section className="explain" aria-labelledby="guarantees-heading">
-        <h2 id="guarantees-heading">What the contract enforces</h2>
-        <p className="note">
-          Each of these is checked on chain on every trade. None of them is a policy an
-          operator could change without deploying a different contract.
-        </p>
+        <h2 id="guarantees-heading">Enforced by the contract</h2>
         <div className="guarantees">
           <div>
-            <strong>Nothing is held for you</strong>
+            <strong>Non-custodial</strong>
+            <p className="note">Reserves back the token. Fees are held apart and paid only to who earned them.</p>
+          </div>
+          <div>
+            <strong>Fixed supply</strong>
+            <p className="note">The mint key ends with the launch contract, which cannot mint.</p>
+          </div>
+          <div>
+            <strong>Locked liquidity</strong>
+            <p className="note">Graduated liquidity has no withdrawal path, for anyone.</p>
+          </div>
+          <div>
+            <strong>Anti-sniping</strong>
             <p className="note">
-              The curve holds the reserve that backs sells and nothing else. Fees accrue
-              separately and are claimed by whoever earned them; no contract here takes
-              custody of a trade in flight.
+              Optional opening fee up to {MAX_EARLY_FEE_PCT}%, wallet caps and start times. No
+              exemptions, including the creator.
             </p>
           </div>
           <div>
-            <strong>Supply is fixed at creation</strong>
-            <p className="note">
-              The whole issuance is minted once and handed over. There is no mint
-              function left to call and no admin who could add to it later.
-            </p>
+            <strong>Same terms for all</strong>
+            <p className="note">One supply, one curve and one fee split on every launch.</p>
           </div>
           <div>
-            <strong>An opening fee with no exemptions</strong>
-            <p className="note">
-              A creator can make the first minutes expensive, up to {MAX_EARLY_FEE_PCT}%,
-              decaying to the curve&rsquo;s own fee. No wallet can be exempted, including
-              the creator&rsquo;s, and the extra goes into the pool at graduation rather
-              than to anyone.
-            </p>
-          </div>
-          <div>
-            <strong>Caps and start times, or neither</strong>
-            <p className="note">
-              A launch can limit what one address takes from the curve and can open at a
-              set time. Both are optional, both are shown on the launch, and a cap that
-              could never bind is refused rather than displayed as protection.
-            </p>
-          </div>
-          <div>
-            <strong>The creator&rsquo;s position is published</strong>
-            <p className="note">
-              Every launch page shows what the creator still holds at their launch
-              address, and how much of the supply was taken in the opening blocks. Both
-              are read from the chain, not reported by the creator.
-            </p>
-          </div>
-          <div>
-            <strong>Every cost is named before you sign</strong>
-            <p className="note">
-              The trading fee, the opening fee if one is running, the price impact of
-              your own order and the minimum you will receive, all quoted from the same
-              arithmetic the contract runs.
-            </p>
+            <strong>Costs shown up front</strong>
+            <p className="note">Fee, price impact and minimum received are quoted before you sign.</p>
           </div>
         </div>
       </section>

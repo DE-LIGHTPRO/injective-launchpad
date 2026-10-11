@@ -1,0 +1,127 @@
+# Internal security review log
+
+Not a third-party audit. Findings from reviewing the contracts, app and scripts
+against what Pons (`ponsdotdev/pons-labs`) and nearly.trade do. Newest first.
+Severity uses the usual scale: Critical / High / Medium / Low / Info.
+
+## 2026-10-11 review, fourth pass (everything, plus the live site)
+
+Triggered by screenshots of production. Scope: git history, contracts, app, scripts,
+deployment.
+
+### Fixed
+
+| # | Sev | Finding | Fix |
+|---|---|---|---|
+| 23 | High | **Creating a launch from the browser could never sign.** `plan` was computed above `builtRules` and `devBuy`; with a wallet connected it hit the temporal dead zone and the try/catch showed it as a form error. Present on production. | Reordered. New guard `hook-order.test.ts` fails on any hook reading a later-declared hook value; run against the old code it flags exactly this. |
+| 24 | High | **Price and market cap were 0 on every 6-decimal pair** (live: PAIR5277 with 9.90 TUSD reserve showed MC 0.00). The per-token price was floored to a whole base unit first. | `marketCapExact` (one division from reserves) and `spotPriceWad` (18 extra digits). |
+| 25 | High | **Create form treated every pair as 18-decimal INJ**: curve preview, labels, and the opening buy ("5" on a USDC pair = 5x10^18 base units, reverted after signing). Switching pair also did not refresh the signed plan. | `fixedCurveFor(decimals)`, the pair's label throughout, missing memo dep added. |
+| 26 | Medium | An opening buy combined with a future start time, or larger than the wallet cap, reverted the whole launch inside the reply with an opaque error, after signing. | The factory refuses both by name before instantiating (`InitialBuyBeforeStart`, `InitialBuyOverCap`). The form flags the start-time case as you type. 3 new factory tests. |
+| 27 | Medium | Trade ticker printed every amount at 18 decimals as INJ ("0 INJ" for a TUSD buy). | Each launch's own quote decimals and label. |
+| 28 | Medium | `quote-test.mjs` / `quote-trade-test.mjs` created launches without the mint-key handover, so they would revert against the new factory. | `MsgChangeAdmin` added. The SDK version used by the scripts (1.20.55, the same line as the app) exports it; checked. |
+
+### Checked, nothing to fix
+
+- **Secrets:** no secret-named file in any commit of any branch. Content scan for seed
+  phrases, hex keys, JWTs and provider tokens finds only prose. Scripts read keys only
+  from `scripts/.env.local` at runtime.
+- **Dependencies:** `npm audit --omit=dev` reports 0 for `app/` and for `scripts/`.
+- **Factory `create_launch`:** exact supply, quote allowlist, initial-buy ceiling,
+  unexpected funds refused, no curve admin, and the mint-key handover forces a real
+  tokenfactory denom the creator controlled.
+- **Hardcoded INJ / 18 decimals** across components: every remaining 18 is a token
+  amount (launch tokens are always 18 decimals). Every remaining INJ label is the gas
+  balance or explanatory copy for the default pair.
+- **Wallets:** unknown-chain suggestion for `injective-888` is handled and tested.
+
+### Open, operational (see `docs/RELEASE.md`)
+
+- Production points at the old factory. Merging before the new deploy would correctly
+  flag all three live launches unsafe and disable trading on them. Follow the release order.
+- ~~Quotes shown as hex~~: fixed. `SetQuote` takes an optional `symbol` (1 to 12
+  letters, digits, dot or dash), returned by `Quotes` and used everywhere the app
+  labels a quote. Mainnet USDT/USDC (peggy hex denoms) must be allowlisted with a symbol.
+  The `0x0514…4f78` quote on the old factory is a test token, so it can stay as hex there.
+- GitHub Actions: no runner assigned, so no CI has run on this PR (billing or minutes).
+
+## 2026-10-11 review, third pass (app, UI, dependencies)
+
+### Fixed
+
+| # | Sev | Finding | Fix |
+|---|---|---|---|
+| 16 | High | On a phone the header chips pushed **Connect wallet** off-screen: a phone user could not connect at all. | Chips and wordmark hide below 640px; verified by screenshot at 390px. |
+| 17 | High | `npm audit`: PostCSS advisories (GHSA-qx2v-qp2m-jg93 and the sourceMappingURL set), pinned inside Next 15. | `overrides.postcss ^8.5.10`; `npm audit --omit=dev` reports 0. |
+| 18 | Medium | No `next.config`, so no security headers: no CSP, frameable (clickjacking on a page that asks a wallet to sign), no HSTS. | `app/next.config.ts`: CSP (`frame-ancestors 'none'`, `connect-src` limited to this origin and `*.injective.network` plus the LCD override, fonts self-hosted), `X-Frame-Options: DENY`, nosniff, HSTS, Referrer- and Permissions-Policy, COOP. |
+| 19 | Medium | The launch page's market cap ignored the pool after graduation (one call site the earlier sweep missed). | Passes `detail.pool`. |
+| 20 | Low | Demo cards could show negative trade counts ("-16 trades"): a signed shift on an unsigned seed. | `>>>`; regression test over 300 addresses, mutation-checked. |
+| 21 | Low | Three places still said graduated tokens "trade on a DEX". | Now says they trade against the locked pool. |
+| 22 | Info | Accessibility and SEO were unmeasured. | axe-core 4.10 on home, two launch pages, create, watchlist, creator: **0 violations, 241 passing checks** (incl. contrast on the new palette). Skip link, reduced-motion, `sitemap.xml`, title template and Open Graph metadata added. |
+
+### Open
+
+- CSP still allows `'unsafe-inline'` scripts (the App Router's inline bootstrap). Closing
+  it needs nonce middleware; worth doing before mainnet.
+
+## 2026-10-11 review, second pass
+
+### Fixed
+
+| # | Sev | Finding | Fix |
+|---|---|---|---|
+| 10 | Critical | The creator stayed **admin of their tokenfactory denom**, which mints without limit. After graduation they could mint any amount and sell it into the locked pool until it was empty, and before that they could dump into the curve reserve. The create page already promised "nothing can mint more afterwards"; it was not true. | The launch tx now hands denom admin to the factory (`MsgChangeAdmin`), and the factory's reply hands it to the new curve, which has no mint code and no wasm admin. If the creator skips the handover, the factory's message is refused and the whole launch reverts. Tests: `the_mint_key_ends_with_the_curve_where_nothing_can_use_it`, `a_creator_who_keeps_the_mint_key_cannot_launch` (simulated tokenfactory enforcing the admin rule; mutation-checked). |
+| 11 | High | Nothing stopped the UI offering trades on a curve built from code the admin had repointed to, or one with an upgrade key or a live mint key. | `lib/codeCheck.ts`: the launch page reads code id, wasm admin and denom authority from the chain, compares them against `NEXT_PUBLIC_CURVE_CODE_IDS`, and disables trading with an explanation on any mismatch. |
+| 12 | Medium | The upload limit was per instance. | `allowUploadShared` uses Upstash Redis when `UPSTASH_REDIS_REST_URL`/`_TOKEN` are set, and falls back to the in-memory limit (never unlimited) on outage. |
+| 13 | Medium | Factory config admin was always the deploy key. | `INJ_FACTORY_ADMIN` (required on mainnet; multisig contract addresses work). |
+| 14 | Info | Accounting was asserted on hand-picked sequences only. | 36 seeded random runs across graduation assert exact books and conservation of every unit after each step (mutation-checked). `docs/AUDIT_SCOPE.md` written for the external auditor. |
+| 15 | Info | `env-surface.test.ts` flagged secrets by NAME anywhere in `src/`, which blocked legitimate server-only credentials and let `PINATA_JWT` pass on spelling. | Now asserts the real boundary: no secret-shaped `NEXT_PUBLIC_*`, and no unprefixed variable read in a `'use client'` file. |
+
+### To verify on testnet (cannot be verified offline)
+
+- The factory's reply sends `MsgChangeAdmin` as a stargate message. `factory.wasm` does
+  not export a `requires_stargate` marker; the curve does. Confirm Injective dispatches
+  the message (step 3 of `scripts/e2e-testnet.mjs` checks the denom authority).
+- Injective accepts `MsgChangeAdmin` from a contract sender for a denom it administers.
+
+## 2026-10-11 review
+
+### Fixed
+
+| # | Sev | Finding | Fix |
+|---|---|---|---|
+| 1 | Critical | Graduation `BankMsg::Send`-ed the whole reserve and every leftover token to `migration_target`, which `deploy.mjs` defaulted to the deploy key. Whoever held that key held all graduated liquidity. That is a rug path, and it is not what "graduates to a pool" means. | The curve contract becomes a constant-product pool at graduation (`launchpad-math/src/pool.rs`), seeded in the same tx as the graduating buy. No withdraw path. `migration_target` removed from both contracts. |
+| 2 | High | Curves were instantiated with `admin: Some(factory)`. The factory's own wasm admin (the deployer) could upgrade the factory to code that migrates every curve and drains it. | Curves are instantiated with `admin: None`. Test: `a_launched_curve_has_no_wasm_admin_so_its_code_can_never_be_replaced`. |
+| 3 | Medium | `UpdateAdmin` transferred factory admin in one step, so a typo bricked admin. | Two-step: `UpdateAdmin` proposes, `AcceptAdmin` from the proposed address completes it (as Pons does with `Ownable2Step`). |
+| 4 | Medium | `deploy.mjs` silently used the deploy key as platform fee recipient when `INJ_PLATFORM_ADDRESS` was unset. | Refuses to run without it. Factory upgrade key is now explicit (`INJ_FACTORY_WASM_ADMIN`, required on mainnet, `none` = immutable). |
+| 5 | Medium | `/api/upload` pinned anything to the operator's Pinata account with no rate limit, and parsed the whole body before checking its size. | Per-IP limit (10 per 10 min, per instance) and a `content-length` check before parsing. **Still open:** a platform-level limiter before mainnet (see below). |
+| 6 | Low | The buy event emitted `buyer` twice (recipient, then sender), so indexers disagreed about who bought. | Second key renamed to `sender`. |
+| 7 | Low | The trade feed accepted wasm events from any contract in a matching tx, so another contract's buy could be shown as this launch's. | Filtered on `_contract_address`. |
+| 8 | Low | `die()` in `deploy.mjs` printed only the first hint line; multi-line refusals lost their explanation. | Prints all hints. |
+| 9 | Info | No CI: 300+ tests ran only when someone remembered. | `.github/workflows/ci.yml`: cargo test, the wasm build with export and opcode checks, tsc, app tests, next build. |
+
+### Open, in priority order (updated in the second pass)
+
+1. **Testnet end-to-end on the new contracts.** Redeploy with `scripts/deploy.mjs`, then
+   `npm --prefix scripts run e2e` (one command, about 3 INJ, mints its own test quote so
+   graduation does not need 87 INJ), then the same flow from the browser. The old testnet
+   factory has the custodial graduation and creator mint keys and must not be used.
+2. **Third-party audit** before mainnet. Send `docs/AUDIT_SCOPE.md`.
+3. Set `UPSTASH_REDIS_REST_URL`/`_TOKEN` (or Vercel Firewall) in production. *(code done)*
+4. Set `NEXT_PUBLIC_CURVE_CODE_IDS` in production to the audited code id. *(code done)*
+5. Create the multisig and pass it as `INJ_FACTORY_ADMIN` and `INJ_FACTORY_WASM_ADMIN`
+   on mainnet. *(code done)*
+6. **Holders panel** needs an indexer over bank events (`denom_owners` returns 501 for
+   tokenfactory denoms).
+7. ~~Align `@injectivelabs/sdk-ts` versions~~: the scripts' lockfile already resolves 1.20.55.
+8. An optional external-AMM adapter for graduation, once an Injective AMM's testnet
+   address is verified on chain rather than inferred.
+
+### Verified properties (by test)
+
+- Curve and pool: rounding always favours the pool, a round trip never profits, `k`
+  never decreases (`launchpad-math` unit tests, curve integration tests).
+- After graduation the contract holds exactly `pool_quote + owed fees` in quote and
+  exactly `pool_tokens` in tokens. Nothing is stranded or leaked.
+- `SimulateBuy` / `SimulateSell` equal execution in both phases.
+- The TypeScript port equals the Rust to the unit on curve and pool vectors generated
+  by the Rust (`npm run vectors`).

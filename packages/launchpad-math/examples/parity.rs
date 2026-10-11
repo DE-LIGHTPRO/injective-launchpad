@@ -21,7 +21,10 @@
 //! internally consistent and no longer talking about the same thing.
 
 use cosmwasm_std::Uint128;
-use launchpad_math::{price_impact_bps, quote_buy, quote_sell, sell_price_impact_bps, CurveConfig, CurveState};
+use launchpad_math::{
+    pool_buy_impact_bps, pool_quote_buy, pool_quote_sell, pool_sell_impact_bps, price_impact_bps,
+    quote_buy, quote_sell, sell_price_impact_bps, CurveConfig, CurveState, PoolReserves,
+};
 
 fn one() -> Uint128 {
     Uint128::new(1_000_000_000_000_000_000)
@@ -90,6 +93,37 @@ fn main() {
         rows.push(format!(
             r#"  {{"kind":"sell","from":"warm","tokensIn":"{}","fee":"{}","injOut":"{}","impactBps":{}}}"#,
             tokens, q.fee, q.inj_out, impact
+        ));
+    }
+
+    // The locked pool a graduated launch becomes, seeded exactly as the contract
+    // seeds it: the reserve collected, against the 200M held back plus whatever the
+    // curve never sold. One oversized buy fills the curve from fresh.
+    let lp_reserve = amt(200_000_000);
+    let fill = quote_buy(&cfg, &CurveState::default(), amt(200)).unwrap();
+    assert!(fill.graduates);
+    let pool = PoolReserves {
+        quote: fill.inj_in_after_fee,
+        tokens: lp_reserve + (cfg.curve_supply - fill.tokens_out),
+    };
+    rows.push(format!(
+        r#"  {{"kind":"pool","quote":"{}","tokens":"{}","feeBps":{}}}"#,
+        pool.quote, pool.tokens, cfg.fee_bps
+    ));
+    for n in [1u128, 10, 80] {
+        let q = pool_quote_buy(&pool, cfg.fee_bps, amt(n)).unwrap();
+        let impact = pool_buy_impact_bps(&pool, cfg.fee_bps, amt(n)).unwrap();
+        rows.push(format!(
+            r#"  {{"kind":"poolBuy","injIn":"{}","fee":"{}","net":"{}","tokensOut":"{}","impactBps":{}}}"#,
+            amt(n), q.fee, q.quote_in_after_fee, q.tokens_out, impact
+        ));
+    }
+    for n in [1_000_000u128, 50_000_000, 700_000_000] {
+        let q = pool_quote_sell(&pool, cfg.fee_bps, amt(n)).unwrap();
+        let impact = pool_sell_impact_bps(&pool, cfg.fee_bps, amt(n)).unwrap();
+        rows.push(format!(
+            r#"  {{"kind":"poolSell","tokensIn":"{}","fee":"{}","injOut":"{}","impactBps":{}}}"#,
+            amt(n), q.fee, q.inj_out, impact
         ));
     }
 

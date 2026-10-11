@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@injectivelabs/sdk-ts": "^1.20.58",
+    "@vercel/blob": "^2.8.1",
     "next": "^15.0.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
@@ -22,5 +23,8 @@
     "@types/react": "^19.0.0",
     "typescript": "^5.6.0"
   },
-  "type": "module"
+  "type": "module",
+  "overrides": {
+    "postcss": "^8.5.10"
+  }
 }

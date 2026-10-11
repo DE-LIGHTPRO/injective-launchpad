@@ -9,8 +9,9 @@
  *
  * What IS true: every buy and sell before graduation goes through the curve contract, so
  * a rule there binds every trade for the whole fair-launch window, which is when launch
- * rules are worth anything. At graduation liquidity moves to a DEX and the rules stop
- * completely.
+ * rules are worth anything. At graduation the reserve is seeded into the locked pool in
+ * the same contract, and the rules stop completely: like Pons's anti-snipe window, they
+ * are launch-window rules and they expire.
  *
  * So the wording is fixed, and `test/launch-rules.test.ts` holds it: "on the curve",
  * "until it graduates", never "on the token" and never "every transfer".
@@ -275,11 +276,11 @@ export function describeRules(
      * Three things this sentence has to do, and dropping any one of them makes it a
      * claim the product cannot keep:
      *   - say WHERE it is enforced (the curve), not "the token"
-     *   - say WHEN it stops (graduation), because afterwards it trades on a DEX
+     *   - say WHEN it stops (graduation), because afterwards it trades against its pool
      *   - say what it does not stop (one person, several addresses)
      */
     scope:
-      'Enforced by the curve contract on every buy and sell until this launch graduates. Afterwards the token trades on a DEX and these no longer apply. A cap is per address, so it raises the cost of taking the opening cheaply rather than making it impossible.',
+      'Enforced by the curve contract on every buy and sell until this launch graduates. Afterwards it trades against its locked pool and these no longer apply. A cap is per address, so it raises the cost of taking the opening cheaply rather than making it impossible.',
   };
 }
 
@@ -316,6 +317,8 @@ export function statusLabel(s: LaunchStatus): { text: string; tone: 'accent' | '
     case 'graduated':
       return { text: 'graduated', tone: 'warn' };
     case 'migrated':
-      return { text: 'migrated', tone: 'warn' };
+      // Tradable again, against the locked pool, so it reads as live rather than as a
+      // warning. "migrated" said liquidity had gone somewhere; it no longer goes anywhere.
+      return { text: 'in pool', tone: 'accent' };
   }
 }

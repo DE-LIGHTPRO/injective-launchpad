@@ -25,6 +25,7 @@ import {
   MSG_CREATE_DENOM,
   MSG_MINT,
   MSG_SET_METADATA,
+  MSG_CHANGE_ADMIN,
   TOKEN_DECIMALS,
   MSG_EXECUTE,
   type LaunchInput,
@@ -73,14 +74,24 @@ const input = (over: Partial<LaunchInput> = {}): LaunchInput => ({
   ...over,
 });
 
-test('four messages, in the order the chain requires', () => {
+test('five messages, in the order the chain requires', () => {
   // The denom must exist before it can be minted, and the supply must exist
   // before it can be attached. Any other order fails at the second message.
   const p = planLaunch(input());
   assert.deepEqual(
     p.messages.map((m) => m.typeUrl),
-    [MSG_CREATE_DENOM, MSG_MINT, MSG_SET_METADATA, MSG_EXECUTE],
+    [MSG_CREATE_DENOM, MSG_MINT, MSG_SET_METADATA, MSG_CHANGE_ADMIN, MSG_EXECUTE],
   );
+});
+
+test('the mint key goes to the factory, for this denom, before the launch executes', () => {
+  // Without it the factory cannot pass the key on to the curve and refuses the launch;
+  // with it pointed anywhere else, a creator could have kept the power to mint.
+  const p = planLaunch(input());
+  const c = byType(p, MSG_CHANGE_ADMIN) as { sender: string; denom: string; new_admin: string };
+  assert.equal(c.sender, CREATOR);
+  assert.equal(c.denom, p.denom);
+  assert.equal(c.new_admin, FACTORY);
 });
 
 test('the denom matches what the chain will derive', () => {
@@ -260,7 +271,10 @@ test('the summary states the irreversible parts in the user\'s own terms', () =>
   const p = planLaunch(input());
   const lines = describePlan(p, CURVE, LP).join(' ');
   assert.match(lines, /factory\/inj1/, 'the denom is not named');
-  assert.match(lines, /nothing can mint more/i, 'the fixed supply is not stated');
+  // Reworded when it became true: the mint key now really is given up, and the line
+  // says so in those terms rather than as a bare promise.
+  assert.match(lines, /give up the right to mint/i, 'giving up the mint key is not stated');
+  assert.match(lines, /supply is fixed for good/i, 'the fixed supply is not stated');
   assert.match(lines, /1,000,000,000/, 'the amount leaving the wallet is not stated');
   assert.match(lines, /800,000,000/, 'the curve share is not stated');
   assert.match(lines, /200,000,000/, 'the held-back share is not stated');
@@ -330,4 +344,24 @@ test('the metadata sender is the creator, who is the only denom admin', () => {
   const i = input();
   const m = byType(planLaunch(i), MSG_SET_METADATA) as unknown as { sender: string };
   assert.equal(m.sender, i.creator);
+});
+
+test('the plan summary speaks in the launch\'s own quote', () => {
+  const p = planLaunch(input({ initialBuy: 5_000_000n, quoteDenom: 'factory/inj1x/tusd' }));
+  const lines = describePlan(p, CURVE, LP, 5_000_000n, { label: 'TUSD', decimals: 6 }).join(' ');
+  assert.match(lines, /Buyers pay TUSD/);
+  assert.match(lines, /spend 5 TUSD/);
+  assert.doesNotMatch(lines, /INJ/);
+});
+
+test('an opening buy with a later start time is refused while typing', () => {
+  const nowMs = 1_800_000_000_000;
+  const later = ((BigInt(nowMs) + 3_600_000n) * 1_000_000n).toString();
+  assert.throws(
+    () => planLaunch(input({ initialBuy: 10n ** 18n, rules: { trade_start: later }, nowMs })),
+    /cannot be combined with a later start time/,
+  );
+  // Either one alone is fine.
+  planLaunch(input({ rules: { trade_start: later }, nowMs }));
+  planLaunch(input({ initialBuy: 10n ** 18n, nowMs }));
 });

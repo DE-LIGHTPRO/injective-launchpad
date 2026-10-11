@@ -1,9 +1,9 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ConnectWallet } from './ConnectWallet';
 import { LogoUpload } from './LogoUpload';
-import { listQuotes, denomLabel, type QuoteAsset } from '@/lib/chain';
+import { LaunchPreview } from './LaunchPreview';
+import { listQuotes, denomLabel, quoteLabel as quoteLabelOf, type QuoteAsset } from '@/lib/chain';
 import { CurveChart } from './CurveChart';
 import {
   planLaunch,
@@ -27,15 +27,18 @@ import {
   CREATOR_FEE_SHARE_BPS,
   PLATFORM_FEE_SHARE_BPS,
   MAX_INITIAL_BUY_BPS,
+  MAX_FEE_BPS,
+  DEFAULT_FEE_BPS,
+  REWARD_ROUTES,
   initialBuyCeiling,
-  FIXED_CURVE,
+  fixedCurveFor,
   FIXED_LP_RESERVE,
   CURVE_SUPPLY_TOKENS,
   LP_RESERVE_TOKENS,
   OPENING_RESERVE_QUOTE,
   GRADUATION_TARGET_QUOTE,
 } from '@/lib/launchLimits';
-import type { WalletAccount } from '@/lib/wallet';
+import { useConnectedAccount } from '@/lib/walletStore';
 import { profileForChain, profileFieldError, imageSrc } from '@/lib/tokenProfile';
 import {
   rulesForChain,
@@ -82,12 +85,27 @@ const DEFAULTS = {
   openingFeePct: '',
   openingFeeMins: '10',
   initialBuy: '',
-  feeBps: '100',
+  /*
+   * PERCENT, not basis points. These read '100' when the field took bps, and the
+   * field now takes percent: left alone the form would have defaulted every launch
+   * to a 100% fee, refused by the cap but only after the creator had filled the
+   * whole form.
+   */
+  feeBps: String(DEFAULT_FEE_BPS / 100),
+  feeSellBps: String(DEFAULT_FEE_BPS / 100),
+  rewardRoute: 'creator',
 };
 
 export function CreateLaunch() {
   const [f, setF] = useState(DEFAULTS);
-  const [account, setAccount] = useState<WalletAccount | null>(null);
+  /*
+   * The connected account comes from the shared store, not local state. It used to be
+   * a `useState` set only by this page's own ConnectWallet, so connecting in the header
+   * (the usual place) left the Sign section still showing "Connect a wallet" even though
+   * a wallet was plainly connected. Reading the store means either connect point works,
+   * the same way the trade panel reads it.
+   */
+  const account = useConnectedAccount();
 
   /*
    * The quote assets this launchpad allows, read from the factory.
@@ -99,6 +117,14 @@ export function CreateLaunch() {
    */
   const [quotes, setQuotes] = useState<{ quotes: QuoteAsset[]; defaultDenom: string } | null>(null);
   const [quoteDenom, setQuoteDenom] = useState<string | null>(null);
+  /*
+   * The chosen pair, resolved once. Its decimals scale the curve and parse the opening
+   * buy; its label goes everywhere this form used to say "INJ" regardless of the pair.
+   */
+  const activeQuote = quoteDenom ?? quotes?.defaultDenom ?? NETWORK.quoteDenom;
+  const quoteDecimals =
+    quotes?.quotes.find((q) => q.denom === activeQuote)?.decimals ?? NETWORK.quoteDecimals;
+  const quoteLabel = quoteLabelOf(activeQuote, quotes?.quotes);
   useEffect(() => {
     let live = true;
     void listQuotes().then((q) => {
@@ -126,7 +152,7 @@ export function CreateLaunch() {
    * `virtual_tokens` is not, and asking for it directly is how a launch gets a
    * shape nobody intended.
    */
-  const built = useMemo((): { curve: CurveConfig; lpReserve: bigint } | { error: string } => {
+  const built = useMemo((): { curve: CurveConfig; lpReserve: bigint; feeSellBps: number } | { error: string } => {
     /*
      * The curve is POLICY, not input. It used to be derived from four numbers the
      * creator typed, and fixing the supply was supposed to make market caps
@@ -142,12 +168,33 @@ export function CreateLaunch() {
      * The fee stays a choice: it is a cost, badged per card, and it does not make two
      * launches incomparable the way a different price curve does.
      */
-    if (f.feeBps.trim() === '') return { error: 'Enter the trading fee.' };
-    const feeBps = Number(f.feeBps);
-    if (!Number.isInteger(feeBps) || feeBps < 0 || feeBps > 1_000) {
-      return { error: 'The trading fee is a whole number of basis points, 0 to 1000.' };
-    }
-    const curve: CurveConfig = { ...FIXED_CURVE, feeBps: BigInt(feeBps) };
+    /*
+     * PERCENTAGES IN, BASIS POINTS OUT, converted once. A creator thinks in percent
+     * and the contract takes bps, and doing the conversion in two places is how the
+     * number shown and the number sent drift apart.
+     *
+     * `Math.round` on the product, not on the input: 0.05% is 5 bps, and parsing the
+     * percent as an integer would refuse every fraction of a percent a creator might
+     * reasonably want.
+     */
+    const asBps = (pct: string, label: string): number | { error: string } => {
+      if (pct.trim() === '') return { error: `Enter the ${label} fee.` };
+      const n = Number(pct);
+      if (!Number.isFinite(n) || n < 0) return { error: `The ${label} fee cannot be negative.` };
+      const bps = Math.round(n * 100);
+      if (bps > MAX_FEE_BPS) {
+        return { error: `The ${label} fee is ${n}%. The most a launch may charge is ${MAX_FEE_BPS / 100}%.` };
+      }
+      return bps;
+    };
+    const buy = asBps(f.feeBps, 'buy');
+    if (typeof buy !== 'number') return buy;
+    const sell = asBps(f.feeSellBps, 'sell');
+    if (typeof sell !== 'number') return sell;
+    const feeBps = buy;
+    // In the chosen pair's own units, as the factory will build it.
+    const curve: CurveConfig = { ...fixedCurveFor(quoteDecimals), feeBps: BigInt(feeBps) };
+    const feeSellBps = sell;
     try {
       // Still validated. The constants are hand-written, and a typo in one would
       // otherwise draw a chart for a curve no launch can actually have.
@@ -155,39 +202,9 @@ export function CreateLaunch() {
     } catch (e) {
       return { error: (e as Error).message };
     }
-    return { curve, lpReserve: FIXED_LP_RESERVE };
-  }, [f]);
+    return { curve, lpReserve: FIXED_LP_RESERVE, feeSellBps };
+  }, [f, quoteDecimals]);
 
-  const plan = useMemo((): { plan: LaunchPlan } | { error: string; field?: string } | null => {
-    if ('error' in built) return { error: built.error };
-    if (!account) return null;
-    const factory = getFactoryAddress();
-    try {
-      return {
-        plan: planLaunch({
-          creator: account.address,
-          symbol: f.symbol.trim(),
-          name: f.name,
-          description: f.description,
-          rules: { ...rulesForChain(builtRules), ...earlyFeeForChain(builtRules.earlyFee) },
-          initialBuy: devBuy,
-          profile: profileForChain({
-            image: f.image,
-            website: f.website,
-            x: f.x,
-            telegram: f.telegram,
-          }),
-          curve: built.curve,
-          lpReserve: built.lpReserve,
-          quoteDenom: quoteDenom ?? undefined,
-          factory,
-        }),
-      };
-    } catch (e) {
-      const err = e as LaunchInputError;
-      return { error: err.message, field: err.field as string };
-    }
-  }, [account, built, f]);
 
   // Null until the address is both safe and complete, so a half-typed URL does not
   // fire a request on every keystroke.
@@ -250,6 +267,65 @@ export function CreateLaunch() {
   const ruleError = (field: 'maxPerWallet' | 'tradeStart' | 'earlyFee') =>
     ruleProblems.find((p) => p.field === field)?.message ?? null;
 
+
+  /*
+   * The creator's own opening buy, parsed from whole quote units.
+   *
+   * Zero when blank, which is the honest default: a launch where the creator takes
+   * nothing first is a different product from one where they take a position, and the
+   * form should not pre-fill a number that changes which one it is.
+   */
+  const devBuy = useMemo(() => {
+    if (f.initialBuy.trim().length === 0) return 0n;
+    try {
+      // At the pair's decimals: "5" is 5 USDC, not 5 x 10^18 USDC base units.
+      const v = parseAmount(f.initialBuy, quoteDecimals);
+      return v > 0n ? v : 0n;
+    } catch {
+      return 0n;
+    }
+  }, [f.initialBuy, quoteDecimals]);
+
+  /*
+   * After `builtRules` and `devBuy`, which it reads. It sat above both, so with a wallet
+   * connected it hit the temporal dead zone ("Cannot access 'builtRules' before
+   * initialization"); the try/catch below turned that into a form error, and the create
+   * flow could never reach the sign step. Order matters for useMemo bodies.
+   */
+  const plan = useMemo((): { plan: LaunchPlan } | { error: string; field?: string } | null => {
+    if ('error' in built) return { error: built.error };
+    if (!account) return null;
+    const factory = getFactoryAddress();
+    try {
+      return {
+        plan: planLaunch({
+          creator: account.address,
+          symbol: f.symbol.trim(),
+          name: f.name,
+          description: f.description,
+          rules: { ...rulesForChain(builtRules), ...earlyFeeForChain(builtRules.earlyFee) },
+          initialBuy: devBuy,
+          profile: profileForChain({
+            image: f.image,
+            website: f.website,
+            x: f.x,
+            telegram: f.telegram,
+          }),
+          curve: built.curve,
+          lpReserve: built.lpReserve,
+          quoteDenom: quoteDenom ?? undefined,
+          feeSellBps: built.feeSellBps,
+          rewardRoute: f.rewardRoute as 'creator' | 'pool',
+          factory,
+        }),
+      };
+    } catch (e) {
+      const err = e as LaunchInputError;
+      return { error: err.message, field: err.field as string };
+    }
+  // `quoteDenom` was missing, so switching the pair did not refresh the signed plan.
+  }, [account, built, f, quoteDenom, quoteDecimals]);
+
   /*
    * Signing, behind the confirmation the user already ticked.
    *
@@ -278,23 +354,6 @@ export function CreateLaunch() {
       setBusy(false);
     }
   }, [account, busy, plan]);
-
-  /*
-   * The creator's own opening buy, parsed from whole quote units.
-   *
-   * Zero when blank, which is the honest default: a launch where the creator takes
-   * nothing first is a different product from one where they take a position, and the
-   * form should not pre-fill a number that changes which one it is.
-   */
-  const devBuy = useMemo(() => {
-    if (f.initialBuy.trim().length === 0) return 0n;
-    try {
-      const v = parseAmount(f.initialBuy);
-      return v > 0n ? v : 0n;
-    } catch {
-      return 0n;
-    }
-  }, [f.initialBuy]);
 
   /*
    * What that buy actually gets, quoted from the same maths the contract runs. A
@@ -341,7 +400,7 @@ export function CreateLaunch() {
       <div className="card">
         <h1>Create a launch</h1>
         <p className="note">
-          You supply the tokens. Buyers bring {NETWORK.quoteSymbol}, and the curve prices every
+          You supply the tokens. Buyers bring {quoteLabel}, and the curve prices every
           trade until it graduates. Nothing here can be edited afterwards, which is what makes it
           a fair launch and also why the numbers are worth checking twice.
         </p>
@@ -509,7 +568,7 @@ export function CreateLaunch() {
             </div>
             <p className="note">
               The other {LP_RESERVE_TOKENS.toLocaleString('en-US')} is held back and
-              paired against the {NETWORK.quoteSymbol} raised when the launch graduates.
+              paired against the {quoteLabel} raised when the launch graduates.
             </p>
           </div>
         </div>
@@ -524,11 +583,11 @@ export function CreateLaunch() {
         <div className="field-row">
           <div className="field">
             <span className="field-label">
-              Graduates at <span className="hint">{NETWORK.quoteSymbol} raised</span>
+              Graduates at <span className="hint">{quoteLabel} raised</span>
             </span>
             <div className="fixed-value">
               <span className="mono">
-                {GRADUATION_TARGET_QUOTE} {NETWORK.quoteSymbol}
+                {GRADUATION_TARGET_QUOTE} {quoteLabel}
               </span>
               <span className="chip chip-sm muted">fixed</span>
             </div>
@@ -539,7 +598,7 @@ export function CreateLaunch() {
             </span>
             <div className="fixed-value">
               <span className="mono">
-                {OPENING_RESERVE_QUOTE} {NETWORK.quoteSymbol}
+                {OPENING_RESERVE_QUOTE} {quoteLabel}
               </span>
               <span className="chip chip-sm muted">fixed</span>
             </div>
@@ -551,12 +610,68 @@ export function CreateLaunch() {
         </div>
 
         <div className="field-row">
+          {/*
+              TWO FEES, because entry and exit are not the same decision. Shown as
+              percentages because that is how a creator thinks about a fee and how
+              every other launchpad states it; the contract takes bps and the
+              conversion happens once, here.
+            */}
           <div className="field">
             <label htmlFor="cl-fee">
-              Trading fee <span className="hint">bps, max 1000</span>
+              Buy fee <span className="hint">%, up to {MAX_FEE_BPS / 100}</span>
             </label>
-            <input id="cl-fee" value={f.feeBps} onChange={(e) => set('feeBps')(e.target.value)} inputMode="numeric" />
+            <input
+              id="cl-fee"
+              value={f.feeBps}
+              onChange={(e) => set('feeBps')(e.target.value)}
+              inputMode="decimal"
+            />
           </div>
+          <div className="field">
+            <label htmlFor="cl-fee-sell">
+              Sell fee <span className="hint">%, up to {MAX_FEE_BPS / 100}</span>
+            </label>
+            <input
+              id="cl-fee-sell"
+              value={f.feeSellBps}
+              onChange={(e) => set('feeSellBps')(e.target.value)}
+              inputMode="decimal"
+            />
+          </div>
+          <div className="field">
+            <span className="field-label">
+              Your share goes <span className="hint">set once, cannot change</span>
+            </span>
+            <div className="segmented" role="group" aria-label="Where your fee share goes">
+              {REWARD_ROUTES.map((r) => (
+                <button
+                  key={r.value}
+                  type="button"
+                  aria-pressed={f.rewardRoute === r.value}
+                  onClick={() => set('rewardRoute')(r.value)}
+                >
+                  {r.label}
+                </button>
+              ))}
+            </div>
+            <p className="note">
+              {REWARD_ROUTES.find((r) => r.value === f.rewardRoute)?.detail}
+            </p>
+            {/*
+                NOT "to holders", and the absence is deliberate. Paying holders needs
+                a holder list, and Injective answers `denom_owners` with
+                not-implemented for a tokenfactory denom; a claim-based version is
+                gameable by buying immediately before claiming. The pool is the
+                honest version: it benefits everyone still holding rather than
+                whoever happened to hold at a snapshot.
+              */}
+            <p className="note">
+              Paying holders directly is not possible on Injective: a token transfer
+              runs no contract code, so nothing can see who holds what. The pool is
+              the closest honest version.
+            </p>
+          </div>
+
           {quotes !== null && quotes.quotes.length > 1 && (
             <div className="field">
               <label htmlFor="cl-quote">
@@ -569,7 +684,7 @@ export function CreateLaunch() {
               >
                 {quotes.quotes.map((q) => (
                   <option key={q.denom} value={q.denom}>
-                    {denomLabel(q.denom)}
+                    {q.symbol ?? denomLabel(q.denom)}
                   </option>
                 ))}
               </select>
@@ -643,7 +758,7 @@ export function CreateLaunch() {
             <div className="metric-row">
               <span className="k">Curve ceiling</span>
               <span className="v mono">
-                {fmt(maxCollectable(built.curve), 18, 2)} {NETWORK.quoteSymbol}
+                {fmt(maxCollectable(built.curve), quoteDecimals, 2)} {quoteLabel}
               </span>
             </div>
           </div>
@@ -654,7 +769,7 @@ export function CreateLaunch() {
         <h2>Launch rules</h2>
         <p className="note">
           Optional. Both are enforced by the curve contract on every buy and sell until
-          this launch graduates. Afterwards the token trades on a DEX and neither applies.
+          this launch graduates. Afterwards it trades against its locked pool and neither applies.
         </p>
 
         <div className="field-row" style={{ marginTop: 'var(--space-4)' }}>
@@ -718,7 +833,7 @@ export function CreateLaunch() {
 
         <div className="field">
           <label htmlFor="cl-devbuy">
-            Your opening buy <span className="hint">{NETWORK.quoteSymbol}, blank for none</span>
+            Your opening buy <span className="hint">{quoteLabel}, blank for none</span>
           </label>
           <input
             id="cl-devbuy"
@@ -789,6 +904,35 @@ export function CreateLaunch() {
         </p>
       </div>
 
+      {/*
+          THE PREVIEW SITS ABOVE SIGN, not beside the fields. A launch is immutable,
+          and until now the only way to check it was to scroll back up and reread the
+          boxes you filled in yourself, which is the worst way to catch a mistake in
+          them. It renders only when the form is coherent: a preview of an invalid
+          launch would show figures the contract will never accept.
+        */}
+      {!('error' in built) && (
+        <LaunchPreview
+          symbol={f.symbol}
+          name={f.name}
+          description={f.description}
+          image={f.image}
+          quoteLabel={quoteLabel}
+          buyFeePct={Number(built.curve.feeBps) / 100}
+          sellFeePct={built.feeSellBps / 100}
+          rewardRoute={f.rewardRoute as 'creator' | 'pool'}
+          rules={builtRules}
+          openingBuy={devBuy}
+          openingBuyShare={devBuyPreview?.share ?? null}
+          profile={{
+            image: f.image || null,
+            website: f.website || null,
+            x: f.x || null,
+            telegram: f.telegram || null,
+          }}
+        />
+      )}
+
       <div className="card">
         <h2>Sign</h2>
 
@@ -811,8 +955,19 @@ export function CreateLaunch() {
 
         {!account && (
           <>
-            <p className="note">Connect a wallet to see exactly what would be signed.</p>
-            <ConnectWallet onAccount={setAccount} />
+{/*
+              NO SECOND CONNECT BUTTON. The header is `position: sticky`, so its
+              "Connect wallet" is on screen at every scroll position, and an identical
+              button here put two of the same control in view at once: a reader has to
+              work out whether they do different things, and they do not.
+
+              The sentence stays, because the reason this section is empty still needs
+              saying. It names where the control is rather than repeating it.
+            */}
+            <p className="note">
+              Connect a wallet, using the button in the header, to see exactly what
+              would be signed.
+            </p>
           </>
         )}
 
@@ -824,13 +979,16 @@ export function CreateLaunch() {
           <>
             <ul className="plan">
               {!('error' in built) &&
-                describePlan(plan.plan, built.curve, built.lpReserve, devBuy).map((l) => (
+                describePlan(plan.plan, built.curve, built.lpReserve, devBuy, {
+                  label: quoteLabel,
+                  decimals: quoteDecimals,
+                }).map((l) => (
                   <li key={l}>{l}</li>
                 ))}
             </ul>
 
             <details className="raw">
-              <summary>The four messages, exactly as they will be sent</summary>
+              <summary>The five messages, exactly as they will be sent</summary>
               <pre>{JSON.stringify(plan.plan.messages, null, 2)}</pre>
             </details>
 
@@ -842,8 +1000,8 @@ export function CreateLaunch() {
                 onChange={(e) => setConfirmed(e.target.checked)}
               />
               <span>
-                I understand the supply is fixed, all of it leaves my wallet, and none of this can
-                be changed afterwards.
+                I understand the supply is fixed, all of it leaves my wallet, the right to mint more
+                is given up for good, and none of this can be changed afterwards.
               </span>
             </label>
 
@@ -875,13 +1033,13 @@ export function CreateLaunch() {
                 like it works. The messages are built by a tested function and shown
                 above exactly as they will be sent, but the ENCODING has never run
                 against a node, and I cannot run it: that needs a wallet extension.
-                What makes it safe to offer anyway is that all four messages are one
+                What makes it safe to offer anyway is that all five messages are one
                 transaction, so a mis-built launch is a rejected transaction rather
                 than a denom created with no curve behind it, and the factory refuses
                 any attached amount but the exact supply.
               */}
             <p className="note">
-              This signing path has not yet been run against a chain. All four messages
+              This signing path has not yet been run against a chain. All five messages
               go in a single transaction, so if anything is wrong the chain refuses the
               whole thing and nothing is created. Try it on testnet first.
             </p>

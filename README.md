@@ -1,8 +1,9 @@
-# inj·pad
+# Vetta
 
-A one-sided bonding curve launchpad on Injective. The creator supplies **only
-tokens**; buyers bring INJ, and the curve prices every trade until it graduates
-and the liquidity migrates.
+*Italian for "summit".* A one-sided bonding curve launchpad on Injective. The creator supplies **only
+tokens**; buyers bring INJ, and the curve prices every trade until it graduates.
+At graduation the reserve and the held-back tokens become a **locked pool inside
+the launch's own contract**: no withdraw function, no upgrade key, nobody's wallet.
 
 Currently a **demo**: the launches on the page are generated locally from the
 real curve maths, no contracts are deployed, and the banner says so on every
@@ -12,18 +13,65 @@ page. That banner is load-bearing — see "Demo mode" below.
 
 ```
 packages/launchpad-math/   The curve. Pure Rust, no chain access.
-contracts/curve/           One launch: buy, sell, graduate, claim fees.
+contracts/curve/           One launch: curve phase, then its locked pool. Buy, sell, claim fees.
 contracts/factory/         Creates curves, keeps the registry.
 app/                       Next.js front end.
 scripts/deploy.mjs         Deploys the factory and stores the curve code id.
+scripts/build-wasm.sh      Builds both contracts to chain-acceptable wasm (Rust 1.81).
+docs/AUDIT.md              Security review log: findings, fixes, open items.
+.github/workflows/ci.yml   Runs everything under "Tests" on every push and PR.
 ```
+
+## Graduation: a locked pool, not a transfer
+
+Both launchpads this one is measured against lock graduated liquidity where no one
+can withdraw it (Pons: a V4 position held by a locker with "no withdrawal path";
+nearly.trade: a Rhea pool). This repository used to `BankMsg::Send` the reserve to a
+`migration_target` address instead, which made that key the custodian of every
+graduated launch. It now works like this:
+
+1. The buy that reaches the 85 INJ target seeds the pool **in the same transaction**:
+   quote side = the curve's reserve plus any opening-fee premium; token side = the 200M
+   held back plus whatever the curve never sold. The two prices meet (~4.11e-7 INJ per
+   token on both sides), so graduation does not gap the price.
+2. From then on the same `Buy` / `Sell` messages trade against a plain `x * y = k`
+   pool (`packages/launchpad-math/src/pool.rs`). Same fee, still split 70/30
+   creator/platform, still taken on the quote leg only. Launch-window rules (wallet
+   cap, start time, opening fee) expire with the curve.
+3. Nothing can remove the liquidity. The contract has no withdraw path, and curves are
+   instantiated with **no wasm admin**, so no one can migrate them to new code.
+   `Graduate {}` survives only as a permissionless fallback that seeds the pool if the
+   target was met without seeding, so a launch can never be stuck between phases.
+
+Trade-off, stated plainly: the pool is not on Helix or an aggregator. It is the launch's
+own market. An adapter that seeds an external Injective AMM instead can be added once
+that AMM's testnet contract address has been verified rather than inferred.
+
+## Trust model
+
+| Who | Can | Cannot |
+|---|---|---|
+| Creator | pick ticker, profile, fee (≤10%), launch rules; make a dev buy in the launch tx | change supply, curve shape or fee split; touch the reserve or pool; **mint more** (the mint key passes to the curve at launch) |
+| Factory admin | allowlist quote denoms, point **future** launches at a new curve code id, hand over admin (two-step: propose, then accept) | change or migrate any existing launch |
+| Factory wasm admin (`INJ_FACTORY_WASM_ADMIN`) | upgrade the factory's code | migrate a curve (curves have no admin) |
+| Anyone | trade, claim fees to their rightful recipients, trigger the graduation fallback | withdraw liquidity |
+
+On mainnet the factory admin (`INJ_FACTORY_ADMIN`) and wasm admin
+(`INJ_FACTORY_WASM_ADMIN`) should be a multisig. The launch page reads each curve's code
+id, wasm admin and denom mint authority from the chain and disables trading unless the
+code id is in `NEXT_PUBLIC_CURVE_CODE_IDS`, there is no admin, and the curve holds the
+mint key.
 
 ## Tests
 
 ```bash
-cargo test            # 42: the maths, both contracts
-npm --prefix app test # 20: the TypeScript port, parity, env surface
+cargo test              # 125: the maths (curve + pool), both contracts, randomized runs
+npm --prefix app test   # 206: the TypeScript port, Rust parity, signing, wallet, env surface
+npx --prefix app tsc --noEmit
+bash scripts/build-wasm.sh  # wasm build + export and opcode checks the chain enforces
 ```
+
+CI runs all four on every push and pull request.
 
 ### The curve exists twice, and that is the main hazard
 
@@ -81,15 +129,19 @@ Testnet is the default everywhere. Mainnet is never a fallback.
   orders and driving the page therefore cannot test them.
 - `/launch/[id]` the launch: curve, numbers, buy and sell with price impact on
   both sides, and the trade feed.
+- `/watchlist` launches starred in this browser (local storage, no account).
+- `/creator/[address]` everything one address has launched, graduated and been paid.
 - `/create` the create form. It derives the curve from four plain numbers,
-  draws it from the real maths as you type, and shows the exact three messages
+  draws it from the real maths as you type, and shows the exact five messages
   before anything is signed.
 
 ## Wallet
 
-Keplr and Leap, over their own injected API. No SDK: both expose `enable` and
-`getKey`, which is all that connecting and reading an address needs, and the
-balance comes from the LCD this app already talks to.
+Keplr, Leap, Cosmostation, Ninji and OWallet, over their injected Keplr-compatible
+API. Connecting needs only `enable` and `getKey`; balances come from the LCD. Signing
+goes through the wallet's `signDirect` with `@injectivelabs/sdk-ts` building the
+transaction, because Injective's `EthAccount` and `ethsecp256k1` key types are not
+something stock CosmJS parses (`lib/broadcast.ts`).
 
 Extensions are detected by polling briefly after mount rather than reading once.
 They inject themselves during page load, so a single read is a coin flip on a
@@ -97,24 +149,26 @@ cold load and resolves to "no wallet" on a machine that has one.
 
 ## Creating a launch
 
-Three messages in one transaction, and the order matters:
+Five messages in one transaction, and the order matters:
 
 1. `MsgCreateDenom` makes `factory/<creator>/<subdenom>`
-2. `MsgMint` mints `curve_supply + lp_reserve` to the creator
-3. `MsgExecuteContract` `CreateLaunch`, with that whole amount attached
+2. `MsgMint` mints the fixed 1B supply to the creator
+3. `MsgSetDenomMetadata` names it, with an 18-decimal display unit
+4. `MsgChangeAdmin` hands the mint key to the factory, which passes it to the new curve.
+   A denom admin can mint without limit; once the curve holds it, nobody can. Skip this
+   and the factory's handover fails, so the whole launch reverts.
+5. `MsgExecuteContract` `CreateLaunch`, with the whole supply attached
 
-The factory refuses anything but the exact amount and nothing mints later, so a
-launch that gets this wrong either fails outright or succeeds with a supply the
-curve cannot honour. The construction is a pure function in `lib/createLaunch.ts`
-with its own tests, mutation-verified nine ways, because it is the part most
-likely to be wrong and the part a form cannot check.
+The factory refuses anything but the exact amount. The construction is a pure function in
+`lib/createLaunch.ts` with its own tests, because it is the part most likely to be wrong
+and the part a form cannot check.
 
-**Broadcasting is not wired up.** The messages are built and tested against the
-contract's own expectations but have never been signed against a chain. Signing
-needs Injective's protobuf types and a wallet to exercise them, and this
-repository already records twice what an unexercised transaction builder costs.
-The form says so on the button rather than failing at the end of a filled-in
-form, and prints the messages for use with `injectived tx`.
+**Broadcasting is wired up and not yet exercised against the current contracts.**
+`lib/broadcast.ts` simulates before the wallet prompt, so an encoding fault fails before
+anything is signed. `scripts/e2e-testnet.mjs` runs the whole lifecycle with the deploy
+key: create, curve trades, graduation, pool trades, fees, and checks the mint key ended
+with the curve. It mints its own 6-decimal test quote so graduating costs gas instead of
+87 INJ. Run it with `npm --prefix scripts run e2e` after `deploy.mjs`.
 
 ## Holders: not possible from a public endpoint
 
@@ -135,11 +189,14 @@ events. The measurement is a comment in `lib/chain.ts` so nobody repeats it.
 
 ## Not done yet
 
-- **Nothing is deployed.** `scripts/deploy.mjs` needs a funded key and has not
-  been run against Injective testnet.
-- **Broadcasting**, as above.
+- **Redeploy needed.** An earlier factory was deployed to testnet from the old
+  contracts (the ones with `migration_target`). Those contracts are not compatible with
+  the locked-pool versions, so testnet needs a fresh `scripts/deploy.mjs` run and the
+  app's `NEXT_PUBLIC_FACTORY_ADDRESS` pointed at the new factory.
+- **End-to-end on testnet**: create, trade, graduate into the pool, trade the pool, claim
+  fees, from both the scripts and the browser.
 - **Holders**, which needs an indexer.
 - A price chart over time, which needs trade history to aggregate and therefore
   needs launches that have traded.
-- The contracts have not been audited, and `contracts/curve` holds the reserve
-  that backs every outstanding token.
+- The contracts have not been audited by a third party, and `contracts/curve` holds
+  the reserve and the locked pool. `docs/AUDIT.md` is the internal review log.

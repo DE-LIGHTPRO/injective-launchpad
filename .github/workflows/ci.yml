@@ -1,0 +1,75 @@
+name: CI
+
+# Every check a contributor is expected to run locally, run on every push and PR.
+# Nothing here deploys, signs, or reads a secret.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contracts:
+    name: Contracts (cargo test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-test-${{ hashFiles('Cargo.lock') }}
+      - run: cargo test --locked
+
+  wasm:
+    name: Contracts (wasm build + chain checks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # build-wasm.sh pins Rust 1.81: later toolchains ship a precompiled std with
+      # bulk-memory opcodes that Injective's VM refuses. See the script's header.
+      - run: rustup toolchain install 1.81 --profile minimal --target wasm32-unknown-unknown
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-wasm-${{ hashFiles('Cargo.lock') }}
+      - run: bash scripts/build-wasm.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wasm
+          path: target/wasm32-unknown-unknown/release/*.wasm
+
+  app:
+    name: App (typecheck, tests, build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - run: npm ci
+      - run: npx tsc --noEmit
+      # Cargo is on the runner, so the parity-vector staleness check runs for real
+      # instead of skipping: the TS curve must match what the Rust prints today.
+      - run: npm test
+      - run: npx next build
+        env:
+          NEXT_PUBLIC_DEMO: '1'
+          NEXT_TELEMETRY_DISABLED: '1'

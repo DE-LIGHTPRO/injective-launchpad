@@ -22,7 +22,8 @@ function openedAtSeconds(raw: unknown): number | null {
 }
 import { NETWORK, getLcdUrl, getFactoryAddress } from './config.ts';
 import { isDemoMode, demoLaunches, demoDetail, demoDetailByCurve, demoTrades, DEMO_HEIGHT } from './demo.ts';
-import type { CurveConfig, CurveState } from './curve.ts';
+import type { CurveConfig, CurveState, PoolReserves } from './curve.ts';
+import type { ContractFacts } from './codeCheck.ts';
 
 /** Shape stored by the factory for each launch. */
 export interface Launch {
@@ -53,7 +54,6 @@ interface RawCurveContractConfig {
   quote_denom: string;
   creator: string;
   platform: string;
-  migration_target: string;
   lp_reserve: string;
   creator_fee_share_bps: number;
   curve: RawCurveConfig;
@@ -69,6 +69,9 @@ interface RawCurveState {
   /** Optional: a curve deployed before lifetime counters existed omits them. */
   platform_paid?: string;
   creator_paid?: string;
+  /** Locked-pool reserves; zero until graduation seeds them. */
+  pool_quote?: string;
+  pool_tokens?: string;
 }
 
 export class ChainError extends Error {
@@ -100,7 +103,7 @@ export class ChainError extends Error {
  * internals, and tell a trader nothing. The original is kept on `detail` so a
  * dev build and the console still have it.
  */
-function translateQueryError(status: number, body: string): ChainError {
+export function translateQueryError(status: number, body: string): ChainError {
   const detail = `${status}: ${body.slice(0, 300)}`;
   if (status === 404) {
     return new ChainError('That contract was not found on this network.', detail);
@@ -115,6 +118,25 @@ function translateQueryError(status: number, body: string): ChainError {
     return new ChainError('The network is rate limiting us. Try again shortly.', detail);
   }
   if (status >= 500) {
+    /*
+     * PRUNED HISTORY IS NOT AN OUTAGE, and it arrives as a 500 like everything else.
+     *
+     * The public sentry node keeps a window of recent blocks and drops the rest, so
+     * a trade older than that window answers `height N is not available, lowest
+     * height is M`. Telling somebody to "try again shortly" is wrong in a way that
+     * costs them time: the data is gone and retrying forever will not bring it back.
+     *
+     * Measured on a launch whose trades were about 83,000 blocks old, roughly
+     * fifteen hours at this chain's block time. That is the real retention horizon
+     * for everything built on transaction search here: trade history, fill prices,
+     * candles and 24h volume.
+     */
+    if (/is not available, lowest height/i.test(detail ?? '')) {
+      return new ChainError(
+        'These trades are older than the public node keeps. The history is gone, not late.',
+        detail,
+      );
+    }
     return new ChainError('The node is having trouble. Try again shortly.', detail);
   }
   return new ChainError('Could not read from the network.', detail);
@@ -194,6 +216,11 @@ export interface LaunchDetail {
   config: CurveConfig;
   state: CurveState;
   migrated: boolean;
+  /**
+   * The locked pool, once graduation has seeded it; `null` before. Nothing can
+   * withdraw it, so it is the liquidity every holder exits into after graduation.
+   */
+  pool: PoolReserves | null;
   platformOwed: bigint;
   creatorOwed: bigint;
   /** Lifetime paid out. Zero on a curve too old to have counted. */
@@ -239,6 +266,9 @@ export async function getLaunchDetail(curveAddress: string): Promise<LaunchDetai
       openedAtSeconds((cfg as { opened_at?: unknown }).opened_at),
     ),
     migrated: st.migrated,
+    pool: st.migrated
+      ? { quote: BigInt(st.pool_quote ?? '0'), tokens: BigInt(st.pool_tokens ?? '0') }
+      : null,
     platformOwed: BigInt(st.platform_owed),
     creatorOwed: BigInt(st.creator_owed),
     /*
@@ -250,6 +280,51 @@ export async function getLaunchDetail(curveAddress: string): Promise<LaunchDetai
     platformPaid: BigInt(st.platform_paid ?? '0'),
     creatorPaid: BigInt(st.creator_paid ?? '0'),
   };
+}
+
+/**
+ * Code id and admin of a contract, from the wasm module itself rather than from
+ * anything the contract says about itself. `null` when it cannot be read; demo
+ * launches have no contract, so they are `null` too.
+ */
+export async function contractFacts(address: string, denom?: string): Promise<ContractFacts | null> {
+  if (isDemoMode()) return null;
+  try {
+    const [res, denomAdmin] = await Promise.all([
+      fetch(`${getLcdUrl()}/cosmwasm/wasm/v1/contract/${address}`, {
+        headers: { accept: 'application/json' },
+      }),
+      denom ? denomAuthority(denom) : Promise.resolve(null),
+    ]);
+    if (!res.ok) return null;
+    const json = (await res.json()) as { contract_info?: { code_id?: string; admin?: string } };
+    const info = json.contract_info;
+    if (!info?.code_id) return null;
+    return { codeId: String(info.code_id), admin: info.admin ?? '', denomAdmin };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Who can mint a tokenfactory denom. Injective's route takes the creator and subdenom
+ * as two path segments, not the whole `factory/...` string. `null` when unreadable,
+ * including for a denom that is not a tokenfactory denom at all.
+ */
+export async function denomAuthority(denom: string): Promise<string | null> {
+  const m = /^factory\/([^/]+)\/(.+)$/.exec(denom);
+  if (!m) return null;
+  try {
+    const res = await fetch(
+      `${getLcdUrl()}/injective/tokenfactory/v1beta1/denoms/${m[1]}/${encodeURIComponent(m[2])}/authority_metadata`,
+      { headers: { accept: 'application/json' } },
+    );
+    if (!res.ok) return null;
+    const json = (await res.json()) as { authority_metadata?: { admin?: string } };
+    return typeof json.authority_metadata?.admin === 'string' ? json.authority_metadata.admin : null;
+  } catch {
+    return null;
+  }
 }
 
 /** Short display form for an address. */
@@ -383,6 +458,14 @@ export async function listTrades(curve: string, limit = 20): Promise<Trade[]> {
     if (tx.code && tx.code !== 0) continue;
     for (const ev of tx.events ?? []) {
       if (ev.type !== 'wasm') continue;
+      /*
+       * Only THIS curve's events. The search matches any transaction that touched the
+       * curve, and a transaction can carry wasm events from other contracts too (a
+       * router, or a second curve), whose buys would otherwise be shown here as this
+       * launch's.
+       */
+      const addr = ev.attributes?.find((x) => x.key === '_contract_address')?.value;
+      if (addr !== undefined && addr !== curve) continue;
       const t = tradeFromAttrs(ev.attributes ?? []);
       if (!t || t.kind === 'other') continue;
       out.push({ ...t, height: Number(tx.height ?? 0), txHash: tx.txhash ?? '' });
@@ -469,6 +552,17 @@ export async function currentHeight(): Promise<number | null> {
 export interface QuoteAsset {
   denom: string;
   decimals: number;
+  /** Display symbol from the factory's allowlist, when the admin set one. */
+  symbol?: string;
+}
+
+/**
+ * The label for a quote: the factory's symbol when it has one, otherwise a short form
+ * of the denom. Prefer this to `denomLabel` wherever the allowlist is at hand, since a
+ * peggy or erc20 quote is otherwise printed as a hex address.
+ */
+export function quoteLabel(denom: string, quotes: QuoteAsset[] | undefined): string {
+  return quotes?.find((q) => q.denom === denom)?.symbol ?? denomLabel(denom);
 }
 
 /**
@@ -490,12 +584,20 @@ export async function listQuotes(): Promise<{ quotes: QuoteAsset[]; defaultDenom
   if (!factory || isDemoMode()) return fallback;
   try {
     const raw = await smartQuery<{
-      quotes?: Array<{ denom?: unknown; decimals?: unknown }>;
+      quotes?: Array<{ denom?: unknown; decimals?: unknown; symbol?: unknown }>;
       default_denom?: unknown;
     }>(factory, { quotes: {} });
     const quotes = (raw.quotes ?? [])
       .filter((q) => typeof q.denom === 'string' && Number.isInteger(q.decimals))
-      .map((q) => ({ denom: q.denom as string, decimals: q.decimals as number }));
+      .map((q) => ({
+        denom: q.denom as string,
+        decimals: q.decimals as number,
+        // Rendered as text only, never as markup, and the contract restricts it to
+        // 1 to 12 letters, digits, dot or dash; re-checked so a bad value cannot spoof.
+        ...(typeof q.symbol === 'string' && /^[A-Za-z0-9.-]{1,12}$/.test(q.symbol)
+          ? { symbol: q.symbol }
+          : {}),
+      }));
     if (quotes.length === 0) return fallback;
     return {
       quotes,
@@ -566,6 +668,6 @@ export async function resolveQuote(denom: string): Promise<Quote> {
   return {
     denom,
     decimals: found?.decimals ?? NETWORK.quoteDecimals,
-    label: denomLabel(denom),
+    label: quoteLabel(denom, quotes),
   };
 }

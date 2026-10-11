@@ -68,7 +68,9 @@ export async function activityFor(curve: string): Promise<LaunchActivity> {
     // render while still differing between cards.
     const seed = [...curve].reduce((a, c) => (a * 31 + c.charCodeAt(0)) >>> 0, 7);
     const buys = seed % 140;
-    const sells = (seed >> 7) % 60;
+    // `>>>`, not `>>`: the seed is unsigned, and a signed shift of one above 2^31 went
+    // negative, which put "-16 trades" on a demo card.
+    const sells = (seed >>> 7) % 60;
     return { buys, sells, trades: buys + sells };
   }
   const base = `wasm._contract_address='${curve}'`;
@@ -190,6 +192,22 @@ export function volumeIsPartial(
   return oldest !== undefined && oldest.height >= currentHeight - blocks;
 }
 
+/**
+ * Trades inside a block window.
+ *
+ * Returns 0 rather than null for an unknown height, and that is a deliberate
+ * difference from `volumeWithin`. Volume is a figure shown to a reader, where zero
+ * and unmeasured must not look alike. This feeds a RANKING, where the only sensible
+ * place for a launch we could not measure is the bottom, and that is what 0 does.
+ */
+export function countWithin(trades: Trade[], currentHeight: number | null, blocks: number): number {
+  if (currentHeight === null) return 0;
+  const floor = currentHeight - blocks;
+  return trades.filter(
+    (t) => t.height >= floor && (t.kind === 'buy' || t.kind === 'sell'),
+  ).length;
+}
+
 /** Compact trade count: 1,871 reads better than 1871 on a dense card. */
 export function tradesLabel(a: LaunchActivity | null | undefined): string {
   /*
@@ -219,6 +237,17 @@ export interface LaunchEnrichment {
   volume24h: bigint | null;
   /** True when the sum is a floor rather than a total. */
   volumePartial: boolean;
+  /**
+   * Trades inside the same window the volume covers.
+   *
+   * A COUNT, which is the only activity measure comparable ACROSS pairs: volume is
+   * denominated in each launch's quote, so ranking an INJ launch against a USDC one
+   * by volume ranks amounts of different assets. A trade is a trade in any pair.
+   *
+   * Counted from the page of trades already fetched, so it costs nothing, and it is
+   * bounded by that page the same way the volume is.
+   */
+  trades24h: number;
   /** Effective prices from real fills, oldest first. Empty when nothing has traded. */
   series: number[];
   traders: number;
@@ -250,6 +279,7 @@ export async function enrichLaunch(
     activity: act,
     volume24h: volumeWithin(trades, height, BLOCKS_PER_DAY),
     volumePartial: volumeIsPartial(trades, ENRICH_TRADE_LIMIT, height, BLOCKS_PER_DAY),
+    trades24h: countWithin(trades, height, BLOCKS_PER_DAY),
     series: priceSeries(trades),
     traders: uniqueTraders(trades),
   };

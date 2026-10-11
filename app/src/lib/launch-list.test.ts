@@ -28,6 +28,8 @@ const row = (
 ): LaunchRow => ({
   id,
   denom: `factory/inj1pad/${sym}`,
+  // Selection and sorting have no opinion about the URL; the shape needs one.
+  path: `/launch/${sym}`,
   curveAddress: `inj1curve${id}`,
   quoteDenom: 'inj',
   quoteDecimals: 18,
@@ -242,4 +244,36 @@ test('the pair filter shows one quote at a time', () => {
   // `null` and absent both mean every pair, so an existing caller is unaffected.
   assert.equal(selectLaunches(rows, { q: '', sort: 'newest', hideGraduated: false, quote: null }).length, 2);
   assert.equal(selectLaunches(rows, { q: '', sort: 'newest', hideGraduated: false }).length, 2);
+});
+
+/*
+ * Stage tabs (Live / About to graduate / Graduated). The fixtures cross the two axes
+ * that matter: a graduated launch, a live one well short of the target, and a live one
+ * past the 0.8 "about to graduate" band, so each tab can only contain the right ids.
+ */
+const STAGED: LaunchRow[] = [
+  row(1, 'LIVELOW', 10n, 0.2, false), // live, not close
+  row(2, 'LIVESOON', 90n, 0.9, false), // live, about to graduate
+  row(3, 'DONE', 85n, 1, true), // graduated
+];
+
+test('the live tab is every launch still on the curve', () => {
+  const ids = selectLaunches(STAGED, { q: '', sort: 'newest', hideGraduated: false, status: 'live' }).map((r) => r.id);
+  assert.deepEqual(ids.sort(), [1, 2]);
+});
+
+test('the about-to-graduate tab is only live launches past the threshold', () => {
+  const ids = selectLaunches(STAGED, { q: '', sort: 'newest', hideGraduated: false, status: 'soon' }).map((r) => r.id);
+  assert.deepEqual(ids, [2], 'a graduated launch or one short of the band leaked in');
+});
+
+test('the graduated tab is only graduated launches, even with hideGraduated set', () => {
+  // The tab asked for graduated rows, so an inherited hideGraduated must not empty it.
+  const ids = selectLaunches(STAGED, { q: '', sort: 'newest', hideGraduated: true, status: 'graduated' }).map((r) => r.id);
+  assert.deepEqual(ids, [3]);
+});
+
+test('all / absent status shows every stage', () => {
+  assert.equal(selectLaunches(STAGED, { q: '', sort: 'newest', hideGraduated: false, status: 'all' }).length, 3);
+  assert.equal(selectLaunches(STAGED, { q: '', sort: 'newest', hideGraduated: false }).length, 3);
 });

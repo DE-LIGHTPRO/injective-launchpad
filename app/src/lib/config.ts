@@ -83,6 +83,15 @@ export function isLcdConfigured(): boolean {
   return Boolean(process.env.NEXT_PUBLIC_LCD_URL?.trim());
 }
 
+/**
+ * Curve code ids the operator has published and vouches for, comma separated. NOT an
+ * audit: see `codeCheck.ts`. The launch page refuses to
+ * offer trading on a curve running anything else. Empty means not pinned (pre-audit).
+ */
+export function getPinnedCurveCodeIdsRaw(): string {
+  return process.env.NEXT_PUBLIC_CURVE_CODE_IDS?.trim() ?? '';
+}
+
 /** The single resolver for the factory address. */
 export function getFactoryAddress(): string {
   return process.env.NEXT_PUBLIC_FACTORY_ADDRESS?.trim() ?? '';

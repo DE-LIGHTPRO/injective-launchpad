@@ -3,42 +3,45 @@
  *
  * This exists to SEPARATE TWO QUESTIONS that are otherwise answered together:
  *
- *   1. do the four messages compose a launch the chain accepts?
+ *   1. do the messages compose a launch the chain accepts?
  *   2. does the browser's signing path encode them correctly?
  *
  * The create page answers both at once, so a failure there is ambiguous: the
- * contract could be wrong, or `app/src/lib/broadcast.ts` could be. This answers only
- * the first, with the same four messages built the same way, signed by the deploy key
- * through the SDK's own broadcaster rather than through a wallet.
+ * contract could be wrong, or the wallet encoding could be. This answers only the
+ * first, with the messages built by the app's own `planLaunch` and `composeMessages`,
+ * signed by the deploy key through the SDK's broadcaster rather than through a wallet.
  *
  * If this lands and the browser does not, the fault is the browser encoding. If
  * neither lands, it is the contract. That is worth one script.
+ *
+ * IT IMPORTS THE APP'S BUILDERS RATHER THAN RESTATING THEM. It used to restate
+ * them, with a comment saying "the same four messages `planLaunch` builds" beside a
+ * list of five, and a `create_launch` payload of `{ denom, fee_bps }` that had
+ * stopped matching the app several fields ago. A script that spends a 1 INJ denom
+ * fee to verify the real path must not be verifying a different path. The sibling
+ * `dry-run-create.mjs` had the same defect, and in its case the restated list was
+ * missing `MsgChangeAdmin` entirely.
  *
  *   node scripts/create-test-launch.mjs           # ticker defaults to TEST<n>
  *   node scripts/create-test-launch.mjs KAIJU 2   # ticker, and 2 INJ opening buy
  *
  * Needs INJ_MNEMONIC in scripts/.env.local, the same as deploy.mjs, and roughly
  * 2 INJ: Injective charges a 1 INJ tokenfactory denom creation fee, plus gas, plus
- * whatever opening buy is asked for.
+ * whatever opening buy is asked for. Run `dry-run-create.mjs` first; it simulates
+ * this for free, and the fee is charged in the same transaction that would fail.
  */
 import { readFileSync, existsSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import {
-  PrivateKey,
-  MsgCreateDenom,
-  MsgMint,
-  MsgSetDenomMetadata,
-  MsgExecuteContract,
-  MsgBroadcasterWithPk,
-} from '@injectivelabs/sdk-ts';
+import { PrivateKey, MsgBroadcasterWithPk } from '@injectivelabs/sdk-ts';
 // Network lives in its own package, not in sdk-ts. deploy.mjs already imports it
 // from here; the SDK re-exports almost everything else, which is what made the
 // wrong guess look reasonable.
 import { Network, getNetworkEndpoints } from '@injectivelabs/networks';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
+const APP = join(HERE, '..', 'app');
 
 function die(msg, hint) {
   console.error(`\n  ✗ ${msg}`);
@@ -46,14 +49,15 @@ function die(msg, hint) {
   process.exit(1);
 }
 
-// Same loader and the same permission refusal as deploy.mjs: this process holds a
-// seed phrase, and a file at 0644 is readable by every account on the machine.
-const envPath = join(HERE, '.env.local');
-if (existsSync(envPath)) {
-  if ((statSync(envPath).mode & 0o777) & 0o077) {
-    die('scripts/.env.local is readable by others.', 'Run: chmod 600 scripts/.env.local');
+/** `KEY=value` lines from a file, without overwriting anything already set. */
+function loadEnv(path, { secret = false } = {}) {
+  if (!existsSync(path)) return;
+  // Same permission refusal as deploy.mjs for the file that holds a seed phrase:
+  // 0644 is readable by every account on the machine, and a seed cannot be rotated.
+  if (secret && (statSync(path).mode & 0o777) & 0o077) {
+    die(`${path} is readable by others.`, `Run: chmod 600 ${path}`);
   }
-  for (const line of readFileSync(envPath, 'utf8').split('\n')) {
+  for (const line of readFileSync(path, 'utf8').split('\n')) {
     const t = line.trim();
     if (!t || t.startsWith('#')) continue;
     const eq = t.indexOf('=');
@@ -62,94 +66,74 @@ if (existsSync(envPath)) {
     if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {
       v = v.slice(1, -1);
     }
-    if (process.env[t.slice(0, eq).trim()] === undefined) process.env[t.slice(0, eq).trim()] = v;
+    const k = t.slice(0, eq).trim();
+    if (process.env[k] === undefined) process.env[k] = v;
   }
 }
+
+loadEnv(join(HERE, '.env.local'), { secret: true });
+// Before the app's modules are imported: they read `NEXT_PUBLIC_*` at module scope.
+loadEnv(join(APP, '.env.local'));
 
 const mnemonic = process.env.INJ_MNEMONIC?.trim();
 if (!mnemonic) die('No INJ_MNEMONIC.', 'Put it in scripts/.env.local, chmod 600, and re-run.');
 
-const factory = process.env.NEXT_PUBLIC_FACTORY_ADDRESS?.trim()
-  ?? readFileSync(join(HERE, '..', 'app', '.env.local'), 'utf8')
-    .split('\n')
-    .find((l) => l.startsWith('NEXT_PUBLIC_FACTORY_ADDRESS='))
-    ?.split('=')[1]
-    ?.trim();
+const factory = process.env.NEXT_PUBLIC_FACTORY_ADDRESS?.trim();
 if (!factory) die('No factory address.', 'Set NEXT_PUBLIC_FACTORY_ADDRESS in app/.env.local.');
 
+// Node strips the types; the app's modules import each other with explicit `.ts`
+// extensions, which is what makes this work without a bundler.
+const { planLaunch, describePlan } = await import(join(APP, 'src/lib/createLaunch.ts'));
+const { composeMessages } = await import(join(APP, 'src/lib/broadcast.ts'));
+const { fixedCurveFor, FIXED_LP_RESERVE } = await import(join(APP, 'src/lib/launchLimits.ts'));
+const { NETWORK } = await import(join(APP, 'src/lib/config.ts'));
+
 const symbol = (process.argv[2] ?? `TEST${Date.now().toString().slice(-4)}`).toUpperCase();
-const openingBuyInj = Number(process.argv[3] ?? 0);
+const openingBuyQuote = Number(process.argv[3] ?? 0);
 
 const privateKey = PrivateKey.fromMnemonic(mnemonic);
 const sender = privateKey.toBech32();
-const denom = `factory/${sender}/${symbol}`;
+const network = NETWORK.name === 'mainnet' ? Network.Mainnet : Network.Testnet;
 
-const ONE = 10n ** 18n;
-const CURVE_SUPPLY = 800_000_000n * ONE;
-const LP_RESERVE = 200_000_000n * ONE;
-const SEED = CURVE_SUPPLY + LP_RESERVE;
-const openingBuy = BigInt(Math.round(openingBuyInj * 1e18));
+const curve = { ...fixedCurveFor(NETWORK.quoteDecimals), feeBps: 100n };
+const initialBuy = BigInt(Math.round(openingBuyQuote * 10 ** NETWORK.quoteDecimals));
+
+let plan;
+try {
+  plan = planLaunch({
+    creator: sender,
+    symbol,
+    name: symbol,
+    description: 'Created by scripts/create-test-launch.mjs to verify the contracts.',
+    curve,
+    lpReserve: FIXED_LP_RESERVE,
+    factory,
+    ...(initialBuy > 0n ? { initialBuy } : {}),
+  });
+} catch (e) {
+  // The app's own validation, reached before anything is signed, which is the whole
+  // reason it lives in a pure function: this is the same refusal the form would show.
+  die(`The launch is invalid (${e.field ?? 'input'}).`, e.message);
+}
 
 console.log(`\n  Creating a launch on ${factory}`);
-console.log(`  signer: ${sender}`);
-console.log(`  denom:  ${denom}`);
-if (openingBuy > 0n) console.log(`  opening buy: ${openingBuyInj} INJ`);
-
-/*
- * The same four messages `planLaunch` builds, in the same order, with the same
- * two-unit denom metadata. Written out rather than imported because that file is
- * TypeScript inside the Next app; keeping them side by side is the point, and
- * `test/create-launch.test.ts` is what pins the shape either way.
- */
-const msgs = [
-  MsgCreateDenom.fromJSON({ sender, subdenom: symbol }),
-  MsgMint.fromJSON({ sender, amount: { denom, amount: SEED.toString() } }),
-  MsgSetDenomMetadata.fromJSON({
-    sender,
-    metadata: {
-      description: 'Created by scripts/create-test-launch.mjs to verify the contracts.',
-      denomUnits: [
-        { denom, exponent: 0, aliases: [] },
-        { denom: symbol, exponent: 18, aliases: [] },
-      ],
-      base: denom,
-      display: symbol,
-      name: symbol,
-      symbol,
-      uri: '',
-      uriHash: '',
-      decimals: 18,
-    },
-  }),
-  MsgExecuteContract.fromJSON({
-    sender,
-    contractAddress: factory,
-    msg: {
-      create_launch: {
-        denom,
-        /*
-         * The curve is no longer sent. Its shape is policy written by the factory,
-         * so the only number left here is the fee; `cw_serde` denies unknown fields,
-         * so leaving `curve` or `lp_reserve` in fails the execute AFTER the 1 INJ
-         * denom-creation fee has been charged in the same transaction.
-         */
-        fee_bps: 100,
-        ...(openingBuy > 0n ? { initial_buy: openingBuy.toString() } : {}),
-      },
-    },
-    funds: [
-      { denom, amount: SEED.toString() },
-      ...(openingBuy > 0n ? [{ denom: 'inj', amount: openingBuy.toString() }] : []),
-    ],
-  }),
-];
+console.log(`  network: ${NETWORK.name}`);
+console.log(`  signer:  ${sender}`);
+console.log(`  denom:   ${plan.denom}`);
+if (initialBuy > 0n) console.log(`  opening buy: ${openingBuyQuote} ${NETWORK.quoteSymbol}`);
+console.log('');
+// The same sentences the create page shows before signing, from the same function,
+// so what this script does is readable without reading the message list.
+for (const line of describePlan(plan, curve, FIXED_LP_RESERVE, initialBuy)) {
+  console.log(`    - ${line}`);
+}
 
 try {
   const res = await new MsgBroadcasterWithPk({
     privateKey,
-    network: Network.Testnet,
-    endpoints: getNetworkEndpoints(Network.Testnet),
-  }).broadcast({ msgs });
+    network,
+    endpoints: getNetworkEndpoints(network),
+  }).broadcast({ msgs: composeMessages(plan, sender) });
 
   /*
    * A 200 is not a landed transaction. The broadcaster resolves with the chain's own
@@ -159,7 +143,7 @@ try {
     die(`The chain refused it (code ${res.code}).`, res.rawLog);
   }
   console.log(`\n  ✓ launched. tx ${res.txHash}`);
-  console.log(`  https://testnet.explorer.injective.network/transaction/${res.txHash}`);
+  console.log(`  ${NETWORK.explorer}/transaction/${res.txHash}`);
   console.log(`\n  The board should show it: https://injpad.vercel.app/\n`);
 } catch (e) {
   die('Broadcast failed.', e?.originalMessage ?? e?.message ?? String(e));

@@ -43,6 +43,10 @@ import {
   parseAmount,
   priceImpactBps,
   sellPriceImpactBps,
+  poolQuoteBuy,
+  poolQuoteSell,
+  poolBuyImpactBps,
+  poolSellImpactBps,
   IMPACT_SEVERE_BPS,
   fmt,
   validate,
@@ -396,4 +400,70 @@ test('the committed vectors are what the Rust produces right now', (t) => {
     'curve-vectors.json is stale: the Rust produces different numbers. Run `npm run vectors`, ' +
       'then check what changed before committing it, because the UI quotes these.',
   );
+});
+
+// ------------------------------------------------------------------ locked pool --
+
+test('pool buys and sells match the Rust to the unit', () => {
+  const poolRow = VECTORS.find((r) => r.kind === 'pool');
+  assert.ok(poolRow, 'the vectors carry no pool row; regenerate with `npm run vectors`');
+  const pool = { quote: big(poolRow.quote), tokens: big(poolRow.tokens) };
+  const feeBps = BigInt(Number(poolRow.feeBps));
+  const buys = rowsOf('poolBuy');
+  const sells = rowsOf('poolSell');
+  assert.ok(buys.length >= 3 && sells.length >= 3, 'too few pool vectors to compare');
+  for (const r of buys) {
+    const q = poolQuoteBuy(pool, feeBps, big(r.injIn));
+    assert.equal(q.fee, big(r.fee), `pool buy fee for ${r.injIn}`);
+    assert.equal(q.quoteInAfterFee, big(r.net), `pool buy net for ${r.injIn}`);
+    assert.equal(q.tokensOut, big(r.tokensOut), `pool buy tokensOut for ${r.injIn}`);
+    assert.equal(poolBuyImpactBps(pool, feeBps, big(r.injIn)), Number(r.impactBps));
+  }
+  for (const r of sells) {
+    const q = poolQuoteSell(pool, feeBps, big(r.tokensIn));
+    assert.equal(q.fee, big(r.fee), `pool sell fee for ${r.tokensIn}`);
+    assert.equal(q.injOut, big(r.injOut), `pool sell injOut for ${r.tokensIn}`);
+    assert.equal(poolSellImpactBps(pool, feeBps, big(r.tokensIn)), Number(r.impactBps));
+  }
+});
+
+test('a pool round trip never returns more than was spent', () => {
+  let pool = { quote: 85n * ONE, tokens: 207_000_000n * ONE };
+  for (const n of [1n, 7n, 50n, 400n]) {
+    const spent = (n * ONE) / 10n;
+    const b = poolQuoteBuy(pool, 0n, spent);
+    const after = { quote: pool.quote + b.quoteInAfterFee, tokens: pool.tokens - b.tokensOut };
+    const s = poolQuoteSell(after, 0n, b.tokensOut);
+    assert.ok(s.injOut <= spent, `round trip of ${n} returned ${s.injOut} for ${spent}`);
+    pool = after;
+  }
+});
+
+// ---------------------------------------------------------- 6-decimal quotes --
+
+import { marketCapExact, spotPriceWad, PRICE_WAD } from './curve.ts';
+import { fixedCurveFor, FIXED_TOTAL_SUPPLY } from './launchLimits.ts';
+
+test('a 6-decimal launch has a real market cap and price, not zero', () => {
+  // Seen live: PAIR5277 held 9.90 TUSD and showed market cap 0.00, because the
+  // per-token price was floored to a whole TUSD base unit before multiplying.
+  const cfg = { ...fixedCurveFor(6), feeBps: 100n };
+  const st = { injCollected: 0n, tokensSold: 0n, graduated: false };
+  const mc = marketCapExact(cfg, st, null, FIXED_TOTAL_SUPPLY);
+  // 60 * 1B / 1.073B = 55.919 whole units, the same figure an INJ launch shows.
+  // It doubled with the opening reserve when the curve was scaled 30/85 -> 60/170.
+  assert.equal(mc, 55_917_986n, `market cap ${mc}`);
+  const wad = spotPriceWad(cfg, st, null, ONE);
+  assert.ok(wad > 0n, 'the wad price must not floor to zero');
+  // Same shape as INJ: identical price once each is read at its own decimals.
+  const inj = spotPriceWad({ ...fixedCurveFor(18), feeBps: 100n }, st, null, ONE);
+  assert.equal(inj / 10n ** 12n, wad, 'the curve shape differs between 6 and 18 decimals');
+  assert.ok(PRICE_WAD === 10n ** 18n);
+});
+
+test('the 18-decimal fixed curve is exactly the factory constants', () => {
+  const c = fixedCurveFor(18);
+  assert.equal(c.virtualInj, 60n * ONE);
+  assert.equal(c.graduationTarget, 170n * ONE);
+  assert.equal(fixedCurveFor(6).virtualInj, 60_000_000n);
 });

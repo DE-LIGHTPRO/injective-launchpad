@@ -3,6 +3,7 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { curvePoints, quoteBuy, spotPrice, fmt, type CurveConfig, type CurveState } from '@/lib/curve';
 import { NETWORK } from '@/lib/config';
+import { fixedCurveFor, DEFAULT_FEE_BPS } from '@/lib/launchLimits';
 
 /**
  * The curve, as something you can move along.
@@ -24,13 +25,25 @@ import { NETWORK } from '@/lib/config';
 
 const ONE = 10n ** 18n;
 
-/** The shape a launch starts from on the create form. */
+/**
+ * The shape a launch actually gets, read from the one place that defines it.
+ *
+ * IT USED TO BE A SECOND COPY, written out here as `virtualInj: 30` and
+ * `graduationTarget: 85`. When the curve was flattened to 60/170 to halve price
+ * impact, the factory changed, `launchLimits.ts` changed, and this did not. The
+ * homepage hero then taught every visitor that graduation is 88 INJ when the
+ * deployed curve needs about 175, and quoted a token amount for 1 INJ that no
+ * launch would ever charge, under a docblock claiming every number is real.
+ *
+ * Nothing about the page looked wrong, which is the point: a duplicated constant
+ * does not drift visibly, it drifts correctly-looking. `fixedCurveFor` is the same
+ * function the create form and the quote panel use.
+ */
 const SHAPE: CurveConfig = {
-  virtualInj: 30n * ONE,
-  virtualTokens: 1_073_000_000n * ONE,
-  curveSupply: 800_000_000n * ONE,
-  graduationTarget: 85n * ONE,
-  feeBps: 100n,
+  ...fixedCurveFor(NETWORK.quoteDecimals),
+  // The default a new launch starts from on the form, which the creator may change
+  // within the cap. The curve's shape is policy; the fee is not.
+  feeBps: BigInt(DEFAULT_FEE_BPS),
 };
 
 const W = 760;
@@ -112,11 +125,8 @@ export function CurveExplorer() {
   return (
     <section className="explorer" aria-labelledby="explorer-heading">
       <div className="explorer-head">
-        <h2 id="explorer-heading">Move along the curve</h2>
-        <p className="note">
-          This is the shape a new launch starts with. Every figure is computed by the
-          same arithmetic the contract runs, for a launch that does not exist yet.
-        </p>
+        <h2 id="explorer-heading">The bonding curve</h2>
+        <p className="note">Every launch uses this curve. Computed with the contract&rsquo;s own maths.</p>
       </div>
 
       <svg
@@ -204,8 +214,8 @@ export function CurveExplorer() {
         </div>
       )}
       <p className="note explorer-hint">
-        Drag the handle, or focus it and use the arrow keys. Further along the curve,
-        the same {NETWORK.quoteSymbol} buys fewer tokens: that is the whole mechanism.
+        Drag the handle or use the arrow keys. The further along, the fewer tokens each{' '}
+        {NETWORK.quoteSymbol} buys.
       </p>
     </section>
   );

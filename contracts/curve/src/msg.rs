@@ -2,7 +2,7 @@ use cosmwasm_schema::{cw_serde, QueryResponses};
 use cosmwasm_std::Uint128;
 
 use crate::state::LaunchRules;
-use crate::state::{Config, CurveConfigStored, State};
+use crate::state::{RewardRoute, Config, CurveConfigStored, State};
 
 #[cw_serde]
 pub struct InstantiateMsg {
@@ -13,8 +13,7 @@ pub struct InstantiateMsg {
     pub quote_denom: String,
     pub creator: String,
     pub platform: String,
-    pub migration_target: String,
-    /// Tokens held back to pair against the collected INJ at migration.
+    /// Tokens held back to pair against the collected INJ in the locked pool.
     /// The seed deposit must cover `curve.curve_supply + lp_reserve`.
     pub lp_reserve: Uint128,
     pub creator_fee_share_bps: u16,
@@ -23,12 +22,16 @@ pub struct InstantiateMsg {
     /// which is what a launch created before this field existed had.
     #[serde(default)]
     pub rules: LaunchRules,
+    /// Where the creator's share of each fee goes.
+    #[serde(default)]
+    pub reward_route: RewardRoute,
 }
 
 #[cw_serde]
 pub enum ExecuteMsg {
-    /// Buy tokens with the attached quote denom. Any amount beyond what the
-    /// curve can still absorb is refunded in the same transaction.
+    /// Buy tokens with the attached quote denom. On the curve, any amount beyond what
+    /// it can still absorb is refunded in the same transaction. After graduation the
+    /// same message trades against the locked pool.
     Buy {
         min_tokens_out: Uint128,
         /// Who receives the tokens. Defaults to the sender.
@@ -44,11 +47,15 @@ pub enum ExecuteMsg {
         #[serde(default)]
         recipient: Option<String>,
     },
-    /// Sell tokens back to the curve by attaching them to the message.
+    /// Sell tokens by attaching them: to the curve, or after graduation to the pool.
     Sell { min_inj_out: Uint128 },
-    /// Close the curve and move the reserve and leftover tokens to the
-    /// migration target. Permissionless: once the target is hit, anyone may
-    /// trigger it, so a launch cannot be held hostage by its creator.
+    /// Seed the locked pool from the curve's reserve and leftover tokens.
+    ///
+    /// The buy that reaches the target already does this in the same transaction, so
+    /// this exists only as a permissionless fallback: if the target is met and the pool
+    /// is not yet seeded, anyone may finish it, and a launch can never be stranded
+    /// between phases (Pons keeps its `createGraduatedPool` retryable for the same
+    /// reason). Nothing is sent anywhere: the liquidity stays in this contract.
     Graduate {},
     /// Pay out accrued fees to the platform and creator.
     ClaimFees {},
