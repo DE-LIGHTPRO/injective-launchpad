@@ -1,7 +1,9 @@
 import Link from 'next/link';
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
-import { getLaunch, getLaunchDetail, resolveQuote, symbolOf, short, ChainError } from '@/lib/chain';
+import { getLaunch, getLaunchDetail, resolveQuote, symbolOf, short, ChainError, contractFacts } from '@/lib/chain';
+import { assessCurveCode, blocksTrading, pinnedCodeIds } from '@/lib/codeCheck';
+import { CodeCheck } from '@/components/CodeCheck';
 import { TokenLogo } from '@/components/TokenLogo';
 import { visibleLinks } from '@/lib/tokenProfile';
 import { describeRules, hasAnyRule } from '@/lib/launchRules';
@@ -12,7 +14,7 @@ import { CreatorPosition } from '@/components/CreatorPosition';
 import { FeeEarnings } from '@/components/FeeEarnings';
 import { CopyButton } from '@/components/CopyButton';
 import { graduationProgress, fmt, launchSpotPrice, maxCollectable } from '@/lib/curve';
-import { NETWORK, isDeployed, isDevBuild } from '@/lib/config';
+import { NETWORK, isDeployed, isDevBuild, getPinnedCurveCodeIdsRaw } from '@/lib/config';
 import { isDemoMode } from '@/lib/demo';
 import { CurveChart } from '@/components/CurveChart';
 import { DemoBanner } from '@/components/DemoBanner';
@@ -100,10 +102,13 @@ export default async function LaunchPage({ params }: { params: Promise<{ id: str
     );
   }
 
-  let launch, detail;
+  let launch, detail, facts;
   try {
     launch = await getLaunch(numericId);
-    detail = await getLaunchDetail(launch.curve);
+    [detail, facts] = await Promise.all([
+      getLaunchDetail(launch.curve),
+      contractFacts(launch.curve, launch.denom),
+    ]);
   } catch (e) {
     /*
      * A launch that does not exist is a 404, not a rendered error at 200.
@@ -126,6 +131,11 @@ export default async function LaunchPage({ params }: { params: Promise<{ id: str
     );
   }
 
+  const codeStatus = assessCurveCode(
+    facts ?? null,
+    pinnedCodeIds(getPinnedCurveCodeIdsRaw()),
+    launch.curve,
+  );
   const symbol = symbolOf(detail.denom);
   // Only the links that survive the scheme allowlist, so nothing hostile reaches an
   // href even if the chain the UI is pointed at never checked them.
@@ -183,6 +193,7 @@ export default async function LaunchPage({ params }: { params: Promise<{ id: str
       <p className="sub mono" style={{ fontSize: 'var(--text-xs)', wordBreak: 'break-all' }}>
         {detail.denom} <CopyButton value={detail.denom} label="Copy" />
       </p>
+      <CodeCheck status={codeStatus} curve={launch.curve} />
 
       {links.length > 0 && (
         <>
@@ -392,6 +403,7 @@ export default async function LaunchPage({ params }: { params: Promise<{ id: str
           tradingClosed={detail.state.graduated}
           pool={detail.pool}
           rules={detail.rules}
+          blocked={blocksTrading(codeStatus)}
         />
 
       <Trades

@@ -5,10 +5,10 @@
  * Pinata account, so without a limit anyone can script it into a free image host
  * billed to us, hosting whatever they like under our credential.
  *
- * In-memory and per instance, which is a speed bump rather than a wall: a serverless
- * platform runs several instances and recycles them. It stops the casual loop. Put a
- * platform rate limit (Vercel Firewall, or an Upstash-backed limiter) in front of this
- * route before mainnet; docs/AUDIT.md tracks it.
+ * `allowUpload` is in-memory and per instance: a speed bump, since a serverless
+ * platform runs several instances and recycles them. `allowUploadShared` below is the
+ * real limit, shared through Redis, when UPSTASH_REDIS_REST_URL and _TOKEN are set.
+ * Production should set them (or put Vercel Firewall rate limiting on the route).
  */
 const WINDOW_MS = 10 * 60 * 1000;
 const MAX_PER_WINDOW = 10;
@@ -39,3 +39,47 @@ export function resetUploadLimit(): void {
 }
 
 export const UPLOAD_LIMIT = { windowMs: WINDOW_MS, maxPerWindow: MAX_PER_WINDOW };
+
+/*
+ * The same limit, shared across every instance, when a Redis is configured.
+ *
+ * Upstash's REST API, so no client library and no connection to hold open from a
+ * serverless function. Server-only variables (no `NEXT_PUBLIC_`), because the token
+ * can write to the database. A fixed window: `SET key 0 PX window NX` starts it once,
+ * `INCR` counts into it, and the key expires on its own.
+ *
+ * FAILS TO THE IN-MEMORY LIMIT, not open. If Redis is down or misconfigured the route
+ * still limits per instance rather than becoming unlimited, and it never fails closed
+ * either: a Redis outage must not take logo uploads down with it.
+ */
+export async function allowUploadShared(
+  key: string,
+  opts: {
+    url?: string;
+    token?: string;
+    fetchImpl?: typeof fetch;
+    now?: number;
+  } = {},
+): Promise<boolean> {
+  const url = (opts.url ?? process.env.UPSTASH_REDIS_REST_URL ?? '').trim();
+  const token = (opts.token ?? process.env.UPSTASH_REDIS_REST_TOKEN ?? '').trim();
+  if (!url || !token) return allowUpload(key, opts.now);
+  const redisKey = `injpad:upload:${key}`;
+  try {
+    const res = await (opts.fetchImpl ?? fetch)(`${url.replace(/\/$/, '')}/pipeline`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify([
+        ['SET', redisKey, '0', 'PX', String(WINDOW_MS), 'NX'],
+        ['INCR', redisKey],
+      ]),
+    });
+    if (!res.ok) return allowUpload(key, opts.now);
+    const out = (await res.json()) as Array<{ result?: unknown }>;
+    const count = Number(out?.[1]?.result);
+    if (!Number.isFinite(count)) return allowUpload(key, opts.now);
+    return count <= MAX_PER_WINDOW;
+  } catch {
+    return allowUpload(key, opts.now);
+  }
+}

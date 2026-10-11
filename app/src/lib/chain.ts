@@ -23,6 +23,7 @@ function openedAtSeconds(raw: unknown): number | null {
 import { NETWORK, getLcdUrl, getFactoryAddress } from './config.ts';
 import { isDemoMode, demoLaunches, demoDetail, demoDetailByCurve, demoTrades, DEMO_HEIGHT } from './demo.ts';
 import type { CurveConfig, CurveState, PoolReserves } from './curve.ts';
+import type { ContractFacts } from './codeCheck.ts';
 
 /** Shape stored by the factory for each launch. */
 export interface Launch {
@@ -260,6 +261,51 @@ export async function getLaunchDetail(curveAddress: string): Promise<LaunchDetai
     platformPaid: BigInt(st.platform_paid ?? '0'),
     creatorPaid: BigInt(st.creator_paid ?? '0'),
   };
+}
+
+/**
+ * Code id and admin of a contract, from the wasm module itself rather than from
+ * anything the contract says about itself. `null` when it cannot be read; demo
+ * launches have no contract, so they are `null` too.
+ */
+export async function contractFacts(address: string, denom?: string): Promise<ContractFacts | null> {
+  if (isDemoMode()) return null;
+  try {
+    const [res, denomAdmin] = await Promise.all([
+      fetch(`${getLcdUrl()}/cosmwasm/wasm/v1/contract/${address}`, {
+        headers: { accept: 'application/json' },
+      }),
+      denom ? denomAuthority(denom) : Promise.resolve(null),
+    ]);
+    if (!res.ok) return null;
+    const json = (await res.json()) as { contract_info?: { code_id?: string; admin?: string } };
+    const info = json.contract_info;
+    if (!info?.code_id) return null;
+    return { codeId: String(info.code_id), admin: info.admin ?? '', denomAdmin };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Who can mint a tokenfactory denom. Injective's route takes the creator and subdenom
+ * as two path segments, not the whole `factory/...` string. `null` when unreadable,
+ * including for a denom that is not a tokenfactory denom at all.
+ */
+export async function denomAuthority(denom: string): Promise<string | null> {
+  const m = /^factory\/([^/]+)\/(.+)$/.exec(denom);
+  if (!m) return null;
+  try {
+    const res = await fetch(
+      `${getLcdUrl()}/injective/tokenfactory/v1beta1/denoms/${m[1]}/${encodeURIComponent(m[2])}/authority_metadata`,
+      { headers: { accept: 'application/json' } },
+    );
+    if (!res.ok) return null;
+    const json = (await res.json()) as { authority_metadata?: { admin?: string } };
+    return typeof json.authority_metadata?.admin === 'string' ? json.authority_metadata.admin : null;
+  } catch {
+    return null;
+  }
 }
 
 /** Short display form for an address. */

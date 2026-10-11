@@ -23,3 +23,39 @@ test('the client is the first forwarded hop, which Vercel sets itself rather tha
   assert.equal(clientKey(req), '9.9.9.9');
   assert.equal(clientKey(new Request('https://x.test')), 'unknown');
 });
+
+import { allowUploadShared } from './uploadLimit.ts';
+
+function fakeRedis(counts: number[] | 'down' | 'error') {
+  let i = 0;
+  const calls: unknown[] = [];
+  const impl = (async (_url: string, init?: RequestInit) => {
+    calls.push(JSON.parse(String(init?.body)));
+    if (counts === 'down') throw new Error('ECONNREFUSED');
+    if (counts === 'error') return new Response('nope', { status: 500 });
+    return new Response(JSON.stringify([{ result: 'OK' }, { result: counts[i++] }]));
+  }) as unknown as typeof fetch;
+  return { impl, calls };
+}
+
+test('with Redis configured the shared count decides, and the window is set once', async () => {
+  const r = fakeRedis([1, 10, 11]);
+  const opts = { url: 'https://r.test/', token: 't', fetchImpl: r.impl };
+  assert.equal(await allowUploadShared('a', opts), true);
+  assert.equal(await allowUploadShared('a', opts), true);
+  assert.equal(await allowUploadShared('a', opts), false, 'the 11th upload was allowed');
+  assert.deepEqual((r.calls[0] as unknown[][])[0].slice(0, 5), ['SET', 'injpad:upload:a', '0', 'PX', '600000']);
+  assert.equal((r.calls[0] as unknown[][])[0][5], 'NX');
+});
+
+test('a Redis outage falls back to the in-memory limit, not to unlimited', async () => {
+  for (const mode of ['down', 'error'] as const) {
+    resetUploadLimit();
+    const r = fakeRedis(mode);
+    const opts = { url: 'https://r.test', token: 't', fetchImpl: r.impl, now: 5_000_000 };
+    for (let i = 0; i < UPLOAD_LIMIT.maxPerWindow; i++) {
+      assert.equal(await allowUploadShared('b', opts), true);
+    }
+    assert.equal(await allowUploadShared('b', opts), false, `${mode}: no limit at all`);
+  }
+});

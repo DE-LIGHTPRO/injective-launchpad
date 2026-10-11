@@ -469,8 +469,27 @@ console.log(
     (factoryWasmAdmin === sender ? '  ← the deploy key; fine on testnet only' : ''),
 );
 
+/*
+ * Who administers the factory's CONFIG: quote allowlist, curve code id for future
+ * launches, admin handover. Distinct from the wasm upgrade key above. On mainnet this
+ * should be a multisig (a DAO DAO or cw3 multisig contract address works: the factory
+ * only compares the sender). It defaults to the deployer on testnet so that
+ * `e2e-testnet.mjs` can allowlist its own test quote.
+ */
+const configAdmin = process.env.INJ_FACTORY_ADMIN?.trim() || (netName === 'mainnet' ? '' : sender);
+if (!configAdmin) {
+  die(
+    'INJ_FACTORY_ADMIN is not set.',
+    'On mainnet name the factory admin explicitly, normally a multisig address.',
+  );
+}
+console.log(
+  `     factory admin: ${configAdmin}` +
+    (configAdmin === sender ? '  ← the deploy key; fine on testnet only' : ''),
+);
+
 const initMsg = {
-  admin: sender,
+  admin: configAdmin,
   curve_code_id: curveCodeId,
   platform,
   quote_denom: 'inj',
@@ -482,6 +501,7 @@ const initMsg = {
   quote_decimals: 18,
 };
 await assertPayable('platform fee recipient', initMsg.platform);
+if (configAdmin !== sender) await assertPayable('factory admin', configAdmin);
 if (factoryWasmAdmin && factoryWasmAdmin !== sender) {
   await assertPayable('factory upgrade key', factoryWasmAdmin);
 }
@@ -523,6 +543,7 @@ console.log(`
 
     NEXT_PUBLIC_NETWORK=${netName}
     NEXT_PUBLIC_FACTORY_ADDRESS=${factoryAddress}
+    NEXT_PUBLIC_CURVE_CODE_IDS=${curveCodeId}
     NEXT_PUBLIC_LCD_URL=${endpoints.rest}
 
   Put them in app/.env.local, then restart the dev server.

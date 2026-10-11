@@ -81,6 +81,7 @@ export function TradePanel({
   tradingClosed,
   rules = NO_RULES,
   pool = null,
+  blocked = false,
 }: {
   config: CurveConfig;
   state: CurveState;
@@ -105,6 +106,8 @@ export function TradePanel({
    * the same Buy / Sell messages, so nothing else about trading changes for the user.
    */
   pool?: PoolReserves | null;
+  /** The curve failed the code check (`lib/codeCheck.ts`); the reason is shown above. */
+  blocked?: boolean;
 }) {
   const inPool = pool !== null && pool.quote > 0n && pool.tokens > 0n;
   const [side, setSide] = useState<Side>('buy');
@@ -372,6 +375,18 @@ export function TradePanel({
             */}
           The contract gates on block time, so the first block after this may land a few
           seconds either side.
+        </p>
+      </div>
+    );
+  }
+
+  if (blocked) {
+    return (
+      <div className="card">
+        <h2>Trading disabled</h2>
+        <p className="note">
+          This launch failed the contract check shown above, so this site will not sign a
+          trade against it.
         </p>
       </div>
     );

@@ -95,13 +95,35 @@ test('no secret-shaped variable is exposed to the browser', () => {
    * unprefixed surface for that reason, and this asserts the boundary rather
    * than trusting it.
    */
-  const secretish = /(MNEMONIC|PRIVATE_KEY|SECRET|SEED|PASSWORD|TOKEN|API_KEY)/;
-  const appVars = varsRead(walk(APP_SRC).filter((f) => !f.endsWith('.test.ts')));
-  for (const v of appVars) {
-    assert.ok(!secretish.test(v), `${v} is read by the client bundle and looks like a secret`);
+  /*
+   * The boundary is the PREFIX, so that is what is asserted. Next inlines only
+   * `NEXT_PUBLIC_*`; an unprefixed variable is undefined in the browser and readable
+   * only by server code (route handlers, server components). This used to fail any
+   * secret-shaped name read anywhere under src/, which blocked server-only credentials
+   * like an Upstash token while letting `PINATA_JWT` through on its spelling alone.
+   *
+   * Two rules instead, each closing a real leak:
+   *   1. nothing secret-shaped carries the public prefix, read or documented;
+   *   2. no unprefixed variable is read from a `'use client'` file, where it would be
+   *      undefined at best and a sign someone expected a secret in the browser at worst.
+   */
+  const secretish = /(MNEMONIC|PRIVATE_KEY|SECRET|SEED|PASSWORD|TOKEN|API_KEY|JWT)/;
+  const files = walk(APP_SRC).filter((f) => !f.endsWith('.test.ts'));
+  const documented = varsDocumented(join(APP_SRC, '..', '.env.example'));
+  for (const v of [...varsRead(files), ...documented]) {
+    if (v.startsWith('NEXT_PUBLIC_')) {
+      assert.ok(!secretish.test(v), `${v} is inlined into the client bundle and looks like a secret`);
+    }
   }
-  for (const v of varsDocumented(join(APP_SRC, '..', '.env.example'))) {
-    assert.ok(!secretish.test(v), `${v} is documented as a client variable and looks like a secret`);
+  for (const f of files) {
+    const src = readFileSync(f, 'utf8');
+    if (!/^\s*['"]use client['"]/.test(src)) continue;
+    for (const v of varsRead([f])) {
+      assert.ok(
+        v.startsWith('NEXT_PUBLIC_'),
+        `${v} is read in a client component (${f}); only NEXT_PUBLIC_ variables exist there`,
+      );
+    }
   }
   // And the credentials that do exist must not have been given the public prefix.
   for (const v of varsRead([join(ROOT, 'scripts', 'deploy.mjs')])) {

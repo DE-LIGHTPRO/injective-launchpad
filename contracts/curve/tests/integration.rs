@@ -1051,3 +1051,121 @@ fn a_malformed_recipient_is_refused_by_name() {
         .unwrap_err();
     assert!(format!("{err:#}").to_lowercase().contains("address"), "{err:#}");
 }
+
+// ------------------------------------------------------------ randomised runs --
+
+/// A tiny deterministic generator, so a failing run names its seed and replays exactly.
+struct Lcg(u64);
+impl Lcg {
+    fn next(&mut self) -> u64 {
+        self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        self.0 >> 33
+    }
+    fn below(&mut self, n: u64) -> u64 {
+        self.next() % n
+    }
+}
+
+/// Every unit of quote and every token is somewhere, and the contract's books say
+/// exactly what it holds. Exact equalities, not `>=`: a surplus is a unit stranded on
+/// nobody's behalf, and solvency checks cannot see it.
+fn assert_books(f: &Fixture, seed: u64, step: usize, quote_total: Uint128) {
+    let st = f.state();
+    let held_q = f.balance(&f.addr, QUOTE);
+    let books_q =
+        st.inj_collected + st.lp_bonus + st.pool_quote + st.creator_owed + st.platform_owed;
+    assert_eq!(held_q, books_q, "seed {seed} step {step}: quote held != books");
+
+    let held_t = f.balance(&f.addr, TOKEN);
+    let books_t = if st.migrated {
+        st.pool_tokens
+    } else {
+        curve_cfg().curve_supply - st.tokens_sold + lp_reserve()
+    };
+    assert_eq!(held_t, books_t, "seed {seed} step {step}: tokens held != books");
+
+    let everyone = [&f.alice, &f.bob, &f.creator, &f.platform, &f.migration, &f.addr];
+    let q: Uint128 = everyone.iter().map(|a| f.balance(a, QUOTE)).sum();
+    let t: Uint128 = everyone.iter().map(|a| f.balance(a, TOKEN)).sum();
+    assert_eq!(q, quote_total, "seed {seed} step {step}: quote created or destroyed");
+    assert_eq!(t, curve_cfg().curve_supply + lp_reserve(), "seed {seed} step {step}: tokens created or destroyed");
+    // Nothing is ever sent to the old migration address.
+    assert!(f.balance(&f.migration, QUOTE).is_zero() && f.balance(&f.migration, TOKEN).is_zero());
+}
+
+fn random_run(seed: u64, rules: LaunchRules) -> bool {
+    let mut f = setup_with(rules);
+    let mut rng = Lcg(seed);
+    let traders = [f.alice.clone(), f.bob.clone()];
+    let quote_total = amt(2_000);
+    let mut graduated_at = None;
+
+    for step in 0..80 {
+        let who = traders[rng.below(2) as usize].clone();
+        match rng.below(10) {
+            // Buys from dust to whale, weighted toward the middle.
+            0..=4 => {
+                let size = match rng.below(4) {
+                    0 => Uint128::new(rng.below(1_000_000_000) as u128 + 1),
+                    1 => amt(rng.below(3) as u128 + 1),
+                    2 => amt(rng.below(15) as u128 + 1),
+                    _ => amt(rng.below(60) as u128 + 1),
+                };
+                if f.balance(&who, QUOTE) >= size {
+                    let _ = f.buy(&who, size);
+                }
+            }
+            // Sells of a random fraction of what the trader holds.
+            5..=8 => {
+                let held = f.balance(&who, TOKEN);
+                if !held.is_zero() {
+                    let frac = rng.below(100) as u128 + 1;
+                    let _ = f.sell(&who, held.multiply_ratio(frac, 100u128).max(Uint128::one()));
+                }
+            }
+            _ => {
+                let _ = f.app.execute_contract(who, f.addr.clone(), &ExecuteMsg::ClaimFees {}, &[]);
+            }
+        }
+        if graduated_at.is_none() && f.state().migrated {
+            graduated_at = Some(step);
+        }
+        assert_books(&f, seed, step, quote_total);
+        f.assert_solvent();
+    }
+
+    // Whatever happened, both traders can always exit what they hold, and the books
+    // still balance after they do.
+    for who in traders.clone() {
+        let held = f.balance(&who, TOKEN);
+        if !held.is_zero() {
+            f.sell(&who, held).unwrap_or_else(|e| panic!("seed {seed}: exit refused: {e}"));
+        }
+    }
+    let _ = f.app.execute_contract(f.alice.clone(), f.addr.clone(), &ExecuteMsg::ClaimFees {}, &[]);
+    assert_books(&f, seed, usize::MAX, quote_total);
+    graduated_at.is_some()
+}
+
+#[test]
+fn random_trading_across_graduation_keeps_exact_books() {
+    let mut graduated = 0;
+    for seed in 1..=24u64 {
+        if random_run(seed, Default::default()) {
+            graduated += 1;
+        }
+    }
+    // The property is only interesting if the runs actually cross the boundary.
+    assert!(graduated >= 6, "only {graduated} of 24 runs graduated; widen the sizes");
+}
+
+#[test]
+fn random_trading_with_an_opening_fee_keeps_exact_books() {
+    let mut graduated = 0;
+    for seed in 101..=112u64 {
+        if random_run(seed, with_early_fee(1_100, 100_000)) {
+            graduated += 1;
+        }
+    }
+    assert!(graduated >= 3, "only {graduated} of 12 runs graduated");
+}

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { allowUpload, clientKey } from '@/lib/uploadLimit';
+import { allowUploadShared, clientKey } from '@/lib/uploadLimit';
 
 /**
  * Pin a launch logo to IPFS.
@@ -66,7 +66,7 @@ export async function POST(req: Request) {
     );
   }
 
-  if (!allowUpload(clientKey(req))) {
+  if (!(await allowUploadShared(clientKey(req)))) {
     return NextResponse.json(
       { error: 'Too many uploads from here. Wait a few minutes, or paste a link instead.' },
       { status: 429 },
