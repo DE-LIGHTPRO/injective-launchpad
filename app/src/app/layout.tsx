@@ -60,6 +60,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <nav className="top-nav" aria-label="Primary">
               <Link href="/">Launches</Link>
               <Link href="/watchlist">Watchlist</Link>
+              <Link href="/portfolio">Portfolio</Link>
             </nav>
             <span className="spacer" />
             {/*
@@ -104,6 +105,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <Link href="/">Launches</Link>
               <Link href="/create">Create a launch</Link>
               <Link href="/watchlist">Watchlist</Link>
+              <Link href="/portfolio">Portfolio</Link>
               <a href={NETWORK.explorer} target="_blank" rel="noopener noreferrer">
                 Injective {NETWORK.name} explorer
               </a>

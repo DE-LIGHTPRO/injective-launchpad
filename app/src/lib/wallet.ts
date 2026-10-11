@@ -407,6 +407,33 @@ export async function denomBalance(address: string, denom: string): Promise<bigi
   return BigInt(raw);
 }
 
+/**
+ * Every denom the account holds, in one bank query, as a denom to base-unit map.
+ *
+ * `null` is not an empty wallet, for the same reason `denomBalance` returns one: an
+ * unreachable LCD must not read as "you hold nothing". One request rather than one per
+ * launch, because the portfolio cross-references these against the board's launches and
+ * a per-denom fan-out would be dozens of requests for a wallet in a handful of them.
+ */
+export async function allBalances(address: string): Promise<Record<string, bigint> | null> {
+  const url = `${getLcdUrl()}/cosmos/bank/v1beta1/balances/${address}?pagination.limit=1000`;
+  let res: Response;
+  try {
+    res = await fetch(url, { headers: { accept: 'application/json' } });
+  } catch {
+    return null;
+  }
+  if (!res.ok) return null;
+  const json = (await res.json()) as { balances?: Array<{ denom?: string; amount?: string }> };
+  const out: Record<string, bigint> = {};
+  for (const b of json.balances ?? []) {
+    if (typeof b.denom === 'string' && typeof b.amount === 'string' && /^[0-9]+$/.test(b.amount)) {
+      out[b.denom] = BigInt(b.amount);
+    }
+  }
+  return out;
+}
+
 /** Shorten an address for display without hiding which account it is. */
 export function shortAddress(addr: string): string {
   return addr.length > 16 ? `${addr.slice(0, 10)}…${addr.slice(-6)}` : addr;
