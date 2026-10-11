@@ -124,10 +124,12 @@ function installKeplr(behaviour: Partial<{ enable: () => Promise<void>; suggest:
 test('an unknown chain is asked for, not reported as misconfiguration', async () => {
   /*
    * The defect from the screenshot. Keplr was installed and the app said "The wallet
-   * could not be opened." Keplr's build carried Injective mainnet and not the testnet,
-   * so `enable('injective-888')` threw, and the code treated an unknown chain as the
-   * app being misconfigured instead of calling the one method the extension provides
-   * for exactly this.
+   * did not open. Unlock it." Keplr's build carried Injective mainnet and not the
+   * testnet, so `enable('injective-888')` threw "There is no modular chain info for
+   * injective-888", and the classifier (which looked for "no chain info" as one phrase)
+   * missed the "modular" in the middle and treated it as a locked/unknown fault instead
+   * of calling the one method the extension provides for exactly this. The error string
+   * here is Keplr's real current wording, so this test fails against the old pattern.
    */
   clearAll();
   let suggested = 0;
@@ -136,7 +138,7 @@ test('an unknown chain is asked for, not reported as misconfiguration', async ()
     enable: async () => {
       enableCalls += 1;
       // Fails until the chain has been suggested, which is how Keplr behaves.
-      if (suggested === 0) throw new Error('There is no chain info for injective-888');
+      if (suggested === 0) throw new Error('There is no modular chain info for injective-888');
     },
     suggest: async () => {
       suggested += 1;
@@ -158,7 +160,7 @@ test('suggesting is retried, never assumed to have worked', async () => {
   clearAll();
   installKeplr({
     enable: async () => {
-      throw new Error('There is no chain info for injective-888');
+      throw new Error('There is no modular chain info for injective-888');
     },
     suggest: async () => {},
   });
@@ -170,7 +172,7 @@ test('declining the add prompt is a choice, not a fault', async () => {
   clearAll();
   installKeplr({
     enable: async () => {
-      throw new Error('There is no chain info for injective-888');
+      throw new Error('There is no modular chain info for injective-888');
     },
     suggest: async () => {
       throw new Error('Request rejected');

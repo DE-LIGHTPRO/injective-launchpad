@@ -249,8 +249,15 @@ export async function connect(name: WalletName): Promise<WalletAccount> {
      *
      * The retry is what proves it worked. Treating `suggestChain` as success without
      * re-enabling would report a connection that never happened.
+     *
+     * The wording is matched loosely on purpose. Current Keplr says "There is no
+     * modular chain info for injective-888" for a chain it does not carry; the earlier
+     * pattern looked for "no chain info" as one phrase and the word "modular" in the
+     * middle made it miss, so a testnet connect fell through to the generic "wallet did
+     * not open" instead of offering to add the chain. Observed on Keplr against
+     * injective-888.
      */
-    if (/no chain info|unknown chain|not supported|chain.*not.*found/i.test(msg)) {
+    if (/no (modular )?chain info|modular chain info|unknown chain|not supported|chain.*not.*found/i.test(msg)) {
       if (typeof ext.experimentalSuggestChain === 'function') {
         try {
           await ext.experimentalSuggestChain(chainSuggestion());
