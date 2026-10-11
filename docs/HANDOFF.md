@@ -40,22 +40,27 @@ make a fresh wallet, faucet 10 INJ, send some over). Then Create should land. No
 
 - Remove the temporary `console.error('[broadcast] …')` lines in `lib/txBroadcast.ts`.
 
-## Feature backlog the user approved ("everything") — not started
+## Feature backlog the user approved ("everything")
 
-The board already has search, 6 sorts, and a hide-graduated toggle (`lib/launchList.ts`,
-`LaunchList.tsx`). Remaining, in priority order:
-1. **Status tabs** on the board: Live / About to graduate / Graduated. Extend `Selection`
-   in `lib/launchList.ts` with a `status` filter ('about to graduate' = not graduated and
-   progress >= ~0.8) and add tab UI in `LaunchList.tsx`. Add cases to the existing tests.
-2. **Slippage protection** on trades. Buys currently send `min_out: '0'` (see the trade
-   panel / execute path) — no protection. Add a slippage % control that computes `min_out`
-   from the quoted out amount and the curve maths already in `curve.ts`.
-3. **Portfolio page** `/portfolio`: the connected wallet's holdings across launches and
-   their value. Read per-launch token balances from chain (no indexer needed).
-4. **Trending strip** reusing the volume/trades ranking.
+Done this session:
+- [x] **Board stage tabs** — All / Live / About to graduate / Graduated, with live counts
+      (commit on branch). `lib/launchList.ts` (`status`, `matchesStatus`, `ABOUT_TO_GRADUATE`),
+      `LaunchList.tsx`, `globals.css`, tests in `launch-list.test.ts`.
+- [x] **Portfolio page** `/portfolio` — wallet holdings across launches, valued per quote
+      from the board's marketCap; `allBalances` in `wallet.ts`, `Portfolio.tsx`, nav links.
+- [x] **Slippage protection** — ALREADY EXISTED in `TradePanel.tsx` (slippage % selector,
+      default 1%, sends `min_tokens_out`/`min_inj_out` as the on-chain guard). No work needed.
 
-Holders list stays blocked (Injective `denom_owners` returns 501 for tokenfactory denoms;
-needs an indexer). Per-token comments need a backend/DB.
+Remaining:
+- [ ] **Trending strip** — a compact "trending now" row above the board, top ~3-5 by 24h
+      volume. The ranking already exists as the 'volume'/'trades' sorts; the strip needs the
+      activity data, which `LaunchList` fetches AFTER paint into `activityIndex`. To build it
+      without duplicating that fetch, lift the activity load (the two count-only tx searches
+      per launch in `LaunchList`) into a small shared hook/loader and feed both the strip and
+      the board. Keep it client-side; no indexer.
+
+Still blocked (need infra, not now): holders list (Injective `denom_owners` returns 501 for
+tokenfactory denoms — needs an indexer); per-token comments (need a backend/DB).
 
 ## How to continue locally
 
