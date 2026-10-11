@@ -1,26 +1,23 @@
 import { BrandMark } from '@/components/BrandMark';
 import type { Metadata, Viewport } from 'next';
 import Link from 'next/link';
-import { Inter, JetBrains_Mono, Space_Grotesk } from 'next/font/google';
+import { Inter, JetBrains_Mono } from 'next/font/google';
+import { PlusIcon } from '@/components/Icons';
 import { NETWORK } from '@/lib/config';
 import { isDemoMode } from '@/lib/demo';
 import { ConnectWallet } from '@/components/ConnectWallet';
 import './globals.css';
 
 /*
- * Three faces, each with one job.
- *
- * The site used the platform's system stack and its system monospace for every
- * number, so prices looked like a terminal and headings looked like a settings page.
- * Space Grotesk carries the display weight (headings, headline figures), Inter carries
- * reading, and JetBrains Mono is kept for the things that genuinely are code: addresses
- * and denoms.
+ * Two faces. Inter for everything a person reads, with tabular figures for numbers;
+ * JetBrains Mono only for strings a person might copy (addresses, denoms). A separate
+ * display face was tried and dropped: one well-set family reads as more considered
+ * than two competing ones.
  *
  * `next/font` downloads them at BUILD time and serves them from this origin, so a
  * visitor's browser never contacts Google, the CSP can stay `font-src 'self'`, and there
  * is no layout shift while a web font swaps in.
  */
-const display = Space_Grotesk({ subsets: ['latin'], variable: '--font-display', display: 'swap' });
 const sans = Inter({ subsets: ['latin'], variable: '--font-sans', display: 'swap' });
 const mono = JetBrains_Mono({ subsets: ['latin'], variable: '--font-mono', display: 'swap' });
 
@@ -42,13 +39,13 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: '#05070d',
+  themeColor: '#0a0b0d',
   colorScheme: 'dark',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`${display.variable} ${sans.variable} ${mono.variable}`}>
+    <html lang="en" className={`${sans.variable} ${mono.variable}`}>
       <body>
         <a href="#main" className="skip-link">
           Skip to content
@@ -74,7 +71,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             {isDemoMode() && <span className="chip warn hide-sm">demo</span>}
             <span className="chip hide-sm">{NETWORK.name}</span>
             <Link href="/create" className="nav-create">
-              <span aria-hidden="true">+</span> Create
+              <PlusIcon size={14} /> Create
             </Link>
             {/*
                 The wallet sits in the header because it is page-independent: a

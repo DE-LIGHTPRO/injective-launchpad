@@ -27,8 +27,9 @@ the pool fee to the creator). When choosing behaviour, check what those two do f
 - **The mint key ends with the curve.** The launch tx sends `MsgChangeAdmin` (creator → factory), and the factory's reply sends it on (factory → curve). No creator keeps the ability to mint.
 - The launch page refuses to trade a curve whose code id isn't in `NEXT_PUBLIC_CURVE_CODE_IDS`, that has a wasm admin, or whose mint key is held elsewhere (`lib/codeCheck.ts`).
 - Testnet is the default everywhere; mainnet needs explicit flags. `NEXT_PUBLIC_*` never holds a secret.
-- **Brand: "ink and electric".** Navy-ink surfaces, one cyan→azure→violet gradient used sparingly (wordmark, primary action, progress), `--buy`/`--sell` green/red for trade sides only, gold for king of the hill. Space Grotesk (display and headline numbers), Inter (body), JetBrains Mono (addresses only), self-hosted via `next/font`. Tokens at the top of `globals.css`; overrides in the "brand layer" at its end. Prices use subscript zeros (`lib/priceFormat.ts`).
-- Homepage order: hero + stats → ticker → king of the hill → board → how it works. Product first.
+- **Design system: professional, flat.** No glassmorphism, ambient orbs, grain, glows, gradient text or gradient buttons (the user rejected the "vibecoded" look). Solid neutral surfaces separated by 1px hairlines; one solid accent `#2f6bf0` (links use `--accent-text`); `--buy`/`--sell` only for trade sides; gold only for king of the hill. Inter for everything with tabular figures; JetBrains Mono only for addresses/denoms. Labels in sentence case, not uppercase-tracked. Short copy, no explanatory paragraph under every heading. Icons from `components/Icons.tsx`, never unicode glyphs. The board is a data table; the launch page is chart-left, trade panel sticky right. Rules live in the "system layer" at the end of `globals.css`.
+- Homepage order: hero + stats → ticker → king of the hill → board table → how it works. Product first.
+- Verify UI changes with screenshots at 1440px and 375px, axe-core (0 violations), and a 375px horizontal-overflow check.
 - Never nest a link/button inside the card `<a>`; per-launch actions (watch, share, creator link) live on the launch page.
 
 ## Current state (2026-10-11)

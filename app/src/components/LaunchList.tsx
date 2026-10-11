@@ -2,20 +2,25 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { symbolOf, short } from '@/lib/chain';
+import { symbolOf } from '@/lib/chain';
 import { TokenLogo } from './TokenLogo';
 import { StatusChip } from './StatusChip';
-import { CurveGlyph } from './CurveGlyph';
-import { ageLabel, feeLabel, compact } from '@/lib/boardMetrics';
+import { ageLabel, compact } from '@/lib/boardMetrics';
 import { addressName } from '@/lib/addressName';
-import { fmt } from '@/lib/curve';
-import { NETWORK } from '@/lib/config';
 import { selectLaunches, type ActivityIndex, type LaunchRow, type SortKey } from '@/lib/launchList';
 import { enrichAll, tradesLabel, type LaunchEnrichment } from '@/lib/launchActivity';
-import { Sparkline } from './Sparkline';
+import { Price } from './Price';
+import { SearchIcon } from './Icons';
 import { denomLabel } from '@/lib/chain';
 
 export type { LaunchRow };
+
+/*
+ * Price per token from market cap. Every launch has the factory's fixed supply of
+ * 1B tokens at 18 decimals, so this is exact rather than an approximation.
+ */
+const ONE = 10n ** 18n;
+const TOTAL_SUPPLY = 1_000_000_000n * ONE;
 
 /**
  * The launch grid, with search and sort.
@@ -150,34 +155,43 @@ export function LaunchList({ rows }: { rows: LaunchRow[] }) {
 
   return (
     <>
-      <div className="list-controls">
+      <div className="board-bar">
         <label className="search">
           <span className="sr-only">Search launches</span>
+          <SearchIcon />
           <input
             id="launch-search"
             type="search"
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder={`Ticker, denom or creator`}
+            placeholder="Search ticker, denom or creator"
             autoComplete="off"
             aria-describedby="launch-count"
           />
         </label>
-
-        <div className="segmented" role="group" aria-label="Sort launches">
-          {SORTS.map((s) => (
-            <button
-              key={s.key}
-              type="button"
-              aria-pressed={sort === s.key}
-              title={s.hint}
-              onClick={() => setSort(s.key)}
-            >
-              {s.label}
-            </button>
-          ))}
-        </div>
-
+        {quotesPresent.length > 1 && (
+          <label className="select">
+            <span className="sr-only">Paired with</span>
+            <select value={quote ?? ''} onChange={(e) => setQuote(e.target.value || null)}>
+              <option value="">All pairs</option>
+              {quotesPresent.map(([denom, n]) => (
+                <option key={denom} value={denom}>
+                  {denomLabel(denom)} ({n})
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        <label className="select">
+          <span className="sr-only">Sort by</span>
+          <select value={sort} onChange={(e) => setSort(e.target.value as SortKey)} title={active?.hint}>
+            {SORTS.map((s) => (
+              <option key={s.key} value={s.key}>
+                {s.label}
+              </option>
+            ))}
+          </select>
+        </label>
         <label className="toggle">
           <input
             id="hide-graduated"
@@ -187,228 +201,96 @@ export function LaunchList({ rows }: { rows: LaunchRow[] }) {
           />
           <span>Hide graduated</span>
         </label>
+        <span className="board-count" id="launch-count" aria-live="polite">
+          {shown.length === rows.length ? `${rows.length} launches` : `${shown.length} of ${rows.length}`}
+        </span>
       </div>
 
-      {/*
-          PAIRED WITH, and it renders only when more than one quote is actually in
-          use. With a single quote it is a filter whose every option shows the same
-          board, which is a control that does nothing.
-
-          It filters rather than converts, because converting would need a price for
-          each quote and there is no oracle here. Within one pair every figure on the
-          board is comparable; across pairs they are base units of different assets,
-          which is why the totals above group by quote rather than summing.
-        */}
-      {quotesPresent.length > 1 && (
-        <div className="segmented pair-filter" role="group" aria-label="Paired with">
-          <button type="button" aria-pressed={quote === null} onClick={() => setQuote(null)}>
-            All pairs
-          </button>
-          {quotesPresent.map(([denom, n]) => (
-            <button
-              key={denom}
-              type="button"
-              aria-pressed={quote === denom}
-              onClick={() => setQuote(denom)}
-            >
-              {denomLabel(denom)} <span className="hint">{n}</span>
-            </button>
-          ))}
-        </div>
-      )}
-
-      {/*
-          The count is stated rather than left for the reader to infer from an
-          empty grid. "Showing 3 of 40" is the difference between a filter that
-          worked and a page that broke.
-        */}
-      <p className="note" id="launch-count" aria-live="polite">
-        {shown.length === rows.length
-          ? `${rows.length} launch${rows.length === 1 ? '' : 'es'}, ${active?.label.toLowerCase()} first`
-          : `${shown.length} of ${rows.length}, ${active?.label.toLowerCase()} first`}
-      </p>
-
       {shown.length === 0 && (
-        <div className="empty" style={{ marginTop: 'var(--space-4)' }}>
-          <p>
-            Nothing matches {q.trim() ? <strong>{q.trim()}</strong> : 'these filters'}.
-          </p>
-          <p className="note">
-            Search covers the ticker, the full denom and the creator address.
-          </p>
+        <div className="empty">
+          <p>No launches match {q.trim() ? <strong>{q.trim()}</strong> : 'these filters'}.</p>
         </div>
       )}
 
       {shown.length > 0 && (
-        <div className="grid" style={{ marginTop: 'var(--space-4)' }}>
-          {shown.map((r) => (
-            <Link key={r.id} href={`/launch/${r.id}`} className="card">
-              <div className="card-head">
-                <div className="sym-row">
-                  <TokenLogo profile={r.profile} symbol={symbolOf(r.denom)} size={40} />
-                  {/*
-                      No denom line here, and removing it was the second attempt.
-                      Shortening it was the first, and the CSS ellipsis then cut the
-                      shortened string again and took the subdenom with it, which is
-                      the exact failure the shortening was written to avoid.
-                      Looking at the card properly: the heading IS the subdenom and
-                      there is a Creator row below, so the denom repeated both of its
-                      own parts and nothing else. The full value is one click away on
-                      the detail page, and search still covers it.
-                    */}
-                  <div style={{ minWidth: 0 }}>
-                    <div className="sym" title={r.denom}>
-                      {symbolOf(r.denom)}
-                    </div>
-                    {/*
-                        Who made it and when, the line every mature launchpad puts
-                        here. The age comes from the curve's `opened_at`, which the
-                        contract already stores for the opening-fee decay, so it costs
-                        no extra query and cannot drift from what the fee uses.
-                      */}
-                    <div className="card-by">
-                      {/*
-                          A readable name, with the address still in the title. The
-                          name is derived and nobody has claimed it, so it is a label
-                          rather than a handle: a visitor can use it to notice the
-                          same creator twice on one board, which is a judgement the
-                          data supports, and cannot use it to identify anyone, which
-                          is one it does not.
-                        */}
-                      by <span title={r.creator}>{addressName(r.creator)}</span>
-                      {ageLabel(r.openedAt, nowSeconds) && (
-                        <> · {ageLabel(r.openedAt, nowSeconds)}</>
-                      )}
-                    </div>
-                  </div>
-                </div>
-                {/*
-                    Status comes from `launchStatus`, never from `graduated` alone.
-                    This chip read "live" on a launch whose start time had not arrived,
-                    which is the most confident possible label on the one state where
-                    the contract refuses every buy.
-                  */}
-                <div className="card-badges">
-                  {/*
-                      The pair, on every card and not only when the filter is off.
-                      A card's market cap is denominated in this asset, so without
-                      the badge two cards side by side in "All pairs" show numbers
-                      that cannot be compared and nothing says so. nearly.trade
-                      badges the pair for the same reason.
-                    */}
-                  <span className="chip chip-sm muted">{denomLabel(r.quoteDenom)}</span>
-                  <span className="chip chip-sm">{feeLabel(BigInt(r.curve.feeBps))}</span>
-                  <StatusChip graduated={r.graduated} rules={r.rules} />
-                </div>
-              </div>
-
-              {/*
-                  The curve, not a progress bar. Two launches at 40% show the same bar
-                  and completely different curves, and the shape is what tells a buyer
-                  whether the next purchase costs sharply more. The bar stays beneath
-                  it, thinner: progress is still worth a glance, it just is not the
-                  thing that distinguishes one launch from another.
-                */}
-              {/*
-                  Market cap as the headline, which is how a launchpad board is read.
-                  Quoted in INJ rather than USD: a USD figure needs a price for INJ,
-                  which is a separate measurement with its own provenance, and an
-                  unlabelled dollar sign over an unsourced conversion is the kind of
-                  number this project keeps finding and removing.
-                */}
-              <div className="card-mc">
-                <span className="mc-label">MC</span>
-                <span className="mc-value mono">
-                  {compact(BigInt(r.marketCap), r.quoteDecimals)} {denomLabel(r.quoteDenom)}
-                </span>
-              </div>
-
-              <div className="card-curve">
-                <CurveGlyph
-                  config={{
-                    virtualInj: BigInt(r.curve.virtualInj),
-                    virtualTokens: BigInt(r.curve.virtualTokens),
-                    curveSupply: BigInt(r.curve.curveSupply),
-                    graduationTarget: BigInt(r.curve.graduationTarget),
-                    feeBps: BigInt(r.curve.feeBps),
-                  }}
-                  state={{
-                    injCollected: BigInt(r.raised),
-                    tokensSold: BigInt(r.tokensSold),
-                    graduated: r.graduated,
-                  }}
-                  height={48}
-                />
-              </div>
-              <div className="bar bar-thin">
-                <i style={{ width: `${Math.min(100, r.progress * 100).toFixed(1)}%` }} />
-              </div>
-
-              <div style={{ marginTop: 'var(--space-4)' }}>
-                <div className="metric-row">
-                  <span className="k">Raised</span>
-                  <span className="v mono">
-                    {fmt(BigInt(r.raised), r.quoteDecimals, 2)} /{' '}
-                    {fmt(BigInt(r.target), r.quoteDecimals, 0)}{' '}
-                    {denomLabel(r.quoteDenom)}
-                  </span>
-                </div>
-                <div className="metric-row">
-                  <span className="k">Progress</span>
-                  <span className="v mono">{(r.progress * 100).toFixed(1)}%</span>
-                </div>
-                <div className="metric-row">
-                  <span className="k">Creator</span>
-                  <span className="v mono">{short(r.creator)}</span>
-                </div>
-                {/*
-                    Rendered only once the count has landed. A placeholder row that
-                    later becomes a number makes the whole card twitch; an absent row
-                    that appears does it once, in one place.
-                  */}
-                {r.curveAddress in activity && (
-                  <>
-                    <div className="metric-row">
-                      <span className="k">Activity</span>
-                      <span className="v mono">
-                        {tradesLabel(activity[r.curveAddress].activity)}
-                      </span>
-                    </div>
-                    <div className="metric-row">
-                      <span className="k">Volume, about 24h</span>
-                      <span className="v mono">
-                        {(() => {
-                          const e = activity[r.curveAddress];
-                          /*
-                            * `null` is "the window is unknown", which happens when the
-                            * chain height could not be read. It is NOT zero: a day with
-                            * no trades and a day we could not measure look identical on
-                            * a card, and only one of them is a quiet market.
-                            */
-                          if (e.volume24h === null) return 'not measured';
-                          /*
-                            * "at least" when the page of trades read is full and its
-                            * oldest entry is still inside the window, because there may
-                            * be more beyond it and the sum is then a floor. Printing it
-                            * bare would understate a busy launch and read as exact.
-                            */
-                          return `${e.volumePartial ? 'at least ' : ''}${compact(e.volume24h, r.quoteDecimals, 2)} ${denomLabel(r.quoteDenom)}`;
-                        })()}
-                      </span>
-                    </div>
-                    {activity[r.curveAddress].series.length >= 2 && (
-                      <div className="metric-row">
-                        <span className="k">Recent fills</span>
-                        <span className="card-spark">
-                          <Sparkline series={activity[r.curveAddress].series} />
-                        </span>
+        <div className="table-wrap">
+          {/*
+              A table, because this is tabular data a trader scans down a column of.
+              The whole row is clickable through a stretched link on the token cell,
+              so the markup stays a real table for screen readers and the only
+              interactive element per row is that one link.
+            */}
+          <table className="board">
+            <thead>
+              <tr>
+                <th scope="col" className="c-rank">#</th>
+                <th scope="col">Token</th>
+                <th scope="col" className="num">Price</th>
+                <th scope="col" className="num">Market cap</th>
+                <th scope="col" className="num hide-md">Vol 24h</th>
+                <th scope="col" className="num hide-md">Trades</th>
+                <th scope="col" className="c-progress hide-sm">Bonding</th>
+                <th scope="col" className="num hide-sm">Age</th>
+              </tr>
+            </thead>
+            <tbody>
+              {shown.map((r, i) => {
+                const unit = denomLabel(r.quoteDenom);
+                const e = activity[r.curveAddress];
+                const pct = Math.min(100, r.progress * 100);
+                return (
+                  <tr key={r.id}>
+                    <td className="c-rank">{i + 1}</td>
+                    <td>
+                      <div className="tok">
+                        <TokenLogo profile={r.profile} symbol={symbolOf(r.denom)} size={32} />
+                        <div className="tok-text">
+                          <Link href={`/launch/${r.id}`} className="row-link">
+                            {symbolOf(r.denom)}
+                          </Link>
+                          <span className="tok-sub">
+                            {addressName(r.creator)}
+                            {r.graduated ? (
+                              <span className="tag tag-pool">Pool</span>
+                            ) : (
+                              <StatusChip graduated={r.graduated} rules={r.rules} />
+                            )}
+                          </span>
+                        </div>
                       </div>
-                    )}
-                  </>
-                )}
-              </div>
-            </Link>
-          ))}
+                    </td>
+                    <td className="num">
+                      <Price raw={(BigInt(r.marketCap) * ONE) / TOTAL_SUPPLY} decimals={r.quoteDecimals} />
+                    </td>
+                    <td className="num strong">
+                      {compact(BigInt(r.marketCap), r.quoteDecimals)} <span className="unit">{unit}</span>
+                    </td>
+                    <td className="num hide-md">
+                      {e === undefined || e.volume24h === null ? (
+                        <span className="dim">·</span>
+                      ) : (
+                        <>
+                          {compact(e.volume24h, r.quoteDecimals)} <span className="unit">{unit}</span>
+                        </>
+                      )}
+                    </td>
+                    <td className="num hide-md">
+                      {e === undefined ? <span className="dim">·</span> : tradesLabel(e.activity).replace(' trades', '')}
+                    </td>
+                    <td className="c-progress hide-sm">
+                      <div className="prog" aria-label={`${pct.toFixed(1)}% bonded`}>
+                        <div className="prog-track">
+                          <i style={{ width: `${pct.toFixed(1)}%` }} />
+                        </div>
+                        <span>{pct.toFixed(0)}%</span>
+                      </div>
+                    </td>
+                    <td className="num hide-sm dim">{ageLabel(r.openedAt, nowSeconds) ?? '·'}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
       )}
     </>

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { CheckIcon, ExternalIcon, LinkIcon } from './Icons';
 
 /**
  * Share a launch: copy its link, or post it.
@@ -18,6 +19,7 @@ export function ShareRow({ symbol, path }: { symbol: string; path: string }) {
     <div className="share-row">
       <button
         type="button"
+        className="icon-btn"
         onClick={async () => {
           try {
             await navigator.clipboard.writeText(url());
@@ -28,14 +30,17 @@ export function ShareRow({ symbol, path }: { symbol: string; path: string }) {
           }
         }}
       >
-        {copied ? 'Link copied' : 'Copy link'}
+        {copied ? <CheckIcon size={14} /> : <LinkIcon size={14} />}
+        {copied ? 'Copied' : 'Copy link'}
       </button>
       <a
         href={`https://x.com/intent/post?text=${encodeURIComponent(text)}&url=${encodeURIComponent(url())}`}
         target="_blank"
         rel="noopener noreferrer"
+        className="icon-btn"
       >
-        Share on X
+        <ExternalIcon size={14} />
+        Post on X
       </a>
     </div>
   );

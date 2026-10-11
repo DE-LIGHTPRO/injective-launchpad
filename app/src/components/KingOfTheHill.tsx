@@ -54,10 +54,6 @@ export function KingOfTheHill({ rows, nowSeconds }: { rows: LaunchRow[]; nowSeco
     <section className="hill" aria-labelledby="hill-heading">
       <div className="hill-head">
         <h2 id="hill-heading">King of the hill</h2>
-        <p className="note">
-          The three largest launches still on their curve, by market cap. Updated every
-          time this page reads the chain.
-        </p>
       </div>
 
       <div className="hill-grid">

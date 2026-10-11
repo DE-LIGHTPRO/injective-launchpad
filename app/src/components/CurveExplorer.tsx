@@ -112,11 +112,8 @@ export function CurveExplorer() {
   return (
     <section className="explorer" aria-labelledby="explorer-heading">
       <div className="explorer-head">
-        <h2 id="explorer-heading">Move along the curve</h2>
-        <p className="note">
-          This is the shape a new launch starts with. Every figure is computed by the
-          same arithmetic the contract runs, for a launch that does not exist yet.
-        </p>
+        <h2 id="explorer-heading">The bonding curve</h2>
+        <p className="note">Every launch uses this curve. Computed with the contract&rsquo;s own maths.</p>
       </div>
 
       <svg
@@ -204,8 +201,8 @@ export function CurveExplorer() {
         </div>
       )}
       <p className="note explorer-hint">
-        Drag the handle, or focus it and use the arrow keys. Further along the curve,
-        the same {NETWORK.quoteSymbol} buys fewer tokens: that is the whole mechanism.
+        Drag the handle or use the arrow keys. The further along, the fewer tokens each{' '}
+        {NETWORK.quoteSymbol} buys.
       </p>
     </section>
   );

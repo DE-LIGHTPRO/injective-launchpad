@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { DemoBanner } from '@/components/DemoBanner';
+import { ArrowLeftIcon } from '@/components/Icons';
 import { CopyButton } from '@/components/CopyButton';
 import { LaunchList } from '@/components/LaunchList';
 import { loadRows, toRow } from '@/lib/boardRows';
@@ -54,8 +55,10 @@ export default async function CreatorPage({ params }: { params: Promise<{ addres
   return (
     <>
       <DemoBanner />
-      <p className="note" style={{ marginBottom: 'var(--space-3)' }}>
-        <Link href="/">← launches</Link>
+      <p className="note" style={{ marginBottom: 'var(--space-4)' }}>
+        <Link href="/" className="back-link">
+          <ArrowLeftIcon size={14} /> All launches
+        </Link>
       </p>
       <h1>{nameFor(address)}</h1>
       <p className="sub mono" style={{ fontSize: 'var(--text-xs)', wordBreak: 'break-all' }}>
@@ -72,28 +75,28 @@ export default async function CreatorPage({ params }: { params: Promise<{ addres
         </div>
       ) : (
         <>
-          <div className="hero-stats" style={{ marginTop: 'var(--space-5)' }}>
-            <div className="hero-stat">
-              <span className="v">{t.launches}</span>
-              <span className="k">Launches</span>
+          <dl className="stats" style={{ marginTop: 'var(--space-5)' }}>
+            <div className="stat">
+              <dt className="k">Launches</dt>
+              <dd className="v">{t.launches}</dd>
             </div>
-            <div className="hero-stat">
-              <span className="v">{t.graduated}</span>
-              <span className="k">Graduated</span>
+            <div className="stat">
+              <dt className="k">Graduated</dt>
+              <dd className="v">{t.graduated}</dd>
             </div>
-            <div className="hero-stat">
-              <span className="v">
+            <div className="stat">
+              <dt className="k">Fees paid out</dt>
+              <dd className="v">
                 {one ? `${compact(t.paidToCreators, one.quoteDecimals)} ${denomLabel(one.quoteDenom)}` : '·'}
-              </span>
-              <span className="k">Fees paid out</span>
+              </dd>
             </div>
-            <div className="hero-stat">
-              <span className="v">
+            <div className="stat">
+              <dt className="k">Fees unclaimed</dt>
+              <dd className="v">
                 {one ? `${compact(t.feesAccrued, one.quoteDecimals, 4)} ${denomLabel(one.quoteDenom)}` : '·'}
-              </span>
-              <span className="k">Fees unclaimed</span>
+              </dd>
             </div>
-          </div>
+          </dl>
           <p className="note" style={{ marginTop: 'var(--space-3)' }}>
             Names are generated from the address and are not chosen or verified.
           </p>

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { onWatchlistChange, readWatchlist, toggleWatch } from '@/lib/watchlist';
+import { StarIcon } from './Icons';
 
 /** A star that adds a launch to this browser's watchlist. */
 export function WatchButton({ id, symbol }: { id: number; symbol: string }) {
@@ -17,18 +18,13 @@ export function WatchButton({ id, symbol }: { id: number; symbol: string }) {
   return (
     <button
       type="button"
-      className="watch-btn"
+      className="icon-btn"
       aria-pressed={on}
       aria-label={on ? `Remove ${symbol} from watchlist` : `Add ${symbol} to watchlist`}
-      title={on ? 'Watching' : 'Watch'}
-      onClick={(e) => {
-        // Inside a card that is itself a link: starring must not navigate.
-        e.preventDefault();
-        e.stopPropagation();
-        setOn(toggleWatch(id));
-      }}
+      onClick={() => setOn(toggleWatch(id))}
     >
-      {on ? '★' : '☆'}
+      <StarIcon size={14} filled={on} />
+      {on ? 'Watching' : 'Watch'}
     </button>
   );
 }

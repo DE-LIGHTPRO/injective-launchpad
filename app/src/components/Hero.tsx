@@ -20,16 +20,11 @@ export interface HeroStats {
 export function Hero({ stats }: { stats: HeroStats | null }) {
   return (
     <section className="hero" aria-labelledby="hero-title">
-      <span className="hero-eyebrow">
-        <i aria-hidden="true" />
-        Live on Injective {NETWORK.name}
-      </span>
-      <h1 id="hero-title">
-        Fair launches on Injective. <span className="grad">Liquidity that locks itself.</span>
-      </h1>
+      <span className="hero-eyebrow">Injective {NETWORK.name}</span>
+      <h1 id="hero-title">Fair token launches, with liquidity locked at graduation.</h1>
       <p className="sub">
-        Every token gets the same fixed supply and the same curve. When it graduates, the
-        liquidity moves into a pool nobody can withdraw, and nobody can mint another token.
+        Fixed supply and one bonding curve for every token. At graduation the liquidity
+        moves into a pool no one can withdraw, and no one can mint more.
       </p>
       <div className="hero-cta">
         <Link href="/create" className="go">
@@ -40,24 +35,24 @@ export function Hero({ stats }: { stats: HeroStats | null }) {
         </a>
       </div>
       {stats && (
-        <div className="hero-stats">
-          <div className="hero-stat">
-            <span className="v">{stats.launches}</span>
-            <span className="k">Launches</span>
+        <dl className="stats">
+          <div className="stat">
+            <dt className="k">Launches</dt>
+            <dd className="v">{stats.launches}</dd>
           </div>
-          <div className="hero-stat">
-            <span className="v">{stats.liquidity}</span>
-            <span className="k">Liquidity on inj·pad</span>
+          <div className="stat">
+            <dt className="k">Total liquidity</dt>
+            <dd className="v">{stats.liquidity}</dd>
           </div>
-          <div className="hero-stat">
-            <span className="v">{stats.graduated}</span>
-            <span className="k">Graduated, locked</span>
+          <div className="stat">
+            <dt className="k">Graduated</dt>
+            <dd className="v">{stats.graduated}</dd>
           </div>
-          <div className="hero-stat">
-            <span className="v">{stats.paidToCreators}</span>
-            <span className="k">Paid to creators</span>
+          <div className="stat">
+            <dt className="k">Paid to creators</dt>
+            <dd className="v">{stats.paidToCreators}</dd>
           </div>
-        </div>
+        </dl>
       )}
     </section>
   );

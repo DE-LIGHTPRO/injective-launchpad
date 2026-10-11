@@ -8,6 +8,7 @@ import { TrustBadges } from '@/components/TrustBadges';
 import { ShareRow } from '@/components/ShareRow';
 import { WatchButton } from '@/components/WatchButton';
 import { Price } from '@/components/Price';
+import { ArrowLeftIcon } from '@/components/Icons';
 import { TokenLogo } from '@/components/TokenLogo';
 import { visibleLinks } from '@/lib/tokenProfile';
 import { describeRules, hasAnyRule } from '@/lib/launchRules';
@@ -179,28 +180,33 @@ export default async function LaunchPage({ params }: { params: Promise<{ id: str
   return (
     <>
       <DemoBanner />
-      <p className="note" style={{ marginBottom: 'var(--space-3)' }}>
-        <Link href="/">← launches</Link>
+      <p className="note" style={{ marginBottom: 'var(--space-4)' }}>
+        <Link href="/" className="back-link">
+          <ArrowLeftIcon size={14} /> All launches
+        </Link>
       </p>
 
-      <div className="metric-row" style={{ alignItems: 'center' }}>
-        <div className="sym-row">
-          <TokenLogo profile={launch.profile} symbol={symbol} size={48} />
-          <h1>{symbol}</h1>
-          <WatchButton id={launch.id} symbol={symbol} />
+      <div className="token-head">
+        <TokenLogo profile={launch.profile} symbol={symbol} size={48} />
+        <div>
+          <div className="token-title">
+            <h1>{symbol}</h1>
+            <StatusChip
+              graduated={detail.state.graduated}
+              migrated={detail.migrated}
+              rules={detail.rules}
+            />
+          </div>
+          <div className="denom-row mono">
+            <span>{detail.denom}</span>
+            <CopyButton value={detail.denom} label="Copy" />
+          </div>
         </div>
-        <StatusChip
-          graduated={detail.state.graduated}
-          migrated={detail.migrated}
-          rules={detail.rules}
-        />
       </div>
       <TrustBadges status={codeStatus} migrated={detail.migrated} demo={isDemoMode()} />
-      <p className="sub mono" style={{ fontSize: 'var(--text-xs)', wordBreak: 'break-all' }}>
-        {detail.denom} <CopyButton value={detail.denom} label="Copy" />
-      </p>
       <CodeCheck status={codeStatus} curve={launch.curve} />
-      <div style={{ margin: 'var(--space-3) 0' }}>
+      <div className="share-row" style={{ margin: 'var(--space-4) 0' }}>
+        <WatchButton id={launch.id} symbol={symbol} />
         <ShareRow symbol={symbol} path={`/launch/${launch.id}`} />
       </div>
 
@@ -290,40 +296,6 @@ export default async function LaunchPage({ params }: { params: Promise<{ id: str
         </div>
       </div>
 
-      {hasAnyRule(detail.rules) && (
-        <div className="card" style={{ marginTop: 'var(--space-5)' }}>
-          <h2>Launch rules</h2>
-          <ul className="plan">
-            {ruleCopy.lines.map((l) => (
-              <li key={l}>{l}</li>
-            ))}
-          </ul>
-          {/*
-              The scope sentence is not optional decoration. These rules stop at
-              graduation, and a buyer reading a cap without that is being told
-              something about the token rather than about this curve.
-            */}
-          <p className="note">{ruleCopy.scope}</p>
-        </div>
-      )}
-
-      <CreatorPosition
-        creator={detail.creator}
-        denom={detail.denom}
-        totalSupply={(detail.config.curveSupply + detail.lpReserve).toString()}
-      />
-
-      <FeeEarnings
-        curve={launch.curve}
-        creator={detail.creator}
-        creatorOwed={detail.creatorOwed}
-        platformOwed={detail.platformOwed}
-        creatorPaid={detail.creatorPaid}
-        platformPaid={detail.platformPaid}
-        feeBps={detail.config.feeBps}
-        quote={quote}
-      />
-
       <div className="cols" style={{ marginTop: 'var(--space-5)' }}>
         <div>
           <div className="card">
@@ -404,27 +376,65 @@ export default async function LaunchPage({ params }: { params: Promise<{ id: str
               </span>
             </div>
           </div>
+          <div style={{ marginTop: 'var(--space-4)' }}>
+            <Trades
+              quote={quote}
+              curve={launch.curve}
+              denom={launch.denom}
+              totalSupply={(detail.config.curveSupply + detail.lpReserve).toString()}
+            />
+          </div>
         </div>
 
-        <TradePanel
-          curve={launch.curve}
-          quoteAsset={quote}
-          config={detail.config}
-          state={detail.state}
-          symbol={symbol}
+        <aside className="trade-col" aria-label="Trade">
+          <TradePanel
+            curve={launch.curve}
+            quoteAsset={quote}
+            config={detail.config}
+            state={detail.state}
+            symbol={symbol}
+            denom={detail.denom}
+            tradingClosed={detail.state.graduated}
+            pool={detail.pool}
+            rules={detail.rules}
+            blocked={blocksTrading(codeStatus)}
+          />
+          {hasAnyRule(detail.rules) && (
+            <div className="card" style={{ marginTop: 'var(--space-4)' }}>
+              <h2>Launch rules</h2>
+              <ul className="plan">
+                {ruleCopy.lines.map((l) => (
+                  <li key={l}>{l}</li>
+                ))}
+              </ul>
+              {/*
+                  The scope sentence is not optional decoration. These rules stop at
+                  graduation, and a buyer reading a cap without that is being told
+                  something about the token rather than about this curve.
+                */}
+              <p className="note">{ruleCopy.scope}</p>
+            </div>
+          )}
+        </aside>
+      </div>
+
+      <div className="stack-below">
+        <CreatorPosition
+          creator={detail.creator}
           denom={detail.denom}
-          tradingClosed={detail.state.graduated}
-          pool={detail.pool}
-          rules={detail.rules}
-          blocked={blocksTrading(codeStatus)}
+          totalSupply={(detail.config.curveSupply + detail.lpReserve).toString()}
         />
 
-      <Trades
-        quote={quote}
-        curve={launch.curve}
-        denom={launch.denom}
-        totalSupply={(detail.config.curveSupply + detail.lpReserve).toString()}
-      />
+        <FeeEarnings
+          curve={launch.curve}
+          creator={detail.creator}
+          creatorOwed={detail.creatorOwed}
+          platformOwed={detail.platformOwed}
+          creatorPaid={detail.creatorPaid}
+          platformPaid={detail.platformPaid}
+          feeBps={detail.config.feeBps}
+          quote={quote}
+        />
       </div>
     </>
   );

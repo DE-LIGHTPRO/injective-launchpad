@@ -42,8 +42,8 @@ export async function TradeTicker({
             really says is that nothing outside this window was asked about.
           */}
         <span className="note">
-          across the {ticker.covered} newest launches
-          {ticker.partial && ', and one or more could not be read'}
+          {ticker.covered} newest launches
+          {ticker.partial && ' · some unavailable'}
         </span>
       </div>
       <ul>
