@@ -20,7 +20,7 @@ import {
 import { addressName } from '@/lib/addressName';
 
 export const metadata: Metadata = {
-  title: 'Analytics · Vetta',
+  title: 'Analytics',
   description: 'What this launchpad has actually done, measured from chain state.',
 };
 

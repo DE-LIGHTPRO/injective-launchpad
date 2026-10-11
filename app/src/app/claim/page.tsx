@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import { ClaimFees } from '@/components/ClaimFees';
 
 export const metadata: Metadata = {
-  title: 'Claim fees · Vetta',
+  title: 'Claim fees',
   description: 'Fees your launches have earned, claimable in one transaction.',
 };
 
