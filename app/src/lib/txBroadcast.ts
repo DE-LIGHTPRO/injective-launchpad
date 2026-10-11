@@ -67,10 +67,15 @@ export async function broadcastRawTx(parts: SignedTxParts): Promise<BroadcastRes
      * own `code`, and anything but zero is a refusal that arrived with a success status.
      */
     if (result.code !== 0) {
+      // Logged server-side so the raw node reason is visible in the dev/server logs
+      // while the user only ever sees the translated sentence. Temporary aid while the
+      // signing path is being brought up against a live chain.
+      console.error('[broadcast] chain rejected tx, code', result.code, '| rawLog:', result.rawLog);
       return { error: describeBroadcastFailure(result.rawLog ?? ''), detail: result.rawLog };
     }
     return { txHash: result.txHash };
   } catch (e) {
+    console.error('[broadcast] threw before/while sending:', (e as Error)?.stack ?? e);
     return {
       error: describeBroadcastFailure((e as Error).message ?? ''),
       detail: (e as Error).message,
