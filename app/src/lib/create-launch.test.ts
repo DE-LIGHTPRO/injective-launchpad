@@ -353,3 +353,15 @@ test('the plan summary speaks in the launch\'s own quote', () => {
   assert.match(lines, /spend 5 TUSD/);
   assert.doesNotMatch(lines, /INJ/);
 });
+
+test('an opening buy with a later start time is refused while typing', () => {
+  const nowMs = 1_800_000_000_000;
+  const later = ((BigInt(nowMs) + 3_600_000n) * 1_000_000n).toString();
+  assert.throws(
+    () => planLaunch(input({ initialBuy: 10n ** 18n, rules: { trade_start: later }, nowMs })),
+    /cannot be combined with a later start time/,
+  );
+  // Either one alone is fine.
+  planLaunch(input({ rules: { trade_start: later }, nowMs }));
+  planLaunch(input({ initialBuy: 10n ** 18n, nowMs }));
+});

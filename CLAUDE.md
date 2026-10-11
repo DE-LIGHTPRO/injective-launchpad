@@ -39,7 +39,8 @@ the pool fee to the creator). When choosing behaviour, check what those two do f
 - Not deployed with the current contracts. An OLD testnet factory exists with the custodial graduation: do not point the app at it. Redeploying is the user's call; never deploy or handle keys without their explicit go-ahead.
 - This cloud environment has no deploy key, and its network policy blocks `testnet.sentry.lcd.injective.network`. Testnet work runs on the user's machine: `scripts/deploy.mjs`, then `npm --prefix scripts run e2e`.
 - Signing path (`app/src/lib/broadcast.ts`) is built but not yet exercised against a chain.
-- Tests: 125 Rust, 206 app. axe-core: 0 violations on the main pages.
+- Tests: 128 Rust, 211 app. axe-core: 0 violations on the main pages.
+- **Production (`injpad.vercel.app`, from `main`) points at the OLD testnet factory with 3 live launches.** Follow `docs/RELEASE.md`: deploy new contracts, update the Vercel env, then merge.
 - Open items, ranked: `docs/AUDIT.md` → "Open".
 
 ## House style

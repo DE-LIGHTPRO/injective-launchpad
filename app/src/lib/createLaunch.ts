@@ -86,6 +86,8 @@ export interface LaunchInput {
   // `unknown` because `early_fee` is a nested object while the others are strings;
   // narrowing to `string` here was what made the rules field quietly reject it.
   rules?: Record<string, unknown>;
+  /** Test seam for the start-time check; defaults to the wall clock. */
+  nowMs?: number;
   /**
    * Quote the creator spends on their own launch, in the same transaction.
    *
@@ -172,6 +174,23 @@ export function validateLaunch(input: LaunchInput): void {
       'lpReserve',
       'With no liquidity reserve a sold-out curve graduates with nothing to pair against. Set some aside.',
     );
+  }
+
+  /*
+   * An opening buy runs inside the launch transaction, so it cannot coexist with a start
+   * time in the future: the curve would refuse it and revert the launch after signing.
+   * The factory refuses this too (InitialBuyBeforeStart); saying it here means the form
+   * says so while the creator is still typing.
+   */
+  const start = input.rules?.trade_start;
+  if (input.initialBuy && input.initialBuy > 0n && typeof start === 'string' && /^[0-9]+$/.test(start)) {
+    const startMs = Number(BigInt(start) / 1_000_000n);
+    if (startMs > (input.nowMs ?? Date.now())) {
+      throw new LaunchInputError(
+        'initialBuy',
+        'An opening buy happens the moment the launch is created, so it cannot be combined with a later start time. Remove one of them.',
+      );
+    }
   }
 
   // The curve's own rules, which the contract checks again on both sides.

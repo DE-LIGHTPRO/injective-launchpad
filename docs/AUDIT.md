@@ -4,6 +4,45 @@ Not a third-party audit. Findings from reviewing the contracts, app and scripts
 against what Pons (`ponsdotdev/pons-labs`) and nearly.trade do. Newest first.
 Severity uses the usual scale: Critical / High / Medium / Low / Info.
 
+## 2026-10-11 review, fourth pass (everything, plus the live site)
+
+Triggered by screenshots of production. Scope: git history, contracts, app, scripts,
+deployment.
+
+### Fixed
+
+| # | Sev | Finding | Fix |
+|---|---|---|---|
+| 23 | High | **Creating a launch from the browser could never sign.** `plan` was computed above `builtRules` and `devBuy`; with a wallet connected it hit the temporal dead zone and the try/catch showed it as a form error. Present on production. | Reordered. New guard `hook-order.test.ts` fails on any hook reading a later-declared hook value; run against the old code it flags exactly this. |
+| 24 | High | **Price and market cap were 0 on every 6-decimal pair** (live: PAIR5277 with 9.90 TUSD reserve showed MC 0.00). The per-token price was floored to a whole base unit first. | `marketCapExact` (one division from reserves) and `spotPriceWad` (18 extra digits). |
+| 25 | High | **Create form treated every pair as 18-decimal INJ**: curve preview, labels, and the opening buy ("5" on a USDC pair = 5x10^18 base units, reverted after signing). Switching pair also did not refresh the signed plan. | `fixedCurveFor(decimals)`, the pair's label throughout, missing memo dep added. |
+| 26 | Medium | An opening buy combined with a future start time, or larger than the wallet cap, reverted the whole launch inside the reply with an opaque error, after signing. | The factory refuses both by name before instantiating (`InitialBuyBeforeStart`, `InitialBuyOverCap`). The form flags the start-time case as you type. 3 new factory tests. |
+| 27 | Medium | Trade ticker printed every amount at 18 decimals as INJ ("0 INJ" for a TUSD buy). | Each launch's own quote decimals and label. |
+| 28 | Medium | `quote-test.mjs` / `quote-trade-test.mjs` created launches without the mint-key handover, so they would revert against the new factory. | `MsgChangeAdmin` added. The SDK version used by the scripts (1.20.55, the same line as the app) exports it; checked. |
+
+### Checked, nothing to fix
+
+- **Secrets:** no secret-named file in any commit of any branch. Content scan for seed
+  phrases, hex keys, JWTs and provider tokens finds only prose. Scripts read keys only
+  from `scripts/.env.local` at runtime.
+- **Dependencies:** `npm audit --omit=dev` reports 0 for `app/` and for `scripts/`.
+- **Factory `create_launch`:** exact supply, quote allowlist, initial-buy ceiling,
+  unexpected funds refused, no curve admin, and the mint-key handover forces a real
+  tokenfactory denom the creator controlled.
+- **Hardcoded INJ / 18 decimals** across components: every remaining 18 is a token
+  amount (launch tokens are always 18 decimals). Every remaining INJ label is the gas
+  balance or explanatory copy for the default pair.
+- **Wallets:** unknown-chain suggestion for `injective-888` is handled and tested.
+
+### Open, operational (see `docs/RELEASE.md`)
+
+- Production points at the old factory. Merging before the new deploy would correctly
+  flag all three live launches unsafe and disable trading on them. Follow the release order.
+- The `0x0514…4f78` quote shows as hex because the chain allowlist stores decimals but no
+  symbol. Either tell us what token it is, or add an optional `symbol` to the factory's
+  `SetQuote` before the redeploy.
+- GitHub Actions: no runner assigned, so no CI has run on this PR (billing or minutes).
+
 ## 2026-10-11 review, third pass (app, UI, dependencies)
 
 ### Fixed
@@ -72,8 +111,7 @@ Severity uses the usual scale: Critical / High / Medium / Low / Info.
    on mainnet. *(code done)*
 6. **Holders panel** needs an indexer over bank events (`denom_owners` returns 501 for
    tokenfactory denoms).
-7. Align `@injectivelabs/sdk-ts` between `app/` (^1.20) and `scripts/` (^1.14), after
-   the scripts have run once on testnet with the current version.
+7. ~~Align `@injectivelabs/sdk-ts` versions~~: the scripts' lockfile already resolves 1.20.55.
 8. An optional external-AMM adapter for graduation, once an Injective AMM's testnet
    address is verified on chain rather than inferred.
 

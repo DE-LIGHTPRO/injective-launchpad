@@ -235,6 +235,18 @@ pub enum FactoryError {
         max: cosmwasm_std::Uint128,
     },
 
+    /// The opening buy runs inside the launch transaction, so a start time in the
+    /// future would make the curve refuse it and revert the whole launch after signing.
+    #[error("an opening buy cannot be combined with a start time in the future: the curve would refuse it")]
+    InitialBuyBeforeStart,
+
+    /// The opening buy is charged against the creator's own wallet cap, like anyone's.
+    #[error("the opening buy would deliver {tokens} tokens, over this launch's wallet cap of {cap}")]
+    InitialBuyOverCap {
+        tokens: cosmwasm_std::Uint128,
+        cap: cosmwasm_std::Uint128,
+    },
+
     #[error("token profile field `{field}` is invalid: {reason}")]
     BadProfile { field: String, reason: String },
 
@@ -692,7 +704,7 @@ pub fn execute(
 #[allow(clippy::too_many_arguments)]
 fn create_launch(
     deps: DepsMut,
-    _env: Env,
+    env: Env,
     info: MessageInfo,
     denom: String,
     fee_bps: u16,
@@ -780,6 +792,20 @@ fn create_launch(
             return Err(FactoryError::InitialBuyTooLarge {
                 tokens: quote.tokens_out,
                 max: ceiling,
+            });
+        }
+        /*
+         * Refused here, by name, rather than by the curve inside the reply. Both would
+         * revert the launch; only this one tells the creator why, and only this one
+         * fails at simulation, before a wallet prompt, instead of after signing.
+         */
+        if !rules.buying_open_at(env.block.time) {
+            return Err(FactoryError::InitialBuyBeforeStart);
+        }
+        if rules.would_exceed_cap(Uint128::zero(), quote.tokens_out) {
+            return Err(FactoryError::InitialBuyOverCap {
+                tokens: quote.tokens_out,
+                cap: rules.max_per_wallet.unwrap_or_default(),
             });
         }
     }

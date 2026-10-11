@@ -1449,3 +1449,54 @@ fn the_quote_list_is_readable_and_names_its_default() {
         .unwrap();
     assert_eq!(gone.quotes.len(), 1);
 }
+
+// ------------------------------------------------ opening buy vs launch rules --
+
+fn create_with_buy(f: &mut Fx, rules: LaunchRules, spend: Uint128) -> anyhow::Result<()> {
+    f.app
+        .execute_contract(
+            f.creator.clone(),
+            f.factory.clone(),
+            &ExecuteMsg::CreateLaunch {
+                denom: TOKEN.into(),
+                fee_bps: 100,
+                quote_denom: None,
+                profile: Default::default(),
+                rules,
+                initial_buy: Some(spend),
+            },
+            &[coin(seed_total().u128(), TOKEN), coin(spend.u128(), QUOTE)],
+        )
+        .map(|_| ())
+        .map_err(|e| anyhow::anyhow!(format!("{e:#}")))
+}
+
+#[test]
+fn an_opening_buy_with_a_future_start_is_refused_by_name() {
+    // The curve would refuse the buy inside the reply and revert the launch anyway;
+    // refusing here names the reason and fails at simulation, before signing.
+    let mut f = setup();
+    let later = f.app.block_info().time.plus_seconds(3_600);
+    let rules = LaunchRules { max_per_wallet: None, trade_start: Some(later), early_fee: None };
+    let err = create_with_buy(&mut f, rules, amt(1)).unwrap_err().to_string();
+    assert!(err.contains("start time in the future"), "{err}");
+}
+
+#[test]
+fn an_opening_buy_over_the_wallet_cap_is_refused_by_name() {
+    let mut f = setup();
+    // 1 INJ buys ~34.6M tokens on this curve; a 10M cap cannot hold it.
+    let cap = Uint128::new(10_000_000) * one();
+    let rules = LaunchRules { max_per_wallet: Some(cap), trade_start: None, early_fee: None };
+    let err = create_with_buy(&mut f, rules, amt(1)).unwrap_err().to_string();
+    assert!(err.contains("over this launch's wallet cap"), "{err}");
+}
+
+#[test]
+fn an_opening_buy_within_the_rules_still_launches() {
+    let mut f = setup();
+    let cap = Uint128::new(100_000_000) * one();
+    let rules = LaunchRules { max_per_wallet: Some(cap), trade_start: None, early_fee: None };
+    create_with_buy(&mut f, rules, amt(1)).unwrap();
+    assert!(f.balance(&f.creator.clone(), TOKEN) > Uint128::zero());
+}

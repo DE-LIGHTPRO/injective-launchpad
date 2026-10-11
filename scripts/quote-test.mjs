@@ -30,6 +30,7 @@ import {
   MsgExecuteContract,
   MsgCreateDenom,
   MsgMint,
+  MsgChangeAdmin,
   MsgBroadcasterWithPk,
 } from '@injectivelabs/sdk-ts';
 // Network lives in its own package, not in sdk-ts. deploy.mjs already imports it
@@ -125,6 +126,9 @@ const res = await broadcaster.broadcast({
   msgs: [
     MsgCreateDenom.fromJSON({ sender, subdenom: SYMBOL }),
     MsgMint.fromJSON({ sender, amount: { denom, amount: SEED.toString() } }),
+    // The mint key to the factory, which passes it to the curve; required since the
+    // factory hands it on and reverts the launch if it cannot.
+    MsgChangeAdmin.fromJSON({ sender, denom, newAdmin: factory }),
     MsgExecuteContract.fromJSON({
       sender, contractAddress: factory,
       msg: { create_launch: { denom, fee_bps: 100, quote_denom: QUOTE6 } },
