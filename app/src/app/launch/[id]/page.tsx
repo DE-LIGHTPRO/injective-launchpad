@@ -4,6 +4,10 @@ import { notFound } from 'next/navigation';
 import { getLaunch, getLaunchDetail, resolveQuote, symbolOf, short, ChainError, contractFacts } from '@/lib/chain';
 import { assessCurveCode, blocksTrading, pinnedCodeIds } from '@/lib/codeCheck';
 import { CodeCheck } from '@/components/CodeCheck';
+import { TrustBadges } from '@/components/TrustBadges';
+import { ShareRow } from '@/components/ShareRow';
+import { WatchButton } from '@/components/WatchButton';
+import { Price } from '@/components/Price';
 import { TokenLogo } from '@/components/TokenLogo';
 import { visibleLinks } from '@/lib/tokenProfile';
 import { describeRules, hasAnyRule } from '@/lib/launchRules';
@@ -183,6 +187,7 @@ export default async function LaunchPage({ params }: { params: Promise<{ id: str
         <div className="sym-row">
           <TokenLogo profile={launch.profile} symbol={symbol} size={48} />
           <h1>{symbol}</h1>
+          <WatchButton id={launch.id} symbol={symbol} />
         </div>
         <StatusChip
           graduated={detail.state.graduated}
@@ -190,10 +195,14 @@ export default async function LaunchPage({ params }: { params: Promise<{ id: str
           rules={detail.rules}
         />
       </div>
+      <TrustBadges status={codeStatus} migrated={detail.migrated} demo={isDemoMode()} />
       <p className="sub mono" style={{ fontSize: 'var(--text-xs)', wordBreak: 'break-all' }}>
         {detail.denom} <CopyButton value={detail.denom} label="Copy" />
       </p>
       <CodeCheck status={codeStatus} curve={launch.curve} />
+      <div style={{ margin: 'var(--space-3) 0' }}>
+        <ShareRow symbol={symbol} path={`/launch/${launch.id}`} />
+      </div>
 
       {links.length > 0 && (
         <>
@@ -244,13 +253,13 @@ export default async function LaunchPage({ params }: { params: Promise<{ id: str
         <div>
           <span className="k">Market cap</span>
           <span className="v mono">
-            {compact(marketCap(detail.config, detail.state, totalSupply), quote.decimals)} {quote.label}
+            {compact(marketCap(detail.config, detail.state, totalSupply, detail.pool), quote.decimals)} {quote.label}
           </span>
         </div>
         <div>
           <span className="k">Price</span>
           <span className="v mono">
-            {fmt(price, quote.decimals, 10)} {quote.label}
+            <Price raw={price} decimals={quote.decimals} unit={quote.label} />
           </span>
         </div>
         <div>
@@ -339,7 +348,7 @@ export default async function LaunchPage({ params }: { params: Promise<{ id: str
             <div className="metric-row">
               <span className="k">Spot price</span>
               <span className="v mono">
-                {fmt(price, quote.decimals, 10)} {quote.label} / {symbol}
+                <Price raw={price} decimals={quote.decimals} unit={`${quote.label} / ${symbol}`} />
               </span>
             </div>
             <div className="metric-row">
@@ -376,7 +385,11 @@ export default async function LaunchPage({ params }: { params: Promise<{ id: str
             </div>
             <div className="metric-row">
               <span className="k">Creator</span>
-              <span className="v mono">{short(detail.creator)}</span>
+              <span className="v mono">
+                <Link href={`/creator/${detail.creator}`} title="Everything this address has launched">
+                  {short(detail.creator)}
+                </Link>
+              </span>
             </div>
             <div className="metric-row">
               <span className="k">Curve contract</span>
