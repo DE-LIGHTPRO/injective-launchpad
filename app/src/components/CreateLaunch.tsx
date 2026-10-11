@@ -35,7 +35,7 @@ import {
   OPENING_RESERVE_QUOTE,
   GRADUATION_TARGET_QUOTE,
 } from '@/lib/launchLimits';
-import type { WalletAccount } from '@/lib/wallet';
+import { useConnectedAccount } from '@/lib/walletStore';
 import { profileForChain, profileFieldError, imageSrc } from '@/lib/tokenProfile';
 import {
   rulesForChain,
@@ -87,7 +87,14 @@ const DEFAULTS = {
 
 export function CreateLaunch() {
   const [f, setF] = useState(DEFAULTS);
-  const [account, setAccount] = useState<WalletAccount | null>(null);
+  /*
+   * The connected account comes from the shared store, not local state. It used to be
+   * a `useState` set only by this page's own ConnectWallet, so connecting in the header
+   * (the usual place) left the Sign section still showing "Connect a wallet" even though
+   * a wallet was plainly connected. Reading the store means either connect point works,
+   * the same way the trade panel reads it.
+   */
+  const account = useConnectedAccount();
 
   /*
    * The quote assets this launchpad allows, read from the factory.
@@ -831,7 +838,7 @@ export function CreateLaunch() {
         {!account && (
           <>
             <p className="note">Connect a wallet to see exactly what would be signed.</p>
-            <ConnectWallet onAccount={setAccount} />
+            <ConnectWallet />
           </>
         )}
 
