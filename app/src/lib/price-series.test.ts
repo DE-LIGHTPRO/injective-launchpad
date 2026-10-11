@@ -10,7 +10,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { fillPrice, buildSeries, changeBps, pathFor } from './priceSeries.ts';
+import { fillPrice, buildSeries, changeBps } from './priceSeries.ts';
 import type { Trade } from './chain.ts';
 
 const ONE = 10n ** 18n;
@@ -129,26 +129,6 @@ test('graduation is not a trade and carries no price', () => {
   assert.equal(s.unpriceable, 0, 'a migration is not an unpriceable trade');
 });
 
-test('an empty series says so rather than drawing a point at zero', () => {
-  const s = buildSeries([]);
-  assert.equal(s.points.length, 0);
-  assert.equal(s.first, null);
-  assert.equal(s.last, null);
-  assert.equal(pathFor(s, 100, 40), null);
-  assert.equal(changeBps(s), null);
-});
-
-test('one trade is not a change', () => {
-  /*
-   * Reporting 0% from a single fill claims the price has held steady over a period
-   * that does not exist. Null is the only honest answer.
-   */
-  const s = buildSeries([trade()]);
-  assert.equal(s.points.length, 1);
-  assert.equal(changeBps(s), null);
-  assert.equal(pathFor(s, 100, 40), null, 'a single point cannot be a line');
-});
-
 test('change is measured first fill to last, in basis points', () => {
   // 0.001 to 0.002 is a double, which is +10000 bps.
   const s = buildSeries([
@@ -165,34 +145,9 @@ test('change is measured first fill to last, in basis points', () => {
   assert.equal(changeBps(down), -5_000);
 });
 
-test('the path stays inside the box it is given', () => {
-  // A chart whose line leaves its viewBox is clipped, and the clipping looks like
-  // data rather than like a bug.
-  const s = buildSeries([
-    trade({ height: 1, injIn: ONE, tokens: 1_000n * ONE }),
-    trade({ height: 2, injIn: 5n * ONE, tokens: 1_000n * ONE }),
-    trade({ height: 3, injIn: 2n * ONE, tokens: 1_000n * ONE }),
-  ]);
-  const W = 200;
-  const H = 50;
-  const d = pathFor(s, W, H, 2);
-  assert.ok(d);
-  const coords = (d as string).match(/-?\d+\.\d+/g)!.map(Number);
-  for (let i = 0; i < coords.length; i += 2) {
-    assert.ok(coords[i] >= 0 && coords[i] <= W, `x ${coords[i]} outside 0..${W}`);
-    assert.ok(coords[i + 1] >= 0 && coords[i + 1] <= H, `y ${coords[i + 1]} outside 0..${H}`);
-  }
-});
-
-test('a price that never moved draws down the middle rather than dividing by zero', () => {
-  // Three fills at one price: the span is zero and the naive scale is 0/0.
-  const s = buildSeries([
-    trade({ height: 1 }),
-    trade({ height: 2 }),
-    trade({ height: 3 }),
-  ]);
-  assert.equal(s.low, s.high);
-  const d = pathFor(s, 100, 40);
-  assert.ok(d && !/NaN/.test(d), `path contains NaN: ${d}`);
-  assert.equal(changeBps(s), 0, 'a flat price across several fills really is 0%');
-});
+/*
+ * The `pathFor` tests went with the function. It drew the fill series as a line and
+ * the launch page moved to candles; nothing called it, and four tests passing on an
+ * unreachable function is the false confidence this project keeps finding rather
+ * than evidence of coverage.
+ */

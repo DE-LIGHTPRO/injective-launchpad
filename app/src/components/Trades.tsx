@@ -3,7 +3,8 @@ import { firstBlockShare } from '@/lib/creatorHolding';
 import { fmt } from '@/lib/curve';
 import { NETWORK } from '@/lib/config';
 import { isDemoMode } from '@/lib/demo';
-import { buildSeries, changeBps, pathFor } from '@/lib/priceSeries';
+import { buildSeries, changeBps } from '@/lib/priceSeries';
+import { toCandles, candleLayout } from '@/lib/candles';
 import {
   uniqueTraders,
   volumeWithin,
@@ -96,7 +97,18 @@ export async function Trades({
   const volPartial = volumeIsPartial(trades, trades.length, height, BLOCKS_PER_DAY);
   const traders = uniqueTraders(trades);
   const change = changeBps(series);
-  const path = pathFor(series, 560, 60, 3);
+  /*
+   * CANDLES, not a line. A line joins fills and hides what happened between them: a
+   * bucket that opened low, spiked and closed low reads as flat. Open, high, low and
+   * close is what a trader expects to see on a market, and the data to build it was
+   * already here.
+   *
+   * Bucketed by BLOCK HEIGHT, because that is the only ordering the transaction log
+   * gives us. Bucketing by a derived wall-clock time would put a precise-looking
+   * label on an estimate.
+   */
+  const candles = toCandles(series, 28);
+  const layout = candleLayout(candles, 560, 60, 3);
 
   return (
     <div className="card">
@@ -117,10 +129,12 @@ export async function Trades({
           that reason: on a steep curve a large buy fills well above spot, and a
           chart drawn from spot would hide exactly that.
         */}
-      {path && (
+      {layout.length > 0 && (
         <div className="spark">
           <div className="spark-head">
-            <span className="note">Fill prices, oldest to newest</span>
+            <span className="note">
+              Fill prices, {candles.length} {candles.length === 1 ? 'candle' : 'candles'} by block
+            </span>
             {change !== null && (
               <span className={`mono spark-change ${change >= 0 ? 'up' : 'down'}`}>
                 {change >= 0 ? '+' : ''}
@@ -129,9 +143,14 @@ export async function Trades({
             )}
           </div>
           <svg viewBox="0 0 560 60" width="100%" height="60" role="img"
-               aria-label={`Fill prices across ${series.points.length} trades`}>
-            <path d={path} fill="none" style={{ stroke: 'var(--accent)' }} strokeWidth="1.5"
-                  strokeLinejoin="round" />
+               aria-label={`${candles.length} candles across ${series.points.length} fills`}>
+            {layout.map((c, i) => (
+              <g key={i} style={{ fill: c.up ? 'var(--accent)' : 'var(--danger)' }}>
+                {/* Wick first, so the body paints over its middle. */}
+                <rect x={c.x + c.w / 2 - 0.5} y={c.wickTop} width="1" height={c.wickH} />
+                <rect x={c.x} y={c.bodyTop} width={c.w} height={c.bodyH} rx="0.5" />
+              </g>
+            ))}
           </svg>
           <div className="spark-foot mono">
             <span>{series.low.toPrecision(3)}</span>

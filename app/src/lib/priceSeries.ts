@@ -137,20 +137,12 @@ export function changeBps(s: Series): number | null {
   return Math.round(((s.last.price - s.first.price) / s.first.price) * 10_000);
 }
 
-/**
- * An SVG path through the points, scaled to a box.
+/*
+ * `pathFor` lived here and drew the fill series as a line. It went when the launch
+ * page moved to candles: a line joins fills and hides what happened between them, so
+ * a bucket that opened low, spiked and closed low read as flat.
  *
- * Returns null rather than a flat line when every fill is at the same price:
- * a horizontal line across a chart reads as "the price did not move", which is
- * true, but a one-point series would draw the same thing and that is not.
+ * Deleted rather than kept "in case": an exported function with no caller is the
+ * thing this codebase keeps finding, and `git` remembers it better than a comment
+ * would.
  */
-export function pathFor(s: Series, width: number, height: number, pad = 2): string | null {
-  if (s.points.length < 2) return null;
-  const span = s.high - s.low;
-  const x = (i: number) => pad + (i / (s.points.length - 1)) * (width - pad * 2);
-  // A zero span would divide by zero; it draws down the middle instead, which is
-  // honest for a price that has not moved.
-  const y = (p: number) =>
-    span === 0 ? height / 2 : height - pad - ((p - s.low) / span) * (height - pad * 2);
-  return s.points.map((p, i) => `${i === 0 ? 'M' : 'L'}${x(i).toFixed(2)},${y(p.price).toFixed(2)}`).join(' ');
-}

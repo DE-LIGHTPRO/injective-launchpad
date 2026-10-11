@@ -103,7 +103,7 @@ export class ChainError extends Error {
  * internals, and tell a trader nothing. The original is kept on `detail` so a
  * dev build and the console still have it.
  */
-function translateQueryError(status: number, body: string): ChainError {
+export function translateQueryError(status: number, body: string): ChainError {
   const detail = `${status}: ${body.slice(0, 300)}`;
   if (status === 404) {
     return new ChainError('That contract was not found on this network.', detail);
@@ -118,6 +118,25 @@ function translateQueryError(status: number, body: string): ChainError {
     return new ChainError('The network is rate limiting us. Try again shortly.', detail);
   }
   if (status >= 500) {
+    /*
+     * PRUNED HISTORY IS NOT AN OUTAGE, and it arrives as a 500 like everything else.
+     *
+     * The public sentry node keeps a window of recent blocks and drops the rest, so
+     * a trade older than that window answers `height N is not available, lowest
+     * height is M`. Telling somebody to "try again shortly" is wrong in a way that
+     * costs them time: the data is gone and retrying forever will not bring it back.
+     *
+     * Measured on a launch whose trades were about 83,000 blocks old, roughly
+     * fifteen hours at this chain's block time. That is the real retention horizon
+     * for everything built on transaction search here: trade history, fill prices,
+     * candles and 24h volume.
+     */
+    if (/is not available, lowest height/i.test(detail ?? '')) {
+      return new ChainError(
+        'These trades are older than the public node keeps. The history is gone, not late.',
+        detail,
+      );
+    }
     return new ChainError('The node is having trouble. Try again shortly.', detail);
   }
   return new ChainError('Could not read from the network.', detail);

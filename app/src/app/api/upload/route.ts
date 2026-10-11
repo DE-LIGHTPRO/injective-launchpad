@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { put } from '@vercel/blob';
+import { allowUploadShared, clientKey } from '@/lib/uploadLimit';
 
 /**
  * Store a launch logo and hand back a URL the profile can hold.
@@ -66,6 +67,33 @@ export async function POST(req: Request) {
       { error: 'Uploading is not set up on this deployment. Paste a link instead.' },
       { status: 501 },
     );
+  }
+
+  /*
+   * RATE LIMIT BEFORE ANYTHING ELSE. This endpoint is unauthenticated and writes to
+   * paid storage, so without a limit one caller can fill the store and the bill.
+   *
+   * I DROPPED THIS once already, rewriting the route from IPFS pinning to Blob: the
+   * feature kept working, nothing failed, and the protection was simply gone. That
+   * is the shape of regression a rewrite produces, and why there is now a test that
+   * reads this file for the call.
+   */
+  if (!(await allowUploadShared(clientKey(req)))) {
+    return NextResponse.json(
+      { error: 'Too many uploads from here. Wait a few minutes, or paste a link instead.' },
+      { status: 429 },
+    );
+  }
+
+  /*
+   * Before the body is parsed. `formData()` reads the whole request into memory, so
+   * checking `file.size` afterwards rejects an oversized upload only after paying
+   * for it. A declared length over the cap, plus room for the multipart envelope, is
+   * refused unread; an undeclared one still meets the `file.size` check below.
+   */
+  const declared = Number(req.headers.get('content-length') ?? '0');
+  if (declared > MAX_BYTES + 64 * 1024) {
+    return NextResponse.json({ error: 'That image is over the 5 MB limit.' }, { status: 413 });
   }
 
   let file: File | null = null;
