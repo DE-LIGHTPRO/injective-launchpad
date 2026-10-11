@@ -6,7 +6,6 @@ import {
   MsgExecuteContract,
   createTransaction,
   ChainRestAuthApi,
-  TxRestApi,
 } from '@injectivelabs/sdk-ts';
 import { NETWORK, getLcdUrl } from './config.ts';
 import {
@@ -274,27 +273,49 @@ async function signAndBroadcast(opts: {
 
   txRaw.signatures = [Buffer.from(signature, 'base64')];
 
+  /*
+   * Broadcast through our own origin, never straight to the LCD from the browser.
+   *
+   * Only the finished, signed bytes leave here; the key stayed in the wallet. A direct
+   * browser POST to the LCD is cross-origin with a JSON body, so it triggers a CORS
+   * preflight the public LCD does not answer, and the request is blocked before it is
+   * sent, with nothing the page can catch: a launch "did nothing" after signing. The GET
+   * reads elsewhere are simple requests that skip the preflight, which is why the rest of
+   * the app worked. `/api/broadcast` forwards the bytes server-side, where the inclusion
+   * poll is also reliable. See lib/txBroadcast.ts.
+   */
+  const toB64 = (b: Uint8Array) => Buffer.from(b).toString('base64');
+  let data: { txHash?: string; error?: string; detail?: string };
   try {
-    const api = new TxRestApi(getLcdUrl());
-    const result = await api.broadcast(txRaw);
-    /*
-     * A 200 from the node is not a landed transaction. `broadcast` returns a result
-     * carrying the chain's own `code`, and anything but zero is a refusal that arrived
-     * with a success status: the exact shape of defect this project records as "a 200
-     * is not a success".
-     */
-    if (result.code !== 0) {
-      throw new BroadcastError(
-        'broadcast',
-        describeBroadcastFailure(result.rawLog ?? ''),
-        result.rawLog,
-      );
+    const resp = await fetch('/api/broadcast', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        bodyBytes: toB64(txRaw.bodyBytes),
+        authInfoBytes: toB64(txRaw.authInfoBytes),
+        signatures: (txRaw.signatures as Uint8Array[]).map(toB64),
+      }),
+    });
+    data = (await resp.json().catch(() => ({}))) as typeof data;
+    if (!resp.ok && !data?.error) {
+      throw new BroadcastError('broadcast', describeBroadcastFailure(''), `broadcast service returned ${resp.status}`);
     }
-    return { txHash: result.txHash };
   } catch (e) {
     if (e instanceof BroadcastError) throw e;
-    throw new BroadcastError('broadcast', describeBroadcastFailure((e as Error).message ?? ''), (e as Error).message);
+    throw new BroadcastError(
+      'broadcast',
+      'The transaction was signed but could not be sent. Check your connection and try again; nothing was created.',
+      (e as Error).message,
+    );
   }
+
+  if (data?.error) {
+    throw new BroadcastError('broadcast', data.error, data.detail);
+  }
+  if (!data?.txHash) {
+    throw new BroadcastError('broadcast', describeBroadcastFailure(''), 'the broadcast service returned no transaction hash');
+  }
+  return { txHash: data.txHash };
 }
 
 /** Signs and broadcasts a launch. */
