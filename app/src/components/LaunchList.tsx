@@ -177,7 +177,7 @@ export function LaunchList({ rows }: { rows: LaunchRow[] }) {
               <option value="">All pairs</option>
               {quotesPresent.map(([denom, n]) => (
                 <option key={denom} value={denom}>
-                  {denomLabel(denom)} ({n})
+                  {rows.find((r) => r.quoteDenom === denom)?.quoteLabel ?? denomLabel(denom)} ({n})
                 </option>
               ))}
             </select>
@@ -236,7 +236,7 @@ export function LaunchList({ rows }: { rows: LaunchRow[] }) {
             </thead>
             <tbody>
               {shown.map((r, i) => {
-                const unit = denomLabel(r.quoteDenom);
+                const unit = r.quoteLabel ?? denomLabel(r.quoteDenom);
                 const e = activity[r.curveAddress];
                 const pct = Math.min(100, r.progress * 100);
                 return (

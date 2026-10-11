@@ -19,6 +19,8 @@ order matters.
    npm --prefix scripts run e2e     # 8 asserted steps, about 3 INJ
    ```
    Keep the printed `NEXT_PUBLIC_FACTORY_ADDRESS` and `NEXT_PUBLIC_CURVE_CODE_IDS`.
+   Allowlist any extra quote with its symbol, e.g.
+   `{"set_quote":{"denom":"peggy0x…","decimals":6,"symbol":"USDT"}}`, or it shows as hex.
    If step 3 of the e2e fails on the denom authority, stop: Injective did not accept the
    factory's mint-key handover (see `docs/AUDIT.md` "To verify on testnet").
 2. **Vercel environment** (Project → Settings → Environment Variables, Production and

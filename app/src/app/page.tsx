@@ -37,7 +37,7 @@ function heroStats(rows: Row[]): HeroStats | null {
       creatorPaid: r.creatorPaid,
     })),
   );
-  const label = denomLabel(quote);
+  const label = group[0].quoteLabel;
   return {
     launches: rows.length,
     liquidity: `${compact(t.raised, decimals)} ${label}`,
@@ -131,7 +131,7 @@ export default async function Home() {
               curve: r.launch.curve,
               denom: r.launch.denom,
               quoteDecimals: r.quoteDecimals,
-              quoteLabel: denomLabel(r.quoteDenom),
+              quoteLabel: r.quoteLabel,
             }))}
             currentHeight={height}
           />
@@ -162,6 +162,7 @@ export default async function Home() {
             // One quote: the hero already shows these figures. Several: one row each.
             if (byQuote.size < 2) return null;
             return [...byQuote.entries()].map(([quote, g]) => {
+              const qLabel = g.rows[0]?.quoteLabel ?? denomLabel(quote);
               const t = boardTotals(
                 g.rows.map((r) => ({
                   raised: r.raised,
@@ -175,7 +176,7 @@ export default async function Home() {
                   <div>
                     <span className="v mono">{t.launches}</span>
                     <span className="k">
-                      {byQuote.size > 1 ? `Launches in ${denomLabel(quote)}` : 'Launches'}
+                      {byQuote.size > 1 ? `Launches in ${qLabel}` : 'Launches'}
                     </span>
                   </div>
                   <div>
@@ -184,19 +185,19 @@ export default async function Home() {
                         so this falls when people exit where volume never would.
                       */}
                     <span className="v mono">
-                      {compact(t.raised, g.decimals)} {denomLabel(quote)}
+                      {compact(t.raised, g.decimals)} {qLabel}
                     </span>
                     <span className="k">In curve reserves</span>
                   </div>
                   <div>
                     <span className="v mono">
-                      {compact(t.feesAccrued, g.decimals, 4)} {denomLabel(quote)}
+                      {compact(t.feesAccrued, g.decimals, 4)} {qLabel}
                     </span>
                     <span className="k">Fees unclaimed</span>
                   </div>
                   <div>
                     <span className="v mono">
-                      {compact(t.paidToCreators, g.decimals, 4)} {denomLabel(quote)}
+                      {compact(t.paidToCreators, g.decimals, 4)} {qLabel}
                     </span>
                     <span className="k">Paid to creators</span>
                   </div>

@@ -96,6 +96,8 @@ export interface LaunchRow {
    */
   quoteDenom: string;
   quoteDecimals: number;
+  /** The quote's display label (factory symbol, else a short denom). Optional for old callers. */
+  quoteLabel?: string;
   /** Unix seconds the curve opened, or null when the contract predates the field. */
   openedAt: number | null;
   /** Fees accrued to creator and platform, base units. Feeds the totals bar. */

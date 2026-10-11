@@ -1304,7 +1304,7 @@ fn an_allowlisted_quote_launches_with_its_own_scale() {
         .execute_contract(
             admin,
             f.factory.clone(),
-            &ExecuteMsg::SetQuote { denom: USDC.into(), decimals: 6 },
+            &ExecuteMsg::SetQuote { denom: USDC.into(), decimals: 6, symbol: None },
             &[],
         )
         .unwrap();
@@ -1343,7 +1343,7 @@ fn only_the_admin_curates_quotes() {
         .execute_contract(
             creator,
             f.factory.clone(),
-            &ExecuteMsg::SetQuote { denom: USDC.into(), decimals: 6 },
+            &ExecuteMsg::SetQuote { denom: USDC.into(), decimals: 6, symbol: None },
             &[],
         )
         .map_err(|e| format!("{e:#}"))
@@ -1365,7 +1365,7 @@ fn absurd_decimals_are_refused_rather_than_silently_clamped() {
         .execute_contract(
             admin,
             f.factory.clone(),
-            &ExecuteMsg::SetQuote { denom: USDC.into(), decimals: 40 },
+            &ExecuteMsg::SetQuote { denom: USDC.into(), decimals: 40, symbol: None },
             &[],
         )
         .map_err(|e| format!("{e:#}"))
@@ -1419,7 +1419,7 @@ fn the_quote_list_is_readable_and_names_its_default() {
         .execute_contract(
             admin.clone(),
             f.factory.clone(),
-            &ExecuteMsg::SetQuote { denom: USDC.into(), decimals: 6 },
+            &ExecuteMsg::SetQuote { denom: USDC.into(), decimals: 6, symbol: None },
             &[],
         )
         .unwrap();
@@ -1499,4 +1499,47 @@ fn an_opening_buy_within_the_rules_still_launches() {
     let rules = LaunchRules { max_per_wallet: Some(cap), trade_start: None, early_fee: None };
     create_with_buy(&mut f, rules, amt(1)).unwrap();
     assert!(f.balance(&f.creator.clone(), TOKEN) > Uint128::zero());
+}
+
+#[test]
+fn a_quote_can_carry_a_display_symbol_and_bad_ones_are_refused() {
+    // Peggy and erc20 denoms are hex addresses; without a symbol the UI prints the hex.
+    let mut f = setup();
+    let admin = f.admin.clone();
+    let hex = "peggy0xdAC17F958D2ee523a2206206994597C13D831ec7";
+    for bad in ["", "WAY-TOO-LONG-SYMBOL", "US DT", "<b>"] {
+        assert!(f
+            .app
+            .execute_contract(
+                admin.clone(),
+                f.factory.clone(),
+                &ExecuteMsg::SetQuote { denom: hex.into(), decimals: 6, symbol: Some(bad.into()) },
+                &[],
+            )
+            .is_err(), "symbol {bad:?} was accepted");
+    }
+    f.app
+        .execute_contract(
+            admin.clone(),
+            f.factory.clone(),
+            &ExecuteMsg::SetQuote { denom: hex.into(), decimals: 6, symbol: Some("USDT".into()) },
+            &[],
+        )
+        .unwrap();
+    let q: factory::QuotesResponse =
+        f.app.wrap().query_wasm_smart(f.factory.clone(), &QueryMsg::Quotes {}).unwrap();
+    let usdt = q.quotes.iter().find(|x| x.denom == hex).unwrap();
+    assert_eq!(usdt.symbol.as_deref(), Some("USDT"));
+    // A later SetQuote without a symbol keeps the one already set.
+    f.app
+        .execute_contract(
+            admin,
+            f.factory.clone(),
+            &ExecuteMsg::SetQuote { denom: hex.into(), decimals: 6, symbol: None },
+            &[],
+        )
+        .unwrap();
+    let q: factory::QuotesResponse =
+        f.app.wrap().query_wasm_smart(f.factory.clone(), &QueryMsg::Quotes {}).unwrap();
+    assert_eq!(q.quotes.iter().find(|x| x.denom == hex).unwrap().symbol.as_deref(), Some("USDT"));
 }

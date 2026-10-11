@@ -240,6 +240,9 @@ pub enum FactoryError {
     #[error("an opening buy cannot be combined with a start time in the future: the curve would refuse it")]
     InitialBuyBeforeStart,
 
+    #[error("quote symbol {symbol:?} must be 1 to 12 letters, digits, dot or dash")]
+    BadQuoteSymbol { symbol: String },
+
     /// The opening buy is charged against the creator's own wallet cap, like anyone's.
     #[error("the opening buy would deliver {tokens} tokens, over this launch's wallet cap of {cap}")]
     InitialBuyOverCap {
@@ -447,6 +450,10 @@ pub const NEXT_ID: Item<u64> = Item::new("next_id");
 /// open quote field means a launch priced in a worthless token the creator minted
 /// that morning, which would read on the board exactly like a real pair.
 pub const QUOTES: Map<&str, u8> = Map::new("quotes");
+/// A display symbol per quote, set by the admin alongside the decimals. Optional: an
+/// Injective peggy or erc20 denom is a hex address (mainnet USDT is
+/// `peggy0xdAC17F95…`), and without this the UI can only print the address.
+pub const QUOTE_SYMBOLS: Map<&str, String> = Map::new("quote_symbols");
 const PENDING: Item<Pending> = Item::new("pending");
 
 fn default_quote_decimals() -> u8 {
@@ -507,7 +514,14 @@ pub enum ExecuteMsg {
     /// thing in this contract's configuration, so it must be fixable without a
     /// redeploy. Launches already created keep the curve they were given, because the
     /// curve is stored on the child at instantiate and nothing here can reach it.
-    SetQuote { denom: String, decimals: u8 },
+    SetQuote {
+        denom: String,
+        decimals: u8,
+        /// What the UI prints for this quote, e.g. "USDT". Absent keeps any symbol
+        /// already set; 1 to 12 letters, digits, dot or dash.
+        #[serde(default)]
+        symbol: Option<String>,
+    },
     /// Stop new launches using a quote asset. Existing launches are untouched: their
     /// curve and their reserve are on the curve contract and keep working.
     RemoveQuote { denom: String },
@@ -547,6 +561,9 @@ pub enum QueryMsg {
 pub struct QuoteAsset {
     pub denom: String,
     pub decimals: u8,
+    /// Display symbol, when the admin set one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub symbol: Option<String>,
 }
 
 #[cw_serde]
@@ -622,7 +639,7 @@ pub fn execute(
             rules,
             initial_buy,
         ),
-        ExecuteMsg::SetQuote { denom, decimals } => {
+        ExecuteMsg::SetQuote { denom, decimals, symbol } => {
             let cfg = CONFIG.load(deps.storage)?;
             if info.sender != cfg.admin {
                 return Err(FactoryError::Unauthorised);
@@ -640,6 +657,14 @@ pub fn execute(
                 return Err(FactoryError::BadQuoteDenom);
             }
             QUOTES.save(deps.storage, &denom, &decimals)?;
+            if let Some(sym) = &symbol {
+                let ok = (1..=12).contains(&sym.len())
+                    && sym.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-');
+                if !ok {
+                    return Err(FactoryError::BadQuoteSymbol { symbol: sym.clone() });
+                }
+                QUOTE_SYMBOLS.save(deps.storage, &denom, sym)?;
+            }
             Ok(Response::new()
                 .add_attribute("action", "set_quote")
                 .add_attribute("denom", denom)
@@ -659,6 +684,7 @@ pub fn execute(
                 return Err(FactoryError::CannotRemoveDefaultQuote { denom });
             }
             QUOTES.remove(deps.storage, &denom);
+            QUOTE_SYMBOLS.remove(deps.storage, &denom);
             Ok(Response::new()
                 .add_attribute("action", "remove_quote")
                 .add_attribute("denom", denom))
@@ -1090,7 +1116,12 @@ pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
             let cfg = CONFIG.load(deps.storage)?;
             let quotes = QUOTES
                 .range(deps.storage, None, None, cosmwasm_std::Order::Ascending)
-                .map(|r| r.map(|(denom, decimals)| QuoteAsset { denom, decimals }))
+                .map(|r| {
+                    r.map(|(denom, decimals)| {
+                        let symbol = QUOTE_SYMBOLS.may_load(deps.storage, &denom).ok().flatten();
+                        QuoteAsset { denom, decimals, symbol }
+                    })
+                })
                 .collect::<Result<Vec<_>, _>>()?;
             to_json_binary(&QuotesResponse { quotes, default_denom: cfg.quote_denom })
         }

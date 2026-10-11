@@ -533,6 +533,17 @@ export async function currentHeight(): Promise<number | null> {
 export interface QuoteAsset {
   denom: string;
   decimals: number;
+  /** Display symbol from the factory's allowlist, when the admin set one. */
+  symbol?: string;
+}
+
+/**
+ * The label for a quote: the factory's symbol when it has one, otherwise a short form
+ * of the denom. Prefer this to `denomLabel` wherever the allowlist is at hand, since a
+ * peggy or erc20 quote is otherwise printed as a hex address.
+ */
+export function quoteLabel(denom: string, quotes: QuoteAsset[] | undefined): string {
+  return quotes?.find((q) => q.denom === denom)?.symbol ?? denomLabel(denom);
 }
 
 /**
@@ -554,12 +565,20 @@ export async function listQuotes(): Promise<{ quotes: QuoteAsset[]; defaultDenom
   if (!factory || isDemoMode()) return fallback;
   try {
     const raw = await smartQuery<{
-      quotes?: Array<{ denom?: unknown; decimals?: unknown }>;
+      quotes?: Array<{ denom?: unknown; decimals?: unknown; symbol?: unknown }>;
       default_denom?: unknown;
     }>(factory, { quotes: {} });
     const quotes = (raw.quotes ?? [])
       .filter((q) => typeof q.denom === 'string' && Number.isInteger(q.decimals))
-      .map((q) => ({ denom: q.denom as string, decimals: q.decimals as number }));
+      .map((q) => ({
+        denom: q.denom as string,
+        decimals: q.decimals as number,
+        // Rendered as text only, never as markup, and the contract restricts it to
+        // 1 to 12 letters, digits, dot or dash; re-checked so a bad value cannot spoof.
+        ...(typeof q.symbol === 'string' && /^[A-Za-z0-9.-]{1,12}$/.test(q.symbol)
+          ? { symbol: q.symbol }
+          : {}),
+      }));
     if (quotes.length === 0) return fallback;
     return {
       quotes,
@@ -630,6 +649,6 @@ export async function resolveQuote(denom: string): Promise<Quote> {
   return {
     denom,
     decimals: found?.decimals ?? NETWORK.quoteDecimals,
-    label: denomLabel(denom),
+    label: quoteLabel(denom, quotes),
   };
 }

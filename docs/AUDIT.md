@@ -38,9 +38,10 @@ deployment.
 
 - Production points at the old factory. Merging before the new deploy would correctly
   flag all three live launches unsafe and disable trading on them. Follow the release order.
-- The `0x0514…4f78` quote shows as hex because the chain allowlist stores decimals but no
-  symbol. Either tell us what token it is, or add an optional `symbol` to the factory's
-  `SetQuote` before the redeploy.
+- ~~Quotes shown as hex~~: fixed. `SetQuote` takes an optional `symbol` (1 to 12
+  letters, digits, dot or dash), returned by `Quotes` and used everywhere the app
+  labels a quote. Mainnet USDT/USDC (peggy hex denoms) must be allowlisted with a symbol.
+  The `0x0514…4f78` quote on the old factory is a test token, so it can stay as hex there.
 - GitHub Actions: no runner assigned, so no CI has run on this PR (billing or minutes).
 
 ## 2026-10-11 review, third pass (app, UI, dependencies)

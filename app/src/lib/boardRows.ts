@@ -4,7 +4,7 @@
  * about a launch's numbers.
  */
 import { marketCap } from './boardMetrics.ts';
-import { listLaunches, getLaunchDetail, listQuotes, type Launch } from './chain.ts';
+import { listLaunches, getLaunchDetail, listQuotes, quoteLabel, type Launch } from './chain.ts';
 import { graduationProgress, type CurveConfig } from './curve.ts';
 import { NETWORK } from './config.ts';
 import type { LaunchRules } from './launchRules.ts';
@@ -24,6 +24,7 @@ export interface Row {
   creatorPaid: bigint;
   quoteDenom: string;
   quoteDecimals: number;
+  quoteLabel: string;
 }
 
 export async function loadRows(): Promise<{ rows: Row[]; error?: string; errorDetail?: string }> {
@@ -76,6 +77,7 @@ export async function loadRows(): Promise<{ rows: Row[]; error?: string; errorDe
            * source the contract scaled the curve with, rather than a second copy.
            */
           quoteDecimals: quoteDecimals[d.quoteDenom] ?? NETWORK.quoteDecimals,
+          quoteLabel: quoteLabel(d.quoteDenom, quotes),
         };
       }),
     );
@@ -101,6 +103,7 @@ export function toRow(r: Row): LaunchRow {
     curveAddress: r.launch.curve,
     quoteDenom: r.quoteDenom,
     quoteDecimals: r.quoteDecimals,
+    quoteLabel: r.quoteLabel,
     creator: r.launch.creator,
     // Already normalised by `parseProfile` at the chain boundary. Plain strings and
     // nulls, so it crosses the server-component boundary without the bigint problem

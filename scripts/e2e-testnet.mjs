@@ -178,7 +178,7 @@ if ((await bal(sender, USD)) < needUsd) {
 }
 const { quotes } = await smart(factory, { quotes: {} });
 if (!quotes.some((q) => q.denom === USD && q.decimals === 6)) {
-  await send(exec(factory, { set_quote: { denom: USD, decimals: 6 } }), 'allowlist test quote');
+  await send(exec(factory, { set_quote: { denom: USD, decimals: 6, symbol: 'E2EUSD' } }), 'allowlist test quote');
 }
 ok('test quote funded and allowlisted at 6 decimals');
 

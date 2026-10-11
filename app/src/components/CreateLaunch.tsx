@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ConnectWallet } from './ConnectWallet';
 import { LogoUpload } from './LogoUpload';
-import { listQuotes, denomLabel, type QuoteAsset } from '@/lib/chain';
+import { listQuotes, denomLabel, quoteLabel as quoteLabelOf, type QuoteAsset } from '@/lib/chain';
 import { CurveChart } from './CurveChart';
 import {
   planLaunch,
@@ -106,7 +106,7 @@ export function CreateLaunch() {
   const activeQuote = quoteDenom ?? quotes?.defaultDenom ?? NETWORK.quoteDenom;
   const quoteDecimals =
     quotes?.quotes.find((q) => q.denom === activeQuote)?.decimals ?? NETWORK.quoteDecimals;
-  const quoteLabel = denomLabel(activeQuote);
+  const quoteLabel = quoteLabelOf(activeQuote, quotes?.quotes);
   useEffect(() => {
     let live = true;
     void listQuotes().then((q) => {
@@ -588,7 +588,7 @@ export function CreateLaunch() {
               >
                 {quotes.quotes.map((q) => (
                   <option key={q.denom} value={q.denom}>
-                    {denomLabel(q.denom)}
+                    {q.symbol ?? denomLabel(q.denom)}
                   </option>
                 ))}
               </select>

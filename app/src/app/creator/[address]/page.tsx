@@ -87,13 +87,13 @@ export default async function CreatorPage({ params }: { params: Promise<{ addres
             <div className="stat">
               <dt className="k">Fees paid out</dt>
               <dd className="v">
-                {one ? `${compact(t.paidToCreators, one.quoteDecimals)} ${denomLabel(one.quoteDenom)}` : '·'}
+                {one ? `${compact(t.paidToCreators, one.quoteDecimals)} ${one.quoteLabel}` : '·'}
               </dd>
             </div>
             <div className="stat">
               <dt className="k">Fees unclaimed</dt>
               <dd className="v">
-                {one ? `${compact(t.feesAccrued, one.quoteDecimals, 4)} ${denomLabel(one.quoteDenom)}` : '·'}
+                {one ? `${compact(t.feesAccrued, one.quoteDecimals, 4)} ${one.quoteLabel}` : '·'}
               </dd>
             </div>
           </dl>
