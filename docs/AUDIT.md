@@ -4,6 +4,36 @@ Not a third-party audit. Findings from reviewing the contracts, app and scripts
 against what Pons (`ponsdotdev/pons-labs`) and nearly.trade do. Newest first.
 Severity uses the usual scale: Critical / High / Medium / Low / Info.
 
+## 2026-10-11 review, fifth pass (deploying 39974/39975, and the front page's claims)
+
+Triggered by pointing the app at the newly deployed contracts and reading the rendered
+page against the chain. Scope: the launch URL, the homepage's factual claims, and the
+two scripts that exist to verify a launch before it costs money.
+
+### Fixed
+
+| # | Sev | Finding | Fix |
+|---|---|---|---|
+| 31 | High | **The page claimed an audit that does not exist.** The launch page read "Audited contract (code 39974)" with a green "Audited code 39974" badge above the buy button, while `AUDIT.md` opens with "Not a third-party audit" and `AUDIT_SCOPE.md` is written for an auditor nobody has engaged. To a trader "audited" means a named third party reviewed the code and signed for it. | Says what is actually established, which is three chain reads: the code id matches the one this launchpad published, there is no upgrade key, and the launch contract holds the mint key. `trust-claims.test.ts` fails on the word in any user-facing string, and asserts `AUDIT.md` still disclaims being an audit, so the guard cannot outlive its premise. Mutation-verified. |
+| 32 | High | **The homepage hero priced a curve no launch gets.** `CurveExplorer` and `demo.ts` each held their own copy of the curve shape, still 30/85 after launches moved to 60/170. The hero advertised graduation at 88 INJ against a real 176, and quoted 15,197,452 tokens per INJ where a launch gives 7,680,861, under a docblock asserting every number is real. 245 app tests, 135 contract tests and the typecheck were all green. | Both spread `fixedCurveFor`; the default fee has one definition (`DEFAULT_FEE_BPS`). `curve-shape-single-source.test.ts` fails on any numeric curve-shape literal outside `launchLimits.ts` and on the hero not spreading it. Mutation-verified both ways. |
+| 33 | Medium | **The hero's figures mixed two scopes under one row of labels.** "Total liquidity 75.71 E2EUSD" and "Paid to creators 2.02 E2EUSD" are one quote's figures, beside a board-wide "Launches 2", on a board also holding 4.25 INJ. "Graduated" was scoped to that one quote too. The arithmetic was right (summing across quotes would add 18-decimal INJ to 6-decimal USDC) and the labels were the lie. | Money figures name their quote when the board has more than one; `Graduated` is a count, so it spans every pair. |
+| 34 | Medium | **`/launch/1` was a row id on the address bar.** It identifies nothing, is unrecognisable when pasted, and makes a token read as a record. | `/launch/VETTA`. A ticker is NOT unique (`factory/<creator>/<SUBDENOM>`), so a shared ticker gets `/launch/INJINU-7` and the bare form renders a chooser rather than picking one. 16 tests, most of them on the ambiguous cases, including the near-miss where a stale `SYMBOL-id` names the right id and the wrong ticker. |
+| 35 | Medium | **Both verification scripts verified a path the app does not take.** `dry-run-create.mjs` exists to prove the message shape before Injective charges the 1 INJ denom fee. It restated five messages by hand, had drifted to a `create_launch` payload of `{ denom, fee_bps }`, and omitted `MsgChangeAdmin` entirely, so every run failed inside the factory's reply with `unauthorized account` and read as a contract bug. `create-test-launch.mjs`, which actually spends the fee, had the same restatement. | Both import `planLaunch` and `composeMessages` from the app. The dry run asserts the plan still contains the admin handover, in the right order, and simulates two shapes: the plain launch and one carrying every optional field. |
+| 36 | Low | `trade-test.mjs`'s docblock described a different script. Copied from `create-test-launch.mjs` and never rewritten, it documented an argument the file does not take. | Rewritten. A comment describing a control is part of the control. |
+
+### Measurement notes
+
+- **Three defects I nearly reported were artifacts of a broken dev server.** The board
+  showed `·` for every 24h volume and trade count and rendered no trending strip. The
+  enrichment was fine: a `next build` had overwritten `.next` under a running `next dev`,
+  so every `_next/static/chunks/*.js` was a 404 served as `text/plain` and the page had no
+  working JavaScript at all. The server-rendered HTML looked like a page with missing
+  data. Establish the measurement is sound first; the console was the thing that said so.
+- **A `NEXT_PUBLIC_*` change needs a redeploy, not an env edit.** The push-triggered
+  production build started before the env change landed and shipped the previous factory.
+  Grepping the served chunks for the address is what caught it; the deployment said Ready
+  and the page looked right.
+
 ## 2026-10-11 review, fourth pass (everything, plus the live site)
 
 Triggered by screenshots of production. Scope: git history, contracts, app, scripts,

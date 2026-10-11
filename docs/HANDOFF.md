@@ -1,7 +1,33 @@
 # Session handoff (2026-10-11)
 
 Continue point for picking this up in another Claude Code session. Delete once consumed.
-Branch: `claude/eager-ramanujan-0yui7v`. Everything below is committed and pushed.
+Branch: `claude/eager-ramanujan-0yui7v`, merged to `main`. Everything below is committed
+and pushed.
+
+## Current deployment (11 Oct 2026, 18:50 UTC+1)
+
+Injective **testnet**. These are what production runs; anything earlier in this file that
+names a different factory or code id is superseded.
+
+| | |
+|---|---|
+| factory | `inj1pxh0ar2s64h0334yy7meygllffez0j95hg05d5` |
+| curve code id | `39974` (factory code id `39975`) |
+| deploy / platform wallet | `inj10lx8xhswguun9s0htmqk8wvzymjteudmt9hjhl` |
+| site | https://injpad.vercel.app, Git-sourced from `main` |
+
+Vercel production env is set to the above. `NEXT_PUBLIC_*` is **inlined at build time**, so
+changing one of these requires a REDEPLOY, not just an env edit: the push-triggered build
+that happened to start before the env change shipped the previous factory, and the only way
+that was caught was grepping the served chunks for the address.
+
+What the new contracts added over `39971/39972`: separate buy and sell fees capped at 10%
+per side, a reward route (`creator` | `pool`), and a flatter curve (virtual reserve 30 to 60,
+graduation target 85 to 170, which halves price impact).
+
+Verified on chain, not just in tests: `scripts/dry-run-create.mjs` (both message shapes),
+`scripts/e2e-testnet.mjs` (all 8 steps including graduation and a 70/30 payout), and a live
+launch `VETTA` with 10 real trades.
 
 ## What happened this session
 
@@ -9,6 +35,7 @@ Branch: `claude/eager-ramanujan-0yui7v`. Everything below is committed and pushe
    burning the 2,000 free minutes; its cron triggers were paused. `injective-launchpad`
    was made **public**, so CI is free and now green on PR #1.
 2. **New testnet contracts deployed** (from the user's Mac). Keep these:
+   - **SUPERSEDED 11 Oct 2026**, see "Current deployment" at the top of this file.
    - factory: `inj1ey75764z7v264nttr2v38pnwmd67q79dptjwhq`
    - curve code id: `39971`  ·  factory code id: `39972`
    - deploy/signing wallet: `inj10lx8xhswguun9s0htmqk8wvzymjteudmt9hjhl`
