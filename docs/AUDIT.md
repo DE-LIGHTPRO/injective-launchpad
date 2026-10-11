@@ -4,6 +4,25 @@ Not a third-party audit. Findings from reviewing the contracts, app and scripts
 against what Pons (`ponsdotdev/pons-labs`) and nearly.trade do. Newest first.
 Severity uses the usual scale: Critical / High / Medium / Low / Info.
 
+## 2026-10-11 review, third pass (app, UI, dependencies)
+
+### Fixed
+
+| # | Sev | Finding | Fix |
+|---|---|---|---|
+| 16 | High | On a phone the header chips pushed **Connect wallet** off-screen: a phone user could not connect at all. | Chips and wordmark hide below 640px; verified by screenshot at 390px. |
+| 17 | High | `npm audit`: PostCSS advisories (GHSA-qx2v-qp2m-jg93 and the sourceMappingURL set), pinned inside Next 15. | `overrides.postcss ^8.5.10`; `npm audit --omit=dev` reports 0. |
+| 18 | Medium | No `next.config`, so no security headers: no CSP, frameable (clickjacking on a page that asks a wallet to sign), no HSTS. | `app/next.config.ts`: CSP (`frame-ancestors 'none'`, `connect-src` limited to this origin and `*.injective.network` plus the LCD override, fonts self-hosted), `X-Frame-Options: DENY`, nosniff, HSTS, Referrer- and Permissions-Policy, COOP. |
+| 19 | Medium | The launch page's market cap ignored the pool after graduation (one call site the earlier sweep missed). | Passes `detail.pool`. |
+| 20 | Low | Demo cards could show negative trade counts ("-16 trades"): a signed shift on an unsigned seed. | `>>>`; regression test over 300 addresses, mutation-checked. |
+| 21 | Low | Three places still said graduated tokens "trade on a DEX". | Now says they trade against the locked pool. |
+| 22 | Info | Accessibility and SEO were unmeasured. | axe-core 4.10 on home, two launch pages, create, watchlist, creator: **0 violations, 241 passing checks** (incl. contrast on the new palette). Skip link, reduced-motion, `sitemap.xml`, title template and Open Graph metadata added. |
+
+### Open
+
+- CSP still allows `'unsafe-inline'` scripts (the App Router's inline bootstrap). Closing
+  it needs nonce middleware; worth doing before mainnet.
+
 ## 2026-10-11 review, second pass
 
 ### Fixed

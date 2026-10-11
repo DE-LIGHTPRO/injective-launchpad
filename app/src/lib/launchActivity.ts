@@ -68,7 +68,9 @@ export async function activityFor(curve: string): Promise<LaunchActivity> {
     // render while still differing between cards.
     const seed = [...curve].reduce((a, c) => (a * 31 + c.charCodeAt(0)) >>> 0, 7);
     const buys = seed % 140;
-    const sells = (seed >> 7) % 60;
+    // `>>>`, not `>>`: the seed is unsigned, and a signed shift of one above 2^31 went
+    // negative, which put "-16 trades" on a demo card.
+    const sells = (seed >>> 7) % 60;
     return { buys, sells, trades: buys + sells };
   }
   const base = `wasm._contract_address='${curve}'`;

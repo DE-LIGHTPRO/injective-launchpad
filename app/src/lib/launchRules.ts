@@ -276,11 +276,11 @@ export function describeRules(
      * Three things this sentence has to do, and dropping any one of them makes it a
      * claim the product cannot keep:
      *   - say WHERE it is enforced (the curve), not "the token"
-     *   - say WHEN it stops (graduation), because afterwards it trades on a DEX
+     *   - say WHEN it stops (graduation), because afterwards it trades against its pool
      *   - say what it does not stop (one person, several addresses)
      */
     scope:
-      'Enforced by the curve contract on every buy and sell until this launch graduates. Afterwards the token trades on a DEX and these no longer apply. A cap is per address, so it raises the cost of taking the opening cheaply rather than making it impossible.',
+      'Enforced by the curve contract on every buy and sell until this launch graduates. Afterwards it trades against its locked pool and these no longer apply. A cap is per address, so it raises the cost of taking the opening cheaply rather than making it impossible.',
   };
 }
 

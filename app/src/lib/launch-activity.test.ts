@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  activityFor,
   priceSeries,
   uniqueTraders,
   volumeWithin,
@@ -125,4 +126,19 @@ test('a sell is priced the same way a buy is', () => {
     priceSeries([t({ kind: 'sell', injIn: null, injOut: 5n * ONE, tokens: 1n * ONE })]),
     [5],
   );
+});
+
+test('demo trade counts are never negative, whatever the curve address', async () => {
+  // A signed shift on an unsigned seed put "-16 trades" on a demo card.
+  const prev = process.env.NEXT_PUBLIC_DEMO;
+  process.env.NEXT_PUBLIC_DEMO = '1';
+  try {
+    for (let i = 0; i < 300; i++) {
+      const a = await activityFor(`inj1demo${'z'.repeat(i % 40)}${i}curve`);
+      assert.ok(a.buys >= 0 && a.sells >= 0 && a.trades === a.buys + a.sells, JSON.stringify(a));
+    }
+  } finally {
+    if (prev === undefined) delete process.env.NEXT_PUBLIC_DEMO;
+    else process.env.NEXT_PUBLIC_DEMO = prev;
+  }
 });

@@ -66,7 +66,7 @@ mint key.
 
 ```bash
 cargo test              # 125: the maths (curve + pool), both contracts, randomized runs
-npm --prefix app test   # 196: the TypeScript port, Rust parity, signing, wallet, env surface
+npm --prefix app test   # 206: the TypeScript port, Rust parity, signing, wallet, env surface
 npx --prefix app tsc --noEmit
 bash scripts/build-wasm.sh  # wasm build + export and opcode checks the chain enforces
 ```
@@ -129,6 +129,8 @@ Testnet is the default everywhere. Mainnet is never a fallback.
   orders and driving the page therefore cannot test them.
 - `/launch/[id]` the launch: curve, numbers, buy and sell with price impact on
   both sides, and the trade feed.
+- `/watchlist` launches starred in this browser (local storage, no account).
+- `/creator/[address]` everything one address has launched, graduated and been paid.
 - `/create` the create form. It derives the curve from four plain numbers,
   draws it from the real maths as you type, and shows the exact five messages
   before anything is signed.

@@ -27,13 +27,16 @@ the pool fee to the creator). When choosing behaviour, check what those two do f
 - **The mint key ends with the curve.** The launch tx sends `MsgChangeAdmin` (creator → factory), and the factory's reply sends it on (factory → curve). No creator keeps the ability to mint.
 - The launch page refuses to trade a curve whose code id isn't in `NEXT_PUBLIC_CURVE_CODE_IDS`, that has a wasm admin, or whose mint key is held elsewhere (`lib/codeCheck.ts`).
 - Testnet is the default everywhere; mainnet needs explicit flags. `NEXT_PUBLIC_*` never holds a secret.
+- **Brand: "ink and electric".** Navy-ink surfaces, one cyan→azure→violet gradient used sparingly (wordmark, primary action, progress), `--buy`/`--sell` green/red for trade sides only, gold for king of the hill. Space Grotesk (display and headline numbers), Inter (body), JetBrains Mono (addresses only), self-hosted via `next/font`. Tokens at the top of `globals.css`; overrides in the "brand layer" at its end. Prices use subscript zeros (`lib/priceFormat.ts`).
+- Homepage order: hero + stats → ticker → king of the hill → board → how it works. Product first.
+- Never nest a link/button inside the card `<a>`; per-launch actions (watch, share, creator link) live on the launch page.
 
 ## Current state (2026-10-11)
 
 - Not deployed with the current contracts. An OLD testnet factory exists with the custodial graduation: do not point the app at it. Redeploying is the user's call; never deploy or handle keys without their explicit go-ahead.
 - This cloud environment has no deploy key, and its network policy blocks `testnet.sentry.lcd.injective.network`. Testnet work runs on the user's machine: `scripts/deploy.mjs`, then `npm --prefix scripts run e2e`.
 - Signing path (`app/src/lib/broadcast.ts`) is built but not yet exercised against a chain.
-- Tests: 125 Rust, 196 app.
+- Tests: 125 Rust, 206 app. axe-core: 0 violations on the main pages.
 - Open items, ranked: `docs/AUDIT.md` → "Open".
 
 ## House style

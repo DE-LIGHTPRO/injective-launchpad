@@ -654,7 +654,7 @@ export function CreateLaunch() {
         <h2>Launch rules</h2>
         <p className="note">
           Optional. Both are enforced by the curve contract on every buy and sell until
-          this launch graduates. Afterwards the token trades on a DEX and neither applies.
+          this launch graduates. Afterwards it trades against its locked pool and neither applies.
         </p>
 
         <div className="field-row" style={{ marginTop: 'var(--space-4)' }}>
