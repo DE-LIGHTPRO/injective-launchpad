@@ -52,12 +52,23 @@ Done this session:
       default 1%, sends `min_tokens_out`/`min_inj_out` as the on-chain guard). No work needed.
 
 Remaining:
-- [ ] **Trending strip** — a compact "trending now" row above the board, top ~3-5 by 24h
-      volume. The ranking already exists as the 'volume'/'trades' sorts; the strip needs the
-      activity data, which `LaunchList` fetches AFTER paint into `activityIndex`. To build it
-      without duplicating that fetch, lift the activity load (the two count-only tx searches
-      per launch in `LaunchList`) into a small shared hook/loader and feed both the strip and
-      the board. Keep it client-side; no indexer.
+- [x] **Trending strip** — DONE, with two departures from the note above, both deliberate.
+
+      NOT BY 24H VOLUME. Volume is denominated in each launch's quote, so ranking an INJ
+      launch against a USDC one by volume ranks amounts of different assets, and there is
+      no price oracle here to convert with. It ranks by TRADE COUNT in about a day
+      (`trades24h`), which is the one activity measure that survives crossing a pair
+      boundary, and is also the honest meaning of the word: one enormous trade is not
+      trending, forty small ones are.
+
+      NO SHARED HOOK. The strip renders INSIDE `LaunchList`, where the enrichment already
+      is, so nothing was lifted and no fetch was duplicated. A loader shared with a
+      page-level strip would have been more machinery for the same result.
+
+      `trades24h` is counted from the page of trades already fetched, so it costs nothing
+      and is bounded the same way the volume is. It returns 0, not null, for an unknown
+      height: unlike `volumeWithin`, this feeds a ranking, where the only sensible place
+      for a launch we could not measure is the bottom.
 
 Still blocked (need infra, not now): holders list (Injective `denom_owners` returns 501 for
 tokenfactory denoms — needs an indexer); per-token comments (need a backend/DB).

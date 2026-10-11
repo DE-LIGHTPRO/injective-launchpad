@@ -8,6 +8,7 @@ import {
   volumeIsPartial,
   tradesLabel,
   BLOCKS_PER_DAY,
+  countWithin,
 } from './launchActivity.ts';
 import type { Trade } from './chain.ts';
 
@@ -141,4 +142,35 @@ test('demo trade counts are never negative, whatever the curve address', async (
     if (prev === undefined) delete process.env.NEXT_PUBLIC_DEMO;
     else process.env.NEXT_PUBLIC_DEMO = prev;
   }
+});
+
+test('the 24h trade count is a count, so it crosses pairs', () => {
+  /*
+   * WHY TRENDING RANKS ON THIS AND NOT ON VOLUME. Volume is denominated in each
+   * launch's quote, so ranking an INJ launch against a USDC one by volume ranks
+   * amounts of different assets, and there is no price oracle here to convert with.
+   * A trade is a trade in any pair.
+   *
+   * It is also the honest meaning of "trending": one enormous trade is not trending,
+   * forty small ones are.
+   */
+  const now = 300_000;
+  const trades = [
+    t({ height: now - 5 }),
+    t({ height: now - 10, kind: 'sell', injIn: null, injOut: ONE }),
+    t({ height: now - BLOCKS_PER_DAY - 1 }), // outside the window
+    t({ height: now - 20, kind: 'graduate' as Trade['kind'], injIn: null, tokens: null }),
+  ];
+  // Two trades in the window; graduation is not a trade and the old one is out.
+  assert.equal(countWithin(trades, now, BLOCKS_PER_DAY), 2);
+});
+
+test('an unknown height ranks last rather than refusing to rank', () => {
+  /*
+   * Deliberately different from `volumeWithin`, which returns null. Volume is shown
+   * to a reader, where zero and unmeasured must not look alike. This feeds a
+   * RANKING, where the only sensible place for a launch we could not measure is the
+   * bottom, and 0 puts it there.
+   */
+  assert.equal(countWithin([t({})], null, BLOCKS_PER_DAY), 0);
 });

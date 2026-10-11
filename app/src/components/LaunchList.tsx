@@ -18,6 +18,7 @@ import { enrichAll, tradesLabel, type LaunchEnrichment } from '@/lib/launchActiv
 import { Price } from './Price';
 import { PRICE_WAD } from '@/lib/curve';
 import { SearchIcon } from './Icons';
+import { Trending } from './Trending';
 import { denomLabel } from '@/lib/chain';
 
 export type { LaunchRow };
@@ -189,6 +190,13 @@ export function LaunchList({ rows }: { rows: LaunchRow[] }) {
 
   return (
     <>
+      {/*
+          Trending sits inside this component, not beside it on the page, because it
+          reads the enrichment already fetched here. A copy at the page level would
+          double the per-launch request count to render a strip.
+        */}
+      <Trending rows={rows} activity={activity} />
+
       <div className="board-tabs" role="tablist" aria-label="Launch stage">
         {STAGES.map((s) => (
           <button

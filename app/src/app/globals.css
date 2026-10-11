@@ -1941,3 +1941,24 @@ table.board .dim { color: var(--text-faint); }
 /* Links inside running text are underlined: colour alone is not enough to tell them apart. */
 .sub a:not(.back-link), .note a:not(.back-link) { text-decoration: underline; text-underline-offset: 2px; text-decoration-thickness: 1px; }
 .token-head > div { min-width: 0; flex: 1; }
+
+/*
+ * Trending. Ranked by trade COUNT, which is the only activity measure that survives
+ * crossing a pair boundary, so the rows carry a pair chip and no amount.
+ */
+.trending { margin-bottom: var(--space-4); }
+.trending-head h2 { margin: 0 0 var(--space-1); }
+.trending-list { list-style: none; margin: var(--space-2) 0 0; padding: 0; }
+.trending-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  text-decoration: none;
+  color: inherit;
+  min-width: 0;
+}
+.trending-row:hover { background: var(--glass-well); }
+.trending-row strong { flex: 1; min-width: 0; font-size: var(--text-sm); }
+.trending-rank { color: var(--text-faint); font-size: var(--text-xs); min-width: 14px; }
