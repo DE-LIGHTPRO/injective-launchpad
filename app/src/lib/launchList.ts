@@ -118,6 +118,43 @@ export interface Selection {
   q: string;
   sort: SortKey;
   hideGraduated: boolean;
+  /**
+   * Which stage of its life a launch is in, like pump.fun's "newly created / about to
+   * graduate / graduated" tabs. `undefined` or 'all' shows every stage.
+   *
+   *   live       on the curve, not yet graduated
+   *   soon       on the curve and close to the target (about to graduate)
+   *   graduated  the curve filled and the locked pool is live
+   *
+   * Kept separate from `hideGraduated`, which older callers still pass; when both are
+   * given, graduated rows are hidden unless `status` is 'graduated', which asked for them.
+   */
+  status?: LaunchStatus;
+}
+
+export type LaunchStatus = 'all' | 'live' | 'soon' | 'graduated';
+
+/**
+ * Share of the target raised at which a launch counts as "about to graduate".
+ *
+ * 80%, not a rounder number by accident: the last fifth of a one-sided curve is where
+ * price moves fastest and a graduating buy becomes likely, so it is the band a trader
+ * watching for the pool opening actually wants. A lower bar would fill the tab with
+ * launches that are not close; a higher one would hide them until it is too late to act.
+ */
+export const ABOUT_TO_GRADUATE = 0.8;
+
+export function matchesStatus(row: LaunchRow, status: LaunchStatus | undefined): boolean {
+  switch (status) {
+    case 'graduated':
+      return row.graduated;
+    case 'live':
+      return !row.graduated;
+    case 'soon':
+      return !row.graduated && row.progress >= ABOUT_TO_GRADUATE;
+    default:
+      return true;
+  }
 }
 
 /**
@@ -143,7 +180,10 @@ export function selectLaunches(
   activity: ActivityIndex = {},
 ): LaunchRow[] {
   const out = rows.filter((r) => {
-    if (sel.hideGraduated && r.graduated) return false;
+    if (!matchesStatus(r, sel.status)) return false;
+    // `hideGraduated` still honoured for old callers, but an explicit 'graduated' tab
+    // has asked for exactly those rows, so it wins.
+    if (sel.hideGraduated && sel.status !== 'graduated' && r.graduated) return false;
     if (sel.quote != null && r.quoteDenom !== sel.quote) return false;
     return matches(r, sel.q);
   });

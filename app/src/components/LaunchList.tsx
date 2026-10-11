@@ -7,7 +7,13 @@ import { TokenLogo } from './TokenLogo';
 import { StatusChip } from './StatusChip';
 import { ageLabel, compact } from '@/lib/boardMetrics';
 import { addressName } from '@/lib/addressName';
-import { selectLaunches, type ActivityIndex, type LaunchRow, type SortKey } from '@/lib/launchList';
+import {
+  selectLaunches,
+  type ActivityIndex,
+  type LaunchRow,
+  type SortKey,
+  type LaunchStatus,
+} from '@/lib/launchList';
 import { enrichAll, tradesLabel, type LaunchEnrichment } from '@/lib/launchActivity';
 import { Price } from './Price';
 import { PRICE_WAD } from '@/lib/curve';
@@ -141,21 +147,63 @@ export function LaunchList({ rows }: { rows: LaunchRow[] }) {
    * actually in.
    */
   const [sort, setSort] = useState<SortKey>('marketCap');
-  const [hideGraduated, setHideGraduated] = useState(false);
+  const [status, setStatus] = useState<LaunchStatus>('all');
 
   // One implementation, in `lib/launchList.ts`, where the tests can reach it.
   const shown = useMemo(
-    () => selectLaunches(rows, { q, sort, hideGraduated, quote }, activityIndex),
+    () => selectLaunches(rows, { q, sort, hideGraduated: false, status, quote }, activityIndex),
     // `activityIndex` IS a dependency. Leaving it out compiles and looks right, and
     // the board would simply never re-sort when the numbers land: picking "Most
     // traded" would rank by data that arrived a second later and never be applied.
-    [rows, q, sort, hideGraduated, quote, activityIndex],
+    [rows, q, sort, status, quote, activityIndex],
   );
+
+  /*
+   * Stage tabs, like pump.fun's "newly created / about to graduate / graduated". Counts
+   * are of the rows in each stage BEFORE the search box narrows them, so an empty tab
+   * reads as "none at this stage" rather than "no match", and a count never jumps when
+   * you type. Computed over all rows, not `shown`, for the same reason.
+   */
+  const stageCounts = useMemo(() => {
+    let live = 0;
+    let soon = 0;
+    let graduated = 0;
+    for (const r of rows) {
+      if (r.graduated) graduated += 1;
+      else {
+        live += 1;
+        if (r.progress >= 0.8) soon += 1;
+      }
+    }
+    return { all: rows.length, live, soon, graduated };
+  }, [rows]);
+
+  const STAGES: Array<{ key: LaunchStatus; label: string }> = [
+    { key: 'all', label: 'All' },
+    { key: 'live', label: 'Live' },
+    { key: 'soon', label: 'About to graduate' },
+    { key: 'graduated', label: 'Graduated' },
+  ];
 
   const active = SORTS.find((s) => s.key === sort);
 
   return (
     <>
+      <div className="board-tabs" role="tablist" aria-label="Launch stage">
+        {STAGES.map((s) => (
+          <button
+            key={s.key}
+            type="button"
+            role="tab"
+            aria-selected={status === s.key}
+            className={`board-tab${status === s.key ? ' is-active' : ''}`}
+            onClick={() => setStatus(s.key)}
+          >
+            {s.label}
+            <span className="board-tab-count">{stageCounts[s.key]}</span>
+          </button>
+        ))}
+      </div>
       <div className="board-bar">
         <label className="search">
           <span className="sr-only">Search launches</span>
@@ -192,15 +240,6 @@ export function LaunchList({ rows }: { rows: LaunchRow[] }) {
               </option>
             ))}
           </select>
-        </label>
-        <label className="toggle">
-          <input
-            id="hide-graduated"
-            type="checkbox"
-            checked={hideGraduated}
-            onChange={(e) => setHideGraduated(e.target.checked)}
-          />
-          <span>Hide graduated</span>
         </label>
         <span className="board-count" id="launch-count" aria-live="polite">
           {shown.length === rows.length ? `${rows.length} launches` : `${shown.length} of ${rows.length}`}

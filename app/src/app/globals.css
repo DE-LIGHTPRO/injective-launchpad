@@ -1767,6 +1767,26 @@ header.top .chip { font-size: 11px; letter-spacing: 0.04em; padding: 3px 8px; bo
 .section-head .note { margin: 0; }
 
 /* ----------------------------------------------------------------- board -- */
+/* Stage tabs: flat, hairline-separated, one solid accent on the active tab. No pills
+   or gradients, per the design system. The count rides each tab as a dim figure. */
+.board-tabs {
+  display: flex; flex-wrap: wrap; gap: var(--space-1);
+  border-bottom: 1px solid var(--line); margin-bottom: var(--space-3);
+}
+.board-tab {
+  display: inline-flex; align-items: center; gap: 7px;
+  background: none; border: none; border-bottom: 2px solid transparent;
+  padding: 8px 12px; margin-bottom: -1px;
+  font: inherit; font-size: var(--text-sm); color: var(--text-dim); cursor: pointer;
+}
+.board-tab:hover { color: var(--text); }
+.board-tab.is-active { color: var(--text); border-bottom-color: var(--accent); }
+.board-tab-count {
+  font-size: var(--text-xs); color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+.board-tab.is-active .board-tab-count { color: var(--accent-text); }
+.board-tab:focus-visible { outline: none; box-shadow: var(--ring); border-radius: 6px; }
 .board-bar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin-bottom: var(--space-3); }
 .search { position: relative; flex: 1 1 260px; display: flex; align-items: center; }
 .search svg { position: absolute; left: 11px; color: var(--text-faint); pointer-events: none; }
