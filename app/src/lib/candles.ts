@@ -29,12 +29,32 @@ export const TIMEFRAMES = [
   { id: '1h', label: '1H', seconds: 3_600 },
   { id: '4h', label: '4H', seconds: 14_400 },
   { id: '1d', label: '1D', seconds: 86_400 },
+  /*
+   * "All" is not an interval, it is an instruction: fit the launch's whole history
+   * into one readable chart. The seconds here are a placeholder the resolver never
+   * uses; `timeframeSeconds` is given the series for this id and derives a span
+   * from it. Listed with the rest so the control is one row of buttons, which is
+   * where a reader looks for it.
+   */
+  { id: 'all', label: 'All', seconds: 0 },
 ] as const;
 
 export type TimeframeId = (typeof TIMEFRAMES)[number]['id'];
 
-export function timeframeSeconds(id: TimeframeId): number {
-  return TIMEFRAMES.find((t) => t.id === id)?.seconds ?? 300;
+/**
+ * Seconds per candle for an interval.
+ *
+ * `all` has no fixed answer, so it takes the series and divides its span into a
+ * readable number of candles, rounded UP to a whole second. A caller that passes no
+ * series for `all` gets the daily interval, which is the safe wrong answer: too
+ * coarse rather than ten thousand slots wide.
+ */
+export function timeframeSeconds(id: TimeframeId, series?: Series, want = 60): number {
+  if (id !== 'all') return TIMEFRAMES.find((t) => t.id === id)?.seconds ?? 300;
+  const pts = series?.points.filter((p) => p.time > 0) ?? [];
+  if (pts.length < 2) return 60;
+  const span = pts[pts.length - 1].time - pts[0].time;
+  return Math.max(1, Math.ceil(span / want));
 }
 
 export interface Candle {
@@ -108,9 +128,11 @@ export function defaultTimeframe(series: Series, want = 40): TimeframeId {
   if (span <= 0) return '1m';
   // The smallest interval whose slot count across the span fits the target.
   for (const tf of TIMEFRAMES) {
-    if (span / tf.seconds <= want) return tf.id;
+    // `all` is a reader's instruction rather than an interval, so it is never the
+    // automatic answer: the automatic answer has to be a real, nameable bucket.
+    if (tf.id !== 'all' && span / tf.seconds <= want) return tf.id;
   }
-  return TIMEFRAMES[TIMEFRAMES.length - 1].id;
+  return '1d';
 }
 
 /**

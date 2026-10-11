@@ -2,7 +2,8 @@ import { short, type Quote } from '@/lib/chain';
 import { fmt } from '@/lib/curve';
 import { NETWORK } from '@/lib/config';
 import { compact } from '@/lib/boardMetrics';
-import { TRADE_LIST_LIMIT, type TradeViewResult } from '@/lib/tradeView';
+import { TRADE_LIMIT, TRADE_LIST_LIMIT, type TradeViewResult } from '@/lib/tradeView';
+import { fillPrice } from '@/lib/priceSeries';
 
 /**
  * Recent trades, read from transaction events.
@@ -51,7 +52,20 @@ export function Trades({ result, quote }: { result: TradeViewResult; quote: Quot
    */
   return (
     <div className="card">
-      <h2>Trades</h2>
+      <div className="chart-head">
+        <h2>Trades</h2>
+        {/*
+            The total, which is what a reader checks first and what every comparable
+            launchpad prints beside the heading. It is the number ACTUALLY READ, not
+            the lifetime count: the page fetches one tx-search page, so saying
+            "50,189 total" when we read 200 would be a figure we cannot stand behind.
+          */}
+        {trades.length > 0 && (
+          <span className="note">
+            {trades.length >= TRADE_LIMIT ? `newest ${trades.length}` : `${trades.length} total`}
+          </span>
+        )}
+      </div>
 
       {openingPct !== null && openingPct >= 20 && (
         <p className="note warn-text">
@@ -116,7 +130,7 @@ export function Trades({ result, quote }: { result: TradeViewResult; quote: Quot
           {trades.slice(0, TRADE_LIST_LIMIT).map((t, i) => (
             <li key={`${t.txHash}-${i}`}>
               <span className={`trade-side ${t.kind}`}>{t.kind}</span>
-              <span className="mono" style={{ fontSize: 'var(--text-sm)', minWidth: 0 }}>
+              <span className="mono trade-amount">
                 {t.kind === 'buy' && t.injIn !== null && (
                   <>
                     {fmt(t.injIn, quote.decimals, 4)} {quote.label}
@@ -130,7 +144,19 @@ export function Trades({ result, quote }: { result: TradeViewResult; quote: Quot
                   </>
                 )}
                 {t.kind === 'graduate' && <>locked pool seeded</>}
-                {t.who && <span style={{ color: 'var(--text-faint)' }}> · {short(t.who)}</span>}
+                {t.who && <span className="trade-who"> · {short(t.who)}</span>}
+              </span>
+              {/*
+                  THE PRICE THIS TRADE FILLED AT, which the list did not show. Two
+                  amounts leave a reader dividing one by the other in their head to
+                  answer the question the row exists for, and it is the column every
+                  comparable launchpad puts between the size and the age.
+                */}
+              <span className="mono trade-price">
+                {(() => {
+                  const p = fillPrice(t, quote.decimals);
+                  return p === null ? '\u2014' : p.toPrecision(4);
+                })()}
               </span>
               <a
                 className="mono"

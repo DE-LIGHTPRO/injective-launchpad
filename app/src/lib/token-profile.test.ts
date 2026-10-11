@@ -18,6 +18,8 @@ import {
   profileForChain,
   EMPTY_PROFILE,
   MAX_URI_LEN,
+  MAX_DESCRIPTION_LEN,
+  descriptionError,
   IPFS_GATEWAY,
 } from './tokenProfile.ts';
 
@@ -113,6 +115,8 @@ test('only the links that are safe are offered for rendering', () => {
     website: 'https://example.org',
     x: 'javascript:alert(1)',
     telegram: 'https://t.me/example',
+    // Prose, which `visibleLinks` must not offer as a link however it reads.
+    description: 'https://not-a-link-just-prose.example',
   });
   assert.deepEqual(
     links.map((l) => l.kind),
@@ -138,6 +142,8 @@ test('a launch with no profile field parses rather than throwing', () => {
     website: 'https://b.org',
     x: null,
     telegram: null,
+    // Absent on a launch created before the factory carried the field.
+    description: null,
   });
 });
 
@@ -182,4 +188,35 @@ test('a lookalike domain comes back as punycode, not as the lookalike', () => {
   // displayed is what the browser would actually navigate to.
   assert.equal(safeExternalUrl('https://EXAMPLE.org'), 'https://example.org/');
   assert.equal(safeExternalUrl('https://example.org/../x'), 'https://example.org/x');
+});
+
+test('a description is checked as prose, never as a URL', () => {
+  /*
+   * The field that nearly did not exist. It was collected by the form, written into
+   * bank metadata that Injective will not read back per denom, and shown to nobody.
+   * Now that it is stored and rendered, the thing to get wrong is validating it with
+   * the URL rules, which would reject every real description.
+   */
+  assert.equal(descriptionError('A token for cats. Not a URL.'), null);
+  assert.equal(descriptionError(''), null);
+  assert.equal(descriptionError('Line one.\n\tIndented, with an emoji \u{1f408}.'), null);
+
+  assert.ok(descriptionError('x'.repeat(MAX_DESCRIPTION_LEN + 1)), 'an overlong description passed');
+  assert.ok(descriptionError('hello\u0000world'), 'a NUL passed');
+  assert.ok(descriptionError('hello\u202edlrow'), 'a bidi override passed');
+
+  // And the field router sends it to the prose rules rather than the URL ones.
+  assert.equal(profileFieldError('A token for cats.', 'description'), null);
+  assert.ok(profileFieldError('A token for cats.'), 'prose passed the URL rules');
+});
+
+test('a description is never offered as a link', () => {
+  const links = visibleLinks({
+    image: null,
+    website: null,
+    x: null,
+    telegram: null,
+    description: 'https://example.org',
+  });
+  assert.deepEqual(links, [], 'the description was rendered as a link');
 });

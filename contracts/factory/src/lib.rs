@@ -400,11 +400,30 @@ pub struct TokenProfile {
     pub website: Option<String>,
     pub x: Option<String>,
     pub telegram: Option<String>,
+    /*
+     * What the token says it is, in the creator's own words.
+     *
+     * THE CREATOR ALREADY TYPED THIS AND NOBODY EVER SAW IT. The create form has had
+     * a description field all along; it went into `MsgSetDenomMetadata` and nowhere
+     * else, and Injective answers a per-denom `denoms_metadata` read with 501, which
+     * is the reason every other identity field lives here rather than in bank
+     * metadata. So the one piece of writing on the whole form was collected,
+     * validated, signed and discarded. Every comparable launchpad shows an About.
+     *
+     * `#[serde(default)]` so a launch created before this field still deserialises;
+     * on an older factory it is simply absent.
+     */
+    #[serde(default)]
+    pub description: Option<String>,
 }
 
 /// Longest any one field may be. Storage is paid for, and an unbounded string is a
 /// griefing vector that bloats every query that returns a launch.
 pub const MAX_URI_LEN: usize = 256;
+
+/// Longest a description may be. Four lines of prose, which is what the field is for;
+/// past that it is a document and belongs behind the website link.
+pub const MAX_DESCRIPTION_LEN: usize = 500;
 
 impl TokenProfile {
     /// Every field is a URL, and a URL from an untrusted creator is an injection
@@ -419,6 +438,36 @@ impl TokenProfile {
     /// contract state is attacker-controlled data and a chain that was correct when
     /// this shipped is not a guarantee about the chain the UI is pointed at.
     pub fn validate(&self) -> Result<(), FactoryError> {
+        /*
+         * The description is TEXT, not a URL, so it is checked differently and first.
+         * It must never be run through the scheme allowlist below: "A token for
+         * cats" is not a URL and refusing it for not starting with https would be
+         * absurd. What it needs instead is a length cap and no control characters,
+         * because a frontend rendering it is still rendering attacker-controlled
+         * input and a newline soup is a layout attack even when it cannot execute.
+         *
+         * It is rendered as TEXT and never as markup, on both sides.
+         */
+        if let Some(desc) = &self.description {
+            if desc.chars().count() > MAX_DESCRIPTION_LEN {
+                return Err(FactoryError::BadProfile {
+                    field: "description".into(),
+                    reason: "too long".into(),
+                });
+            }
+            // Tab and newline are legitimate in prose; the rest of C0, and DEL, are
+            // not, and neither are the bidi overrides that let text render in an
+            // order it is not written in.
+            if desc
+                .chars()
+                .any(|c| (c.is_control() && c != '\n' && c != '\t') || ('\u{202a}'..='\u{202e}').contains(&c))
+            {
+                return Err(FactoryError::BadProfile {
+                    field: "description".into(),
+                    reason: "contains control characters".into(),
+                });
+            }
+        }
         for (field, value) in [
             ("image", &self.image),
             ("website", &self.website),

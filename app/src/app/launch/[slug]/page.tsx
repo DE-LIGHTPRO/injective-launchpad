@@ -302,6 +302,22 @@ export default async function LaunchPage({ params }: { params: Promise<{ slug: s
       </div>
       <TrustBadges status={codeStatus} migrated={detail.migrated} demo={isDemoMode()} />
       <CodeCheck status={codeStatus} curve={launch.curve} />
+
+      {/*
+          WHAT THE CREATOR SAID THIS IS. The form has always collected a description
+          and it went into `MsgSetDenomMetadata` and nowhere else; Injective answers a
+          per-denom `denoms_metadata` read with 501, which is why every other identity
+          field is stored on the factory. So the only piece of writing on the whole
+          form was collected, validated, signed, and then shown to nobody.
+
+          RENDERED AS TEXT, never as markup. It is attacker-controlled input like
+          every other profile field; what keeps it safe is that it is text content,
+          and `white-space: pre-line` is what lets the creator's own line breaks
+          survive without any markup being interpreted.
+        */}
+      {launch.profile.description && (
+        <p className="token-about">{launch.profile.description}</p>
+      )}
       <div className="share-row" style={{ margin: 'var(--space-4) 0' }}>
         <WatchButton id={launch.id} symbol={symbol} />
         <ShareRow symbol={symbol} path={launchPath(launch, board)} />

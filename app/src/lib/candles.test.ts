@@ -222,3 +222,33 @@ test('the default never produces an unreadable number of slots', () => {
 test('an empty series still yields a usable default', () => {
   assert.ok(TIMEFRAMES.some((t) => t.id === defaultTimeframe(series([]))));
 });
+
+test('"All" fits the whole history rather than being a fixed interval', () => {
+  /*
+   * It is an instruction, not a bucket size: whatever the launch's span, All has to
+   * produce a chart a person can look at. A fixed seconds value in the table would
+   * give a week-old launch ten thousand slots and a minutes-old one a single candle.
+   */
+  for (const spanSeconds of [120, 3_600, 86_400, 30 * 86_400]) {
+    const s = series([pt(0, 1), pt(spanSeconds, 2)]);
+    const secs = timeframeSeconds('all', s, 60);
+    const slots = spanSeconds / secs;
+    assert.ok(slots <= 61 && slots >= 1, `${spanSeconds}s gave ${slots} slots`);
+  }
+});
+
+test('"All" is never chosen automatically', () => {
+  /*
+   * The default has to be a real, nameable interval. Landing on All would leave the
+   * reader unable to tell what a candle covers, and the label would not say.
+   */
+  for (const spanSeconds of [60, 3_600, 86_400, 365 * 86_400]) {
+    assert.notEqual(defaultTimeframe(series([pt(0, 1), pt(spanSeconds, 2)])), 'all');
+  }
+});
+
+test('"All" with too little history falls back rather than dividing by zero', () => {
+  assert.ok(timeframeSeconds('all', series([]), 60) > 0);
+  assert.ok(timeframeSeconds('all', series([pt(0, 1)]), 60) > 0);
+  assert.ok(timeframeSeconds('all', undefined, 60) > 0);
+});

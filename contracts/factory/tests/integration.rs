@@ -799,6 +799,8 @@ fn a_valid_profile_survives_the_round_trip_into_storage() {
         website: Some("https://example.org".into()),
         x: Some("https://x.com/example".into()),
         telegram: None,
+        // Carried across the same submessage reply as the rest of the profile.
+        description: Some("What this token is, in the creator's words.".into()),
     };
     f.create_with(TOKEN, profile.clone()).unwrap();
 
@@ -1905,4 +1907,58 @@ fn a_quote_scale_of_zero_or_beyond_the_cap_is_refused() {
             "a scale of {bad} was accepted or refused for the wrong reason: {reason}"
         );
     }
+}
+
+/// A description is stored, and is checked as text rather than as a URL.
+///
+/// THE DEFECT THIS EXISTS FOR. The create form collected a description, put it in
+/// `MsgSetDenomMetadata` and nowhere else. Injective answers a per-denom
+/// `denoms_metadata` read with 501, which is the reason every other identity field
+/// lives in the factory, so the one piece of writing on the form was collected,
+/// validated, signed and then invisible to everybody.
+#[test]
+fn a_description_is_stored_and_validated_as_prose() {
+    let mut f = setup();
+    let profile = factory::TokenProfile {
+        image: None,
+        website: None,
+        x: None,
+        telegram: None,
+        description: Some("A token for cats. Not a URL.\nSecond line.".into()),
+    };
+    f.create_with(TOKEN, profile.clone()).unwrap();
+    let stored = f.launch(1).profile;
+    assert_eq!(
+        stored.description.as_deref(),
+        Some("A token for cats. Not a URL.\nSecond line."),
+        "prose was refused or dropped",
+    );
+}
+
+#[test]
+fn a_description_is_capped_and_refuses_control_characters() {
+    let long = "x".repeat(factory::MAX_DESCRIPTION_LEN + 1);
+    for (label, desc) in [
+        ("too long", long.as_str()),
+        ("a NUL", "hello\u{0}world"),
+        ("a bidi override", "hello\u{202e}dlrow"),
+    ] {
+        let p = factory::TokenProfile {
+            image: None,
+            website: None,
+            x: None,
+            telegram: None,
+            description: Some(desc.into()),
+        };
+        assert!(p.validate().is_err(), "{label} was accepted");
+    }
+    // And the things prose legitimately contains are not refused.
+    let ok = factory::TokenProfile {
+        image: None,
+        website: None,
+        x: None,
+        telegram: None,
+        description: Some("Line one.\n\tIndented, with an emoji \u{1f408} and \"quotes\".".into()),
+    };
+    assert!(ok.validate().is_ok(), "ordinary prose was refused");
 }

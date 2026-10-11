@@ -22,12 +22,30 @@ export interface TokenProfile {
   website: string | null;
   x: string | null;
   telegram: string | null;
+  /**
+   * What the token says it is, in the creator's words.
+   *
+   * TEXT, NOT A URL, which is why it is the one field here that never goes near
+   * `safeExternalUrl`: "A token for cats" is not a URL and refusing it for not
+   * starting with https would be absurd. It is rendered as text content and never
+   * as markup, which is what keeps it safe.
+   */
+  description: string | null;
 }
 
-export const EMPTY_PROFILE: TokenProfile = { image: null, website: null, x: null, telegram: null };
+export const EMPTY_PROFILE: TokenProfile = {
+  image: null,
+  website: null,
+  x: null,
+  telegram: null,
+  description: null,
+};
 
 /** Mirrors `MAX_URI_LEN` in the factory contract. */
 export const MAX_URI_LEN = 256;
+
+/** Mirrors `MAX_DESCRIPTION_LEN` in the factory contract. */
+export const MAX_DESCRIPTION_LEN = 500;
 
 /**
  * Schemes a token link may use.
@@ -126,7 +144,13 @@ export function parseProfile(raw: unknown): TokenProfile {
   if (raw === null || typeof raw !== 'object') return EMPTY_PROFILE;
   const o = raw as Record<string, unknown>;
   const field = (k: string): string | null => (typeof o[k] === 'string' ? (o[k] as string) : null);
-  return { image: field('image'), website: field('website'), x: field('x'), telegram: field('telegram') };
+  return {
+    image: field('image'),
+    website: field('website'),
+    x: field('x'),
+    telegram: field('telegram'),
+    description: field('description'),
+  };
 }
 
 /**
@@ -135,10 +159,34 @@ export function parseProfile(raw: unknown): TokenProfile {
  * Same rules as the contract, reported per field so the form can say which input is
  * wrong. Returns null when the value is acceptable.
  */
-export function profileFieldError(raw: string): string | null {
+export function profileFieldError(raw: string, field = 'url'): string | null {
   if (raw.trim().length === 0) return null; // Absent is valid.
+  /*
+   * The description is prose and takes the prose rules. Checking it with the URL
+   * rules would reject every real description, and the form would be telling a
+   * creator to write their token's story as an https address.
+   */
+  if (field === 'description') return descriptionError(raw);
   if (raw.trim().length > MAX_URI_LEN) return `Keep this under ${MAX_URI_LEN} characters.`;
   if (safeExternalUrl(raw) === null) return 'Use a full https:// or ipfs:// address.';
+  return null;
+}
+
+/** The same rules the contract applies to a description. Null when acceptable. */
+export function descriptionError(raw: string): string | null {
+  const value = raw.trim();
+  if (value.length === 0) return null;
+  if ([...value].length > MAX_DESCRIPTION_LEN) {
+    return `Keep this under ${MAX_DESCRIPTION_LEN} characters.`;
+  }
+  // Tab and newline are legitimate in prose; the rest of C0, DEL, and the bidi
+  // overrides that let text render in an order it is not written in are not.
+  for (const ch of value) {
+    const code = ch.codePointAt(0) ?? 0;
+    const control = (code < 0x20 && ch !== '\n' && ch !== '\t') || code === 0x7f;
+    const bidi = code >= 0x202a && code <= 0x202e;
+    if (control || bidi) return 'Remove the control characters.';
+  }
   return null;
 }
 
@@ -148,6 +196,7 @@ export function profileForChain(input: {
   website: string;
   x: string;
   telegram: string;
+  description?: string;
 }): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [key, raw] of Object.entries(input)) {

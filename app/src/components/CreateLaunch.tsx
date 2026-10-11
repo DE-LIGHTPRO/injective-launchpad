@@ -321,6 +321,14 @@ export function CreateLaunch() {
             website: f.website,
             x: f.x,
             telegram: f.telegram,
+            /*
+             * STORED ON THE FACTORY, not only in bank metadata. It went to
+             * `MsgSetDenomMetadata` alone, and Injective answers a per-denom
+             * `denoms_metadata` read with 501, so the one piece of writing on this
+             * form was collected and then invisible to every reader. Bank metadata
+             * is still set, for wallets that read it their own way.
+             */
+            description: f.description,
           }),
           curve: built.curve,
           lpReserve: built.lpReserve,
@@ -940,6 +948,7 @@ export function CreateLaunch() {
             website: f.website || null,
             x: f.x || null,
             telegram: f.telegram || null,
+            description: f.description || null,
           }}
         />
       )}

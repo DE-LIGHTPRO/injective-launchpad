@@ -158,7 +158,14 @@ export function validateLaunch(input: LaunchInput): void {
     throw new LaunchInputError('symbol', 'That ticker makes the denom longer than the chain allows.');
   }
   for (const [field, value] of Object.entries(input.profile ?? {})) {
-    const problem = profileFieldError(value);
+    /*
+     * THE FIELD NAME DECIDES WHICH RULES APPLY. Every profile field was a URL until
+     * the description joined them, and this loop checked them all with the URL
+     * rules: "A token for cats" came back as "Use a full https:// or ipfs://
+     * address". Found by the create script rather than by a test, because the
+     * validator and the form were each correct about the fields they knew about.
+     */
+    const problem = profileFieldError(value, field);
     if (problem) throw new LaunchInputError('profile', `${field}: ${problem}`);
   }
   if (!/^inj1[0-9a-z]{38,}$/.test(input.factory)) {

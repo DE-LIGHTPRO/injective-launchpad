@@ -105,6 +105,14 @@ try {
     symbol,
     name: symbol,
     description: 'Created by scripts/create-test-launch.mjs to verify the contracts.',
+    /*
+     * Stored on the FACTORY as well as in bank metadata, which is the only copy the
+     * app can read back: Injective answers a per-denom `denoms_metadata` with 501.
+     */
+    profile: {
+      description:
+        'A test launch for Vetta. Fixed supply, one bonding curve, liquidity that locks itself at graduation.',
+    },
     curve,
     lpReserve: FIXED_LP_RESERVE,
     factory,

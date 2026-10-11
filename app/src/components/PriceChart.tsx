@@ -198,7 +198,7 @@ function Candles({
 
   const auto = useMemo(() => defaultTimeframe(series), [series]);
   const tf = chosen ?? auto;
-  const interval = timeframeSeconds(tf);
+  const interval = timeframeSeconds(tf, series);
 
   const candles = useMemo(() => toCandles(series, interval), [series, interval]);
   /*

@@ -30,7 +30,12 @@ import {
   MSG_EXECUTE,
   type LaunchInput,
 } from './createLaunch.ts';
-import { CREATOR_FEE_SHARE_BPS, PLATFORM_FEE_SHARE_BPS } from './launchLimits.ts';
+import {
+  CREATOR_FEE_SHARE_BPS,
+  PLATFORM_FEE_SHARE_BPS,
+  fixedCurveFor,
+  FIXED_LP_RESERVE,
+} from './launchLimits.ts';
 import type { CurveConfig } from './curve.ts';
 import type { LaunchPlan } from './createLaunch.ts';
 
@@ -364,4 +369,26 @@ test('an opening buy with a later start time is refused while typing', () => {
   // Either one alone is fine.
   planLaunch(input({ rules: { trade_start: later }, nowMs }));
   planLaunch(input({ initialBuy: 10n ** 18n, nowMs }));
+});
+
+test('a profile description is validated as prose, not as a URL', () => {
+  /*
+   * Every profile field was a URL until the description joined them, and the
+   * validation loop checked them all with the URL rules, so an ordinary sentence
+   * came back as "Use a full https:// or ipfs:// address". The create script caught
+   * it; no test did, because the validator and the form were each individually
+   * right about the fields they knew about.
+   */
+  const base = {
+    creator: 'inj1' + 'q'.repeat(38),
+    symbol: 'ABC',
+    curve: { ...fixedCurveFor(18), feeBps: 100n },
+    lpReserve: FIXED_LP_RESERVE,
+    factory: 'inj1' + 'z'.repeat(38),
+  };
+  assert.doesNotThrow(() =>
+    validateLaunch({ ...base, profile: { description: 'A token for cats. Not a URL.' } }),
+  );
+  // And a real URL field is still held to the URL rules.
+  assert.throws(() => validateLaunch({ ...base, profile: { website: 'A token for cats.' } }));
 });

@@ -1060,6 +1060,24 @@ button.ghost { background: transparent; border: 1px solid var(--line); color: va
 .chart-ohlc time { color: var(--text-faint); margin-left: auto; }
 
 .chart-foot-note { margin-top: var(--space-2); }
+
+/* The creator's own description. `pre-line` keeps their line breaks without any
+   markup being interpreted; `overflow-wrap` stops one long unbroken string from
+   pushing the page sideways. */
+/* A trade row: side, amounts, the price it filled at, then the block link. */
+.trade-amount { font-size: var(--text-sm); min-width: 0; }
+.trade-who { color: var(--text-faint); }
+.trade-price { font-size: var(--text-micro); color: var(--text-muted); margin-left: auto; }
+
+.token-about {
+  margin: var(--space-4) 0 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  line-height: 1.6;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+  max-width: 68ch;
+}
 /* The SVG sets its own height and stretches; min-width 0 keeps it off the page edge. */
 .chart { min-width: 0; }
 .chart svg { display: block; }
