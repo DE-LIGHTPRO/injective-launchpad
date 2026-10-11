@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "deploy": "node deploy.mjs"
+    "deploy": "node deploy.mjs",
+    "e2e": "node e2e-testnet.mjs"
   },
   "dependencies": {
     "@injectivelabs/sdk-ts": "^1.14.0",

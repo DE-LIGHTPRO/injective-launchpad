@@ -51,19 +51,22 @@ that AMM's testnet contract address has been verified rather than inferred.
 
 | Who | Can | Cannot |
 |---|---|---|
-| Creator | pick ticker, profile, fee (≤10%), launch rules; make a dev buy in the launch tx | change supply, curve shape or fee split; touch the reserve or pool |
+| Creator | pick ticker, profile, fee (≤10%), launch rules; make a dev buy in the launch tx | change supply, curve shape or fee split; touch the reserve or pool; **mint more** (the mint key passes to the curve at launch) |
 | Factory admin | allowlist quote denoms, point **future** launches at a new curve code id, hand over admin (two-step: propose, then accept) | change or migrate any existing launch |
 | Factory wasm admin (`INJ_FACTORY_WASM_ADMIN`) | upgrade the factory's code | migrate a curve (curves have no admin) |
 | Anyone | trade, claim fees to their rightful recipients, trigger the graduation fallback | withdraw liquidity |
 
-On mainnet the factory admin and wasm admin should be a multisig, and the UI should
-check a launch's curve code id against the audited one.
+On mainnet the factory admin (`INJ_FACTORY_ADMIN`) and wasm admin
+(`INJ_FACTORY_WASM_ADMIN`) should be a multisig. The launch page reads each curve's code
+id, wasm admin and denom mint authority from the chain and disables trading unless the
+code id is in `NEXT_PUBLIC_CURVE_CODE_IDS`, there is no admin, and the curve holds the
+mint key.
 
 ## Tests
 
 ```bash
-cargo test              # 120: the maths (curve + pool), both contracts
-npm --prefix app test   # 186: the TypeScript port, Rust parity, signing, wallet, env surface
+cargo test              # 125: the maths (curve + pool), both contracts, randomized runs
+npm --prefix app test   # 196: the TypeScript port, Rust parity, signing, wallet, env surface
 npx --prefix app tsc --noEmit
 bash scripts/build-wasm.sh  # wasm build + export and opcode checks the chain enforces
 ```
@@ -127,7 +130,7 @@ Testnet is the default everywhere. Mainnet is never a fallback.
 - `/launch/[id]` the launch: curve, numbers, buy and sell with price impact on
   both sides, and the trade feed.
 - `/create` the create form. It derives the curve from four plain numbers,
-  draws it from the real maths as you type, and shows the exact three messages
+  draws it from the real maths as you type, and shows the exact five messages
   before anything is signed.
 
 ## Wallet
@@ -144,23 +147,26 @@ cold load and resolves to "no wallet" on a machine that has one.
 
 ## Creating a launch
 
-Three messages in one transaction, and the order matters:
+Five messages in one transaction, and the order matters:
 
 1. `MsgCreateDenom` makes `factory/<creator>/<subdenom>`
-2. `MsgMint` mints `curve_supply + lp_reserve` to the creator
-3. `MsgExecuteContract` `CreateLaunch`, with that whole amount attached
+2. `MsgMint` mints the fixed 1B supply to the creator
+3. `MsgSetDenomMetadata` names it, with an 18-decimal display unit
+4. `MsgChangeAdmin` hands the mint key to the factory, which passes it to the new curve.
+   A denom admin can mint without limit; once the curve holds it, nobody can. Skip this
+   and the factory's handover fails, so the whole launch reverts.
+5. `MsgExecuteContract` `CreateLaunch`, with the whole supply attached
 
-The factory refuses anything but the exact amount and nothing mints later, so a
-launch that gets this wrong either fails outright or succeeds with a supply the
-curve cannot honour. The construction is a pure function in `lib/createLaunch.ts`
-with its own tests, mutation-verified nine ways, because it is the part most
-likely to be wrong and the part a form cannot check.
+The factory refuses anything but the exact amount. The construction is a pure function in
+`lib/createLaunch.ts` with its own tests, because it is the part most likely to be wrong
+and the part a form cannot check.
 
 **Broadcasting is wired up and not yet exercised against the current contracts.**
-`lib/broadcast.ts` simulates before the wallet prompt, so an encoding fault fails
-before anything is signed, and all messages land in one transaction or none.
-`scripts/create-test-launch.mjs` signs the same messages with the deploy key, which
-separates "the contract refuses this" from "the browser encoded it wrong".
+`lib/broadcast.ts` simulates before the wallet prompt, so an encoding fault fails before
+anything is signed. `scripts/e2e-testnet.mjs` runs the whole lifecycle with the deploy
+key: create, curve trades, graduation, pool trades, fees, and checks the mint key ended
+with the curve. It mints its own 6-decimal test quote so graduating costs gas instead of
+87 INJ. Run it with `npm --prefix scripts run e2e` after `deploy.mjs`.
 
 ## Holders: not possible from a public endpoint
 

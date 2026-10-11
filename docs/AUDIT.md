@@ -4,6 +4,26 @@ Not a third-party audit. Findings from reviewing the contracts, app and scripts
 against what Pons (`ponsdotdev/pons-labs`) and nearly.trade do. Newest first.
 Severity uses the usual scale: Critical / High / Medium / Low / Info.
 
+## 2026-10-11 review, second pass
+
+### Fixed
+
+| # | Sev | Finding | Fix |
+|---|---|---|---|
+| 10 | Critical | The creator stayed **admin of their tokenfactory denom**, which mints without limit. After graduation they could mint any amount and sell it into the locked pool until it was empty, and before that they could dump into the curve reserve. The create page already promised "nothing can mint more afterwards"; it was not true. | The launch tx now hands denom admin to the factory (`MsgChangeAdmin`), and the factory's reply hands it to the new curve, which has no mint code and no wasm admin. If the creator skips the handover, the factory's message is refused and the whole launch reverts. Tests: `the_mint_key_ends_with_the_curve_where_nothing_can_use_it`, `a_creator_who_keeps_the_mint_key_cannot_launch` (simulated tokenfactory enforcing the admin rule; mutation-checked). |
+| 11 | High | Nothing stopped the UI offering trades on a curve built from code the admin had repointed to, or one with an upgrade key or a live mint key. | `lib/codeCheck.ts`: the launch page reads code id, wasm admin and denom authority from the chain, compares them against `NEXT_PUBLIC_CURVE_CODE_IDS`, and disables trading with an explanation on any mismatch. |
+| 12 | Medium | The upload limit was per instance. | `allowUploadShared` uses Upstash Redis when `UPSTASH_REDIS_REST_URL`/`_TOKEN` are set, and falls back to the in-memory limit (never unlimited) on outage. |
+| 13 | Medium | Factory config admin was always the deploy key. | `INJ_FACTORY_ADMIN` (required on mainnet; multisig contract addresses work). |
+| 14 | Info | Accounting was asserted on hand-picked sequences only. | 36 seeded random runs across graduation assert exact books and conservation of every unit after each step (mutation-checked). `docs/AUDIT_SCOPE.md` written for the external auditor. |
+| 15 | Info | `env-surface.test.ts` flagged secrets by NAME anywhere in `src/`, which blocked legitimate server-only credentials and let `PINATA_JWT` pass on spelling. | Now asserts the real boundary: no secret-shaped `NEXT_PUBLIC_*`, and no unprefixed variable read in a `'use client'` file. |
+
+### To verify on testnet (cannot be verified offline)
+
+- The factory's reply sends `MsgChangeAdmin` as a stargate message. `factory.wasm` does
+  not export a `requires_stargate` marker; the curve does. Confirm Injective dispatches
+  the message (step 3 of `scripts/e2e-testnet.mjs` checks the denom authority).
+- Injective accepts `MsgChangeAdmin` from a contract sender for a denom it administers.
+
 ## 2026-10-11 review
 
 ### Fixed
@@ -20,19 +40,17 @@ Severity uses the usual scale: Critical / High / Medium / Low / Info.
 | 8 | Low | `die()` in `deploy.mjs` printed only the first hint line; multi-line refusals lost their explanation. | Prints all hints. |
 | 9 | Info | No CI: 300+ tests ran only when someone remembered. | `.github/workflows/ci.yml`: cargo test, the wasm build with export and opcode checks, tsc, app tests, next build. |
 
-### Open, in priority order
+### Open, in priority order (updated in the second pass)
 
-1. **Testnet end-to-end on the new contracts.** The old testnet factory has the
-   custodial graduation and must not be used. Redeploy, then run create, buy, graduate,
-   pool buy/sell and claim from `scripts/` and from the browser.
-2. **Third-party audit** before mainnet. Focus areas: `seed_pool`, the pool maths'
-   rounding, refund paths in `exec_buy`, the factory reply.
-3. **Platform rate limit on `/api/upload`** (Vercel Firewall, or an Upstash limiter).
-   The in-memory limit is per instance.
-4. **Code-id pinning in the UI.** The factory admin can repoint FUTURE launches at new
-   curve code. The app should read each curve's `code_id` (`/cosmwasm/wasm/v1/contract/{addr}`)
-   and warn on anything but the audited one.
-5. **Multisig** for factory admin and factory wasm admin on mainnet.
+1. **Testnet end-to-end on the new contracts.** Redeploy with `scripts/deploy.mjs`, then
+   `npm --prefix scripts run e2e` (one command, about 3 INJ, mints its own test quote so
+   graduation does not need 87 INJ), then the same flow from the browser. The old testnet
+   factory has the custodial graduation and creator mint keys and must not be used.
+2. **Third-party audit** before mainnet. Send `docs/AUDIT_SCOPE.md`.
+3. Set `UPSTASH_REDIS_REST_URL`/`_TOKEN` (or Vercel Firewall) in production. *(code done)*
+4. Set `NEXT_PUBLIC_CURVE_CODE_IDS` in production to the audited code id. *(code done)*
+5. Create the multisig and pass it as `INJ_FACTORY_ADMIN` and `INJ_FACTORY_WASM_ADMIN`
+   on mainnet. *(code done)*
 6. **Holders panel** needs an indexer over bank events (`denom_owners` returns 501 for
    tokenfactory denoms).
 7. Align `@injectivelabs/sdk-ts` between `app/` (^1.20) and `scripts/` (^1.14), after
