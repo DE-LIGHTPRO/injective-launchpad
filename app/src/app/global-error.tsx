@@ -1,4 +1,5 @@
 'use client';
+import { BRAND_NAME } from '@/lib/brand';
 
 /**
  * The boundary of last resort: a throw in the root layout itself.
@@ -25,7 +26,7 @@ export default function GlobalError({ error, reset }: { error: Error & { digest?
         }}
       >
         <div style={{ maxWidth: '32rem' }}>
-          <h1 style={{ fontSize: '1.375rem', marginBottom: '0.75rem' }}>inj·pad could not load</h1>
+          <h1 style={{ fontSize: '1.375rem', marginBottom: '0.75rem' }}>{BRAND_NAME} could not load</h1>
           <p style={{ color: '#9aa3b8', lineHeight: 1.6 }}>
             <strong style={{ color: '#eef1f7' }}>Nothing was signed and no transaction was sent.</strong>{' '}
             The page itself failed to start. Reloading usually clears it.

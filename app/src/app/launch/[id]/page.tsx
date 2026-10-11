@@ -8,6 +8,7 @@ import { TrustBadges } from '@/components/TrustBadges';
 import { ShareRow } from '@/components/ShareRow';
 import { WatchButton } from '@/components/WatchButton';
 import { Price } from '@/components/Price';
+import { BRAND_NAME } from '@/lib/brand';
 import { ArrowLeftIcon } from '@/components/Icons';
 import { TokenLogo } from '@/components/TokenLogo';
 import { visibleLinks } from '@/lib/tokenProfile';
@@ -78,10 +79,10 @@ export async function generateMetadata({
      * destination ours to vouch for.
      */
     return {
-      title: `${sym} on inj·pad`,
+      title: `${sym} on ${BRAND_NAME}`,
       description,
-      openGraph: { title: `${sym} on inj·pad`, description, type: 'website' },
-      twitter: { card: 'summary', title: `${sym} on inj·pad`, description },
+      openGraph: { title: `${sym} on ${BRAND_NAME}`, description, type: 'website' },
+      twitter: { card: 'summary', title: `${sym} on ${BRAND_NAME}`, description },
     };
   } catch {
     // A launch that cannot be read still needs a title, and it must not be the

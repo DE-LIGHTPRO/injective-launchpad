@@ -3,6 +3,7 @@ import type { Metadata, Viewport } from 'next';
 import Link from 'next/link';
 import { Inter, JetBrains_Mono } from 'next/font/google';
 import { PlusIcon } from '@/components/Icons';
+import { BRAND_NAME, BRAND_TAGLINE } from '@/lib/brand';
 import { NETWORK } from '@/lib/config';
 import { isDemoMode } from '@/lib/demo';
 import { ConnectWallet } from '@/components/ConnectWallet';
@@ -25,13 +26,13 @@ const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL?.trim() || 'https://injpad.ver
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
-  title: { default: 'inj·pad · Fair launches on Injective', template: '%s · inj·pad' },
+  title: { default: `${BRAND_NAME} · ${BRAND_TAGLINE}`, template: `%s · ${BRAND_NAME}` },
   description:
     'Launch a token on Injective with a fixed supply, a bonding curve, and liquidity that locks itself at graduation. No presale, no team allocation, no mint key.',
   openGraph: {
     type: 'website',
-    siteName: 'inj·pad',
-    title: 'inj·pad · Fair launches on Injective',
+    siteName: BRAND_NAME,
+    title: `${BRAND_NAME} · ${BRAND_TAGLINE}`,
     description:
       'Fixed supply, one curve for everyone, and liquidity that locks itself at graduation.',
   },
@@ -52,11 +53,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         </a>
         <header className="top">
           <div className="wrap inner">
-            <Link href="/" className="brand" aria-label="inj·pad home">
-              <BrandMark />
-              <span className="wordmark">
-                inj<em>·</em>pad
-              </span>
+            <Link href="/" className="brand" aria-label={`${BRAND_NAME} home`}>
+              <BrandMark size={26} id="hdr" />
+              <span className="wordmark">{BRAND_NAME}</span>
             </Link>
             <nav className="top-nav" aria-label="Primary">
               <Link href="/">Launches</Link>
@@ -89,10 +88,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <div className="wrap footer-inner">
             <div>
               <Link href="/" className="brand">
-                <BrandMark size={18} />
-                <span className="wordmark">
-                  inj<em>·</em>pad
-                </span>
+                <BrandMark size={20} id="ftr" />
+                <span className="wordmark">{BRAND_NAME}</span>
               </Link>
               <p className="micro" style={{ marginTop: 'var(--space-2)', maxWidth: '44ch' }}>
                 {/*

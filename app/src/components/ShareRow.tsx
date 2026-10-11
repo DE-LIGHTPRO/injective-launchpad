@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { BRAND_NAME } from '@/lib/brand';
 import { CheckIcon, ExternalIcon, LinkIcon } from './Icons';
 
 /**
@@ -13,7 +14,7 @@ import { CheckIcon, ExternalIcon, LinkIcon } from './Icons';
 export function ShareRow({ symbol, path }: { symbol: string; path: string }) {
   const [copied, setCopied] = useState(false);
   const url = () => (typeof window === 'undefined' ? path : new URL(path, window.location.origin).toString());
-  const text = `$${symbol} on inj·pad: fixed supply, liquidity that locks itself at graduation.`;
+  const text = `$${symbol} on ${BRAND_NAME}: fixed supply, liquidity that locks itself at graduation.`;
 
   return (
     <div className="share-row">
