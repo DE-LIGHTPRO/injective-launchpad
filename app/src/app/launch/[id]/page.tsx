@@ -19,7 +19,7 @@ import { StatusChip } from '@/components/StatusChip';
 import { CreatorPosition } from '@/components/CreatorPosition';
 import { FeeEarnings } from '@/components/FeeEarnings';
 import { CopyButton } from '@/components/CopyButton';
-import { graduationProgress, fmt, launchSpotPrice, maxCollectable } from '@/lib/curve';
+import { graduationProgress, fmt, spotPriceWad, maxCollectable } from '@/lib/curve';
 import { NETWORK, isDeployed, isDevBuild, getPinnedCurveCodeIdsRaw } from '@/lib/config';
 import { isDemoMode } from '@/lib/demo';
 import { CurveChart } from '@/components/CurveChart';
@@ -174,7 +174,8 @@ export default async function LaunchPage({ params }: { params: Promise<{ id: str
     (secs) => `${new Date(secs * 1000).toISOString().slice(0, 16).replace('T', ' ')} UTC`,
   );
   const progress = graduationProgress(detail.config, detail.state);
-  const price = launchSpotPrice(detail.config, detail.state, detail.pool, ONE);
+  // Wad precision: on a 6-decimal quote a whole-unit price floors to 0.
+  const price = spotPriceWad(detail.config, detail.state, detail.pool, ONE);
   const reserveNow = detail.pool ? detail.pool.quote : detail.state.injCollected;
   const ceiling = maxCollectable(detail.config);
   const remaining = detail.config.curveSupply - detail.state.tokensSold;
@@ -267,7 +268,7 @@ export default async function LaunchPage({ params }: { params: Promise<{ id: str
         <div>
           <span className="k">Price</span>
           <span className="v mono">
-            <Price raw={price} decimals={quote.decimals} unit={quote.label} />
+            <Price raw={price} decimals={quote.decimals + 18} unit={quote.label} />
           </span>
         </div>
         <div>
@@ -322,7 +323,7 @@ export default async function LaunchPage({ params }: { params: Promise<{ id: str
             <div className="metric-row">
               <span className="k">Spot price</span>
               <span className="v mono">
-                <Price raw={price} decimals={quote.decimals} unit={`${quote.label} / ${symbol}`} />
+                <Price raw={price} decimals={quote.decimals + 18} unit={`${quote.label} / ${symbol}`} />
               </span>
             </div>
             <div className="metric-row">

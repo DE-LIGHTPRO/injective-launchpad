@@ -334,12 +334,24 @@ export function planLaunch(input: LaunchInput): LaunchPlan {
   };
 }
 
+/** A quote amount in whole units, at the quote's own decimals, trailing zeros trimmed. */
+function fmtQuote(v: bigint, decimals: number): string {
+  const unit = 10n ** BigInt(decimals);
+  const frac = (v % unit).toString().padStart(decimals, '0').slice(0, 6).replace(/0+$/, '');
+  return `${(v / unit).toLocaleString('en-US')}${frac ? `.${frac}` : ''}`;
+}
+
 /** A human summary of what signing would do, shown before it is signed. */
 export function describePlan(
   plan: LaunchPlan,
   curve: CurveConfig,
   lpReserve: bigint,
   initialBuy = 0n,
+  /** The launch's quote; defaults to the network's (INJ). */
+  quote: { label: string; decimals: number } = {
+    label: NETWORK.quoteSymbol,
+    decimals: NETWORK.quoteDecimals,
+  },
 ): string[] {
   const whole = (v: bigint) => (v / 10n ** 18n).toLocaleString('en-US');
   const lines = [
@@ -350,7 +362,7 @@ export function describePlan(
     // mint at will. It is true now because of the step below, which is why it names it.
     `Give up the right to mint: it passes to the launch's contract, which has no code that mints, so the supply is fixed for good`,
     `Send all ${whole(plan.seedAmount)} to the launchpad: ${whole(curve.curveSupply)} onto the curve and ${whole(lpReserve)} held back to pair at graduation`,
-    `Buyers pay ${NETWORK.quoteSymbol} and the curve prices every trade until it reaches the target`,
+    `Buyers pay ${quote.label} and the curve prices every trade until it reaches the target`,
   ];
 
   /*
@@ -362,7 +374,7 @@ export function describePlan(
    */
   if (initialBuy > 0n) {
     lines.push(
-      `Immediately spend ${whole(initialBuy)} ${NETWORK.quoteSymbol} of your own on the curve, at the opening price, before anyone else can buy`,
+      `Immediately spend ${fmtQuote(initialBuy, quote.decimals)} ${quote.label} of your own on the curve, at the opening price, before anyone else can buy`,
     );
   }
   return lines;

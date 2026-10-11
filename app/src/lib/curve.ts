@@ -425,6 +425,54 @@ export function launchSpotPrice(
   return spotPrice(cfg, st, oneToken);
 }
 
+/** The reserves a launch currently prices against: the pool's once graduated, else the curve's. */
+function pricingReserves(
+  cfg: CurveConfig,
+  st: CurveState,
+  pool: PoolReserves | null | undefined,
+): [bigint, bigint] {
+  if (pool && pool.quote > 0n && pool.tokens > 0n) return [pool.quote, pool.tokens];
+  validate(cfg);
+  return reserves(cfg, st);
+}
+
+/** Extra fixed-point precision for prices, so a sub-unit price is not floored to zero. */
+export const PRICE_WAD = 10n ** 18n;
+
+/**
+ * Spot price of one whole token in quote base units, multiplied by `PRICE_WAD`.
+ *
+ * `spotPrice` floors to a whole quote base unit, which is fine for an 18-decimal quote
+ * and wrong for a 6-decimal one: a token on this curve costs about 0.04 of a USDC base
+ * unit, so the floored price was 0 and every USDC launch showed price 0 and market cap
+ * 0 (seen live on TUSD and 0x… pairs). Render with `decimals + 18`.
+ */
+export function spotPriceWad(
+  cfg: CurveConfig,
+  st: CurveState,
+  pool: PoolReserves | null | undefined,
+  oneToken: bigint,
+): bigint {
+  const [q, t] = pricingReserves(cfg, st, pool);
+  if (t <= 0n) throw new CurveError('curve maths out of range');
+  return (q * oneToken * PRICE_WAD) / t;
+}
+
+/**
+ * Market cap in quote base units, computed from the reserves in one division so no
+ * intermediate per-token price is rounded away: quoteReserve * supply / tokenReserve.
+ */
+export function marketCapExact(
+  cfg: CurveConfig,
+  st: CurveState,
+  pool: PoolReserves | null | undefined,
+  totalSupply: bigint,
+): bigint {
+  const [q, t] = pricingReserves(cfg, st, pool);
+  if (t <= 0n) throw new CurveError('curve maths out of range');
+  return (q * totalSupply) / t;
+}
+
 /** How far along the curve this launch is, 0..1, for progress bars. */
 export function graduationProgress(cfg: CurveConfig, st: CurveState): number {
   // A graduated curve's reserve has moved into the pool, so `injCollected` reads zero

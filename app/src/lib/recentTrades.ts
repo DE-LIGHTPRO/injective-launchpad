@@ -22,6 +22,9 @@ export interface TickerTrade {
   /** Quote moved, base units. */
   quote: bigint;
   symbol: string;
+  /** The launch's quote, so the amount is formatted and labelled in what was paid. */
+  quoteDecimals: number;
+  quoteLabel: string;
   launchId: number;
   height: number;
   txHash: string;
@@ -43,7 +46,7 @@ export interface Ticker {
  * worth delaying the board for.
  */
 export async function recentTrades(
-  launches: Array<{ id: number; curve: string; denom: string }>,
+  launches: Array<{ id: number; curve: string; denom: string; quoteDecimals: number; quoteLabel: string }>,
   perLaunch = 5,
   limit = 8,
 ): Promise<Ticker> {
@@ -77,6 +80,8 @@ export async function recentTrades(
         who: t.who,
         quote,
         symbol: symbolOf(launch.denom),
+        quoteDecimals: launch.quoteDecimals,
+        quoteLabel: launch.quoteLabel,
         launchId: launch.id,
         height: t.height,
         txHash: t.txHash,

@@ -130,6 +130,8 @@ export default async function Home() {
               id: r.launch.id,
               curve: r.launch.curve,
               denom: r.launch.denom,
+              quoteDecimals: r.quoteDecimals,
+              quoteLabel: denomLabel(r.quoteDenom),
             }))}
             currentHeight={height}
           />

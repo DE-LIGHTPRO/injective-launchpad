@@ -438,3 +438,31 @@ test('a pool round trip never returns more than was spent', () => {
     pool = after;
   }
 });
+
+// ---------------------------------------------------------- 6-decimal quotes --
+
+import { marketCapExact, spotPriceWad, PRICE_WAD } from './curve.ts';
+import { fixedCurveFor, FIXED_TOTAL_SUPPLY } from './launchLimits.ts';
+
+test('a 6-decimal launch has a real market cap and price, not zero', () => {
+  // Seen live: PAIR5277 held 9.90 TUSD and showed market cap 0.00, because the
+  // per-token price was floored to a whole TUSD base unit before multiplying.
+  const cfg = { ...fixedCurveFor(6), feeBps: 100n };
+  const st = { injCollected: 0n, tokensSold: 0n, graduated: false };
+  const mc = marketCapExact(cfg, st, null, FIXED_TOTAL_SUPPLY);
+  // 30 * 1B / 1.073B = 27.959 whole units, the same figure an INJ launch shows.
+  assert.equal(mc, 27_958_993n, `market cap ${mc}`);
+  const wad = spotPriceWad(cfg, st, null, ONE);
+  assert.ok(wad > 0n, 'the wad price must not floor to zero');
+  // Same shape as INJ: identical price once each is read at its own decimals.
+  const inj = spotPriceWad({ ...fixedCurveFor(18), feeBps: 100n }, st, null, ONE);
+  assert.equal(inj / 10n ** 12n, wad, 'the curve shape differs between 6 and 18 decimals');
+  assert.ok(PRICE_WAD === 10n ** 18n);
+});
+
+test('the 18-decimal fixed curve is exactly the factory constants', () => {
+  const c = fixedCurveFor(18);
+  assert.equal(c.virtualInj, 30n * ONE);
+  assert.equal(c.graduationTarget, 85n * ONE);
+  assert.equal(fixedCurveFor(6).virtualInj, 30_000_000n);
+});

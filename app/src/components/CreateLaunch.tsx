@@ -28,7 +28,7 @@ import {
   PLATFORM_FEE_SHARE_BPS,
   MAX_INITIAL_BUY_BPS,
   initialBuyCeiling,
-  FIXED_CURVE,
+  fixedCurveFor,
   FIXED_LP_RESERVE,
   CURVE_SUPPLY_TOKENS,
   LP_RESERVE_TOKENS,
@@ -99,6 +99,14 @@ export function CreateLaunch() {
    */
   const [quotes, setQuotes] = useState<{ quotes: QuoteAsset[]; defaultDenom: string } | null>(null);
   const [quoteDenom, setQuoteDenom] = useState<string | null>(null);
+  /*
+   * The chosen pair, resolved once. Its decimals scale the curve and parse the opening
+   * buy; its label goes everywhere this form used to say "INJ" regardless of the pair.
+   */
+  const activeQuote = quoteDenom ?? quotes?.defaultDenom ?? NETWORK.quoteDenom;
+  const quoteDecimals =
+    quotes?.quotes.find((q) => q.denom === activeQuote)?.decimals ?? NETWORK.quoteDecimals;
+  const quoteLabel = denomLabel(activeQuote);
   useEffect(() => {
     let live = true;
     void listQuotes().then((q) => {
@@ -147,7 +155,8 @@ export function CreateLaunch() {
     if (!Number.isInteger(feeBps) || feeBps < 0 || feeBps > 1_000) {
       return { error: 'The trading fee is a whole number of basis points, 0 to 1000.' };
     }
-    const curve: CurveConfig = { ...FIXED_CURVE, feeBps: BigInt(feeBps) };
+    // In the chosen pair's own units, as the factory will build it.
+    const curve: CurveConfig = { ...fixedCurveFor(quoteDecimals), feeBps: BigInt(feeBps) };
     try {
       // Still validated. The constants are hand-written, and a typo in one would
       // otherwise draw a chart for a curve no launch can actually have.
@@ -156,38 +165,8 @@ export function CreateLaunch() {
       return { error: (e as Error).message };
     }
     return { curve, lpReserve: FIXED_LP_RESERVE };
-  }, [f]);
+  }, [f, quoteDecimals]);
 
-  const plan = useMemo((): { plan: LaunchPlan } | { error: string; field?: string } | null => {
-    if ('error' in built) return { error: built.error };
-    if (!account) return null;
-    const factory = getFactoryAddress();
-    try {
-      return {
-        plan: planLaunch({
-          creator: account.address,
-          symbol: f.symbol.trim(),
-          name: f.name,
-          description: f.description,
-          rules: { ...rulesForChain(builtRules), ...earlyFeeForChain(builtRules.earlyFee) },
-          initialBuy: devBuy,
-          profile: profileForChain({
-            image: f.image,
-            website: f.website,
-            x: f.x,
-            telegram: f.telegram,
-          }),
-          curve: built.curve,
-          lpReserve: built.lpReserve,
-          quoteDenom: quoteDenom ?? undefined,
-          factory,
-        }),
-      };
-    } catch (e) {
-      const err = e as LaunchInputError;
-      return { error: err.message, field: err.field as string };
-    }
-  }, [account, built, f]);
 
   // Null until the address is both safe and complete, so a half-typed URL does not
   // fire a request on every keystroke.
@@ -250,6 +229,63 @@ export function CreateLaunch() {
   const ruleError = (field: 'maxPerWallet' | 'tradeStart' | 'earlyFee') =>
     ruleProblems.find((p) => p.field === field)?.message ?? null;
 
+
+  /*
+   * The creator's own opening buy, parsed from whole quote units.
+   *
+   * Zero when blank, which is the honest default: a launch where the creator takes
+   * nothing first is a different product from one where they take a position, and the
+   * form should not pre-fill a number that changes which one it is.
+   */
+  const devBuy = useMemo(() => {
+    if (f.initialBuy.trim().length === 0) return 0n;
+    try {
+      // At the pair's decimals: "5" is 5 USDC, not 5 x 10^18 USDC base units.
+      const v = parseAmount(f.initialBuy, quoteDecimals);
+      return v > 0n ? v : 0n;
+    } catch {
+      return 0n;
+    }
+  }, [f.initialBuy, quoteDecimals]);
+
+  /*
+   * After `builtRules` and `devBuy`, which it reads. It sat above both, so with a wallet
+   * connected it hit the temporal dead zone ("Cannot access 'builtRules' before
+   * initialization"); the try/catch below turned that into a form error, and the create
+   * flow could never reach the sign step. Order matters for useMemo bodies.
+   */
+  const plan = useMemo((): { plan: LaunchPlan } | { error: string; field?: string } | null => {
+    if ('error' in built) return { error: built.error };
+    if (!account) return null;
+    const factory = getFactoryAddress();
+    try {
+      return {
+        plan: planLaunch({
+          creator: account.address,
+          symbol: f.symbol.trim(),
+          name: f.name,
+          description: f.description,
+          rules: { ...rulesForChain(builtRules), ...earlyFeeForChain(builtRules.earlyFee) },
+          initialBuy: devBuy,
+          profile: profileForChain({
+            image: f.image,
+            website: f.website,
+            x: f.x,
+            telegram: f.telegram,
+          }),
+          curve: built.curve,
+          lpReserve: built.lpReserve,
+          quoteDenom: quoteDenom ?? undefined,
+          factory,
+        }),
+      };
+    } catch (e) {
+      const err = e as LaunchInputError;
+      return { error: err.message, field: err.field as string };
+    }
+  // `quoteDenom` was missing, so switching the pair did not refresh the signed plan.
+  }, [account, built, f, quoteDenom, quoteDecimals]);
+
   /*
    * Signing, behind the confirmation the user already ticked.
    *
@@ -278,23 +314,6 @@ export function CreateLaunch() {
       setBusy(false);
     }
   }, [account, busy, plan]);
-
-  /*
-   * The creator's own opening buy, parsed from whole quote units.
-   *
-   * Zero when blank, which is the honest default: a launch where the creator takes
-   * nothing first is a different product from one where they take a position, and the
-   * form should not pre-fill a number that changes which one it is.
-   */
-  const devBuy = useMemo(() => {
-    if (f.initialBuy.trim().length === 0) return 0n;
-    try {
-      const v = parseAmount(f.initialBuy);
-      return v > 0n ? v : 0n;
-    } catch {
-      return 0n;
-    }
-  }, [f.initialBuy]);
 
   /*
    * What that buy actually gets, quoted from the same maths the contract runs. A
@@ -341,7 +360,7 @@ export function CreateLaunch() {
       <div className="card">
         <h1>Create a launch</h1>
         <p className="note">
-          You supply the tokens. Buyers bring {NETWORK.quoteSymbol}, and the curve prices every
+          You supply the tokens. Buyers bring {quoteLabel}, and the curve prices every
           trade until it graduates. Nothing here can be edited afterwards, which is what makes it
           a fair launch and also why the numbers are worth checking twice.
         </p>
@@ -509,7 +528,7 @@ export function CreateLaunch() {
             </div>
             <p className="note">
               The other {LP_RESERVE_TOKENS.toLocaleString('en-US')} is held back and
-              paired against the {NETWORK.quoteSymbol} raised when the launch graduates.
+              paired against the {quoteLabel} raised when the launch graduates.
             </p>
           </div>
         </div>
@@ -524,11 +543,11 @@ export function CreateLaunch() {
         <div className="field-row">
           <div className="field">
             <span className="field-label">
-              Graduates at <span className="hint">{NETWORK.quoteSymbol} raised</span>
+              Graduates at <span className="hint">{quoteLabel} raised</span>
             </span>
             <div className="fixed-value">
               <span className="mono">
-                {GRADUATION_TARGET_QUOTE} {NETWORK.quoteSymbol}
+                {GRADUATION_TARGET_QUOTE} {quoteLabel}
               </span>
               <span className="chip chip-sm muted">fixed</span>
             </div>
@@ -539,7 +558,7 @@ export function CreateLaunch() {
             </span>
             <div className="fixed-value">
               <span className="mono">
-                {OPENING_RESERVE_QUOTE} {NETWORK.quoteSymbol}
+                {OPENING_RESERVE_QUOTE} {quoteLabel}
               </span>
               <span className="chip chip-sm muted">fixed</span>
             </div>
@@ -643,7 +662,7 @@ export function CreateLaunch() {
             <div className="metric-row">
               <span className="k">Curve ceiling</span>
               <span className="v mono">
-                {fmt(maxCollectable(built.curve), 18, 2)} {NETWORK.quoteSymbol}
+                {fmt(maxCollectable(built.curve), quoteDecimals, 2)} {quoteLabel}
               </span>
             </div>
           </div>
@@ -718,7 +737,7 @@ export function CreateLaunch() {
 
         <div className="field">
           <label htmlFor="cl-devbuy">
-            Your opening buy <span className="hint">{NETWORK.quoteSymbol}, blank for none</span>
+            Your opening buy <span className="hint">{quoteLabel}, blank for none</span>
           </label>
           <input
             id="cl-devbuy"
@@ -824,7 +843,10 @@ export function CreateLaunch() {
           <>
             <ul className="plan">
               {!('error' in built) &&
-                describePlan(plan.plan, built.curve, built.lpReserve, devBuy).map((l) => (
+                describePlan(plan.plan, built.curve, built.lpReserve, devBuy, {
+                  label: quoteLabel,
+                  decimals: quoteDecimals,
+                }).map((l) => (
                   <li key={l}>{l}</li>
                 ))}
             </ul>

@@ -101,6 +101,22 @@ export const FIXED_CURVE = {
   graduationTarget: 85_000_000_000_000_000_000n,
 } as const;
 
+/**
+ * The fixed curve in a quote asset's own units, exactly as the factory's `fixed_curve`
+ * builds it: the two QUOTE figures (opening reserve, graduation target) are whole units
+ * times 10^decimals; the token figures do not change. `FIXED_CURVE` is the 18-decimal
+ * (INJ) case. Using it for a 6-decimal pair drew a curve, and parsed an opening buy,
+ * a trillion times too large.
+ */
+export function fixedCurveFor(quoteDecimals: number) {
+  const unit = 10n ** BigInt(quoteDecimals);
+  return {
+    ...FIXED_CURVE,
+    virtualInj: BigInt(OPENING_RESERVE_QUOTE) * unit,
+    graduationTarget: BigInt(GRADUATION_TARGET_QUOTE) * unit,
+  };
+}
+
 /** The reserve held back for the pool: whatever the fixed supply leaves over. */
 export const FIXED_LP_RESERVE = FIXED_TOTAL_SUPPLY - FIXED_CURVE.curveSupply;
 

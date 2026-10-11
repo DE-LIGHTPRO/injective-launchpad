@@ -345,3 +345,11 @@ test('the metadata sender is the creator, who is the only denom admin', () => {
   const m = byType(planLaunch(i), MSG_SET_METADATA) as unknown as { sender: string };
   assert.equal(m.sender, i.creator);
 });
+
+test('the plan summary speaks in the launch\'s own quote', () => {
+  const p = planLaunch(input({ initialBuy: 5_000_000n, quoteDenom: 'factory/inj1x/tusd' }));
+  const lines = describePlan(p, CURVE, LP, 5_000_000n, { label: 'TUSD', decimals: 6 }).join(' ');
+  assert.match(lines, /Buyers pay TUSD/);
+  assert.match(lines, /spend 5 TUSD/);
+  assert.doesNotMatch(lines, /INJ/);
+});

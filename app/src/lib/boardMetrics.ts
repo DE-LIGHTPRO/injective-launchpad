@@ -1,4 +1,4 @@
-import { launchSpotPrice, type CurveConfig, type CurveState, type PoolReserves } from './curve.ts';
+import { marketCapExact, type CurveConfig, type CurveState, type PoolReserves } from './curve.ts';
 
 /**
  * The figures a launchpad board is read by, and the ones this chain cannot produce.
@@ -37,10 +37,9 @@ export function marketCap(
   totalSupply: bigint,
   pool: PoolReserves | null = null,
 ): bigint {
-  const price = launchSpotPrice(config, state, pool, ONE);
-  // Scaled through the token unit so an 18-decimal supply times an 18-decimal price
-  // does not come back 18 orders of magnitude out.
-  return (price * totalSupply) / ONE;
+  // From the reserves in one division. Going through a floored per-token price first
+  // made every 6-decimal launch read 0: the price is below one USDC base unit.
+  return marketCapExact(config, state, pool, totalSupply);
 }
 
 /**

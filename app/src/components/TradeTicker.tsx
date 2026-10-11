@@ -2,7 +2,6 @@ import Link from 'next/link';
 import { recentTrades, blocksAgo } from '@/lib/recentTrades';
 import { addressName } from '@/lib/addressName';
 import { fmt } from '@/lib/curve';
-import { NETWORK } from '@/lib/config';
 
 /**
  * What is happening right now, across the board.
@@ -19,7 +18,7 @@ export async function TradeTicker({
   launches,
   currentHeight,
 }: {
-  launches: Array<{ id: number; curve: string; denom: string }>;
+  launches: Array<{ id: number; curve: string; denom: string; quoteDecimals: number; quoteLabel: string }>;
   currentHeight: number | null;
 }) {
   /*
@@ -54,7 +53,9 @@ export async function TradeTicker({
               {t.symbol}
             </Link>
             <span className="mono ticker-amt">
-              {fmt(t.quote, 18, 3)} {NETWORK.quoteSymbol}
+              {/* The launch's own quote: this read every amount at 18 decimals as INJ,
+                  so a TUSD buy showed as "0 INJ". */}
+              {fmt(t.quote, t.quoteDecimals, 3)} {t.quoteLabel}
             </span>
             {/* The trader as a readable name, address in the title: a label, not an
                 identity, exactly as on the cards. */}

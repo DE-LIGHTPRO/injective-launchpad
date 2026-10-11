@@ -10,6 +10,7 @@ import { addressName } from '@/lib/addressName';
 import { selectLaunches, type ActivityIndex, type LaunchRow, type SortKey } from '@/lib/launchList';
 import { enrichAll, tradesLabel, type LaunchEnrichment } from '@/lib/launchActivity';
 import { Price } from './Price';
+import { PRICE_WAD } from '@/lib/curve';
 import { SearchIcon } from './Icons';
 import { denomLabel } from '@/lib/chain';
 
@@ -260,7 +261,8 @@ export function LaunchList({ rows }: { rows: LaunchRow[] }) {
                       </div>
                     </td>
                     <td className="num">
-                      <Price raw={(BigInt(r.marketCap) * ONE) / TOTAL_SUPPLY} decimals={r.quoteDecimals} />
+                      {/* Wad precision: a 6-decimal quote's price is below one base unit. */}
+                      <Price raw={(BigInt(r.marketCap) * ONE * PRICE_WAD) / TOTAL_SUPPLY} decimals={r.quoteDecimals + 18} />
                     </td>
                     <td className="num strong">
                       {compact(BigInt(r.marketCap), r.quoteDecimals)} <span className="unit">{unit}</span>
