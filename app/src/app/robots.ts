@@ -6,7 +6,7 @@ import { isDemoMode } from '@/lib/demo';
  *
  * While `NEXT_PUBLIC_DEMO` is set, every launch on the site is generated locally from
  * the curve maths and no contract is deployed. The banner says so to anyone who opens
- * the page, but a search result has no banner: someone finding "inj·pad" through a
+ * the page, but a search result has no banner: someone finding the site through a
  * query would land on prices that nothing backs, with the explanation one scroll above
  * wherever the snippet cut off.
  *

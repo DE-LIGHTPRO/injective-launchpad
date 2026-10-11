@@ -1,6 +1,6 @@
-# inj·pad
+# Vetta
 
-A one-sided bonding curve launchpad on Injective. The creator supplies **only
+*Italian for "summit".* A one-sided bonding curve launchpad on Injective. The creator supplies **only
 tokens**; buyers bring INJ, and the curve prices every trade until it graduates.
 At graduation the reserve and the held-back tokens become a **locked pool inside
 the launch's own contract**: no withdraw function, no upgrade key, nobody's wallet.

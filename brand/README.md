@@ -34,6 +34,7 @@ In the app, use `components/BrandMark.tsx` and pass a unique `id` per placement.
 
 ## Name
 
-The product name lives in `app/src/lib/brand.ts` (`BRAND_NAME`). A rename is pending;
-candidates are **Crestline** (recommended) and **Plateau**. Storage keys such as
-`injpad:watchlist` stay as they are so users keep their data.
+**Vetta**, Italian for "summit" (VET-tah): the top of the climb, which is what the mark
+draws. Set in Inter Semibold. The name lives in `app/src/lib/brand.ts` (`BRAND_NAME`).
+Internal storage keys (`injpad:*`) and the Vercel project name keep the old prefix so
+users keep their data and the deploy keeps working.

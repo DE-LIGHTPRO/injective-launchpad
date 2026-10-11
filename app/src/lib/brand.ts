@@ -1,10 +1,9 @@
 /**
- * The product's name, in one place.
+ * The product's name, in one place: Vetta, Italian for "summit".
  *
- * A rename is pending (candidates: Crestline, Plateau). Every user-facing mention reads
- * from here, so the rename is this one line. Storage keys elsewhere (`injpad:watchlist`)
- * deliberately do NOT read from it: renaming them would silently empty every user's
- * watchlist.
+ * Every user-facing mention reads from here. Storage keys elsewhere (`injpad:watchlist`,
+ * `injpad:upload:*`) and the Vercel project name deliberately do NOT: renaming them
+ * would silently empty every user's watchlist and break the deploy script.
  */
-export const BRAND_NAME = 'inj·pad';
+export const BRAND_NAME = 'Vetta';
 export const BRAND_TAGLINE = 'Fair launches on Injective';

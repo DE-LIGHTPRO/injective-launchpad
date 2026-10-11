@@ -79,7 +79,8 @@ export async function generateMetadata({
      * destination ours to vouch for.
      */
     return {
-      title: `${sym} on ${BRAND_NAME}`,
+      // Absolute: the layout template would otherwise append the name a second time.
+      title: { absolute: `${sym} on ${BRAND_NAME}` },
       description,
       openGraph: { title: `${sym} on ${BRAND_NAME}`, description, type: 'website' },
       twitter: { card: 'summary', title: `${sym} on ${BRAND_NAME}`, description },

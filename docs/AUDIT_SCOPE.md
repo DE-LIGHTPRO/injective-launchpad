@@ -1,4 +1,4 @@
-# Audit scope: inj·pad contracts
+# Audit scope: Vetta contracts
 
 For the third-party auditor. Send it with a pinned commit hash and the wasm checksums
 that `scripts/build-wasm.sh` produces at that commit.
