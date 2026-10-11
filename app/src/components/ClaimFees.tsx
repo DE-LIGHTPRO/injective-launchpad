@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { listLaunches, getLaunchDetail, resolveQuote, symbolOf, type Quote } from '@/lib/chain';
 import { useConnectedAccount } from '@/lib/walletStore';
 import { fmt } from '@/lib/curve';
+import { selectClaimable, type ClaimRow } from '@/lib/claimable';
 
 /**
  * Every fee this wallet can claim, in one place and one transaction.
@@ -26,11 +27,12 @@ import { fmt } from '@/lib/curve';
  * the same fee, split at the time of the trade.
  */
 
-interface Claimable {
-  id: number;
-  curve: string;
-  symbol: string;
-  owed: bigint;
+/*
+ * Extends `ClaimRow` so the tested selector can filter it and hand it back WITH the
+ * resolved quote. `creator` and `quoteDenom` are what the selector needs; `quote` is
+ * what rendering needs, and keeping them on one row is why the selector is generic.
+ */
+interface Claimable extends ClaimRow {
   quote: Quote;
 }
 
@@ -63,7 +65,9 @@ export function ClaimFees() {
               id: l.id,
               curve: l.curve,
               symbol: symbolOf(l.denom),
+              creator: d.creator,
               owed: d.creatorOwed,
+              quoteDenom: d.quoteDenom,
               quote: await resolveQuote(d.quoteDenom),
             };
           }),
@@ -78,7 +82,14 @@ export function ClaimFees() {
     };
   }, [account]);
 
-  const withFees = useMemo(() => (rows ?? []).filter((r) => r.owed > 0n), [rows]);
+  /*
+   * The selection lives in `lib/claimable.ts`, where tests can reach it. It decides
+   * whose money is shown, and an inline filter is one no test can exercise.
+   */
+  const { withFees } = useMemo(
+    () => selectClaimable(rows ?? [], account?.address ?? null),
+    [rows, account],
+  );
 
   async function claimAll() {
     if (!account || withFees.length === 0) return;

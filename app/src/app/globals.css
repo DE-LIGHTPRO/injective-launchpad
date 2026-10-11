@@ -347,7 +347,15 @@ h3 { font-size: var(--text-base); font-weight: 600; }
 
 /* ----------------------------------------------------------------- cards -- */
 
-.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: var(--space-4); }
+/* `min(290px, 100%)` so a track collapses on a narrow screen instead of forcing the
+   page sideways. It was a bare 290px, which on a 320px phone with gutters overflows:
+   the only hard grid floor left in this stylesheet, found by a source guard after a
+   browser measurement turned out to be unavailable. */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(290px, 100%), 1fr));
+  gap: var(--space-4);
+}
 
 .card {
   position: relative;
