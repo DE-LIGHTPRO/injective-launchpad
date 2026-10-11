@@ -1,7 +1,8 @@
 import Link from 'next/link';
 import type { Metadata } from 'next';
-import { notFound } from 'next/navigation';
-import { getLaunch, getLaunchDetail, resolveQuote, symbolOf, short, ChainError, contractFacts } from '@/lib/chain';
+import { notFound, redirect } from 'next/navigation';
+import { getLaunch, listLaunches, getLaunchDetail, resolveQuote, symbolOf, short, ChainError, contractFacts } from '@/lib/chain';
+import { resolveLaunchSlug, launchPath, pathForSlug, parseLaunchRef } from '@/lib/launchPath';
 import { assessCurveCode, blocksTrading, pinnedCodeIds } from '@/lib/codeCheck';
 import { CodeCheck } from '@/components/CodeCheck';
 import { TrustBadges } from '@/components/TrustBadges';
@@ -45,14 +46,13 @@ export const dynamic = 'force-dynamic';
 export async function generateMetadata({
   params,
 }: {
-  params: Promise<{ id: string }>;
+  params: Promise<{ slug: string }>;
 }): Promise<Metadata> {
-  const { id } = await params;
-  const numericId = Number(id);
-  if (!Number.isInteger(numericId)) return { title: 'Launch' };
+  const { slug } = await params;
 
   try {
-    const launch = await getLaunch(numericId);
+    const launch = await launchForSlug(slug);
+    if (!launch) return { title: 'Launch' };
     const detail = await getLaunchDetail(launch.curve);
     const sym = symbolOf(detail.denom);
     const pct = (graduationProgress(detail.config, detail.state) * 100).toFixed(1);
@@ -82,6 +82,12 @@ export async function generateMetadata({
       // Absolute: the layout template would otherwise append the name a second time.
       title: { absolute: `${sym} on ${BRAND_NAME}` },
       description,
+      /*
+       * Which of the forms a crawler should index. The redirect is deliberately
+       * temporary (see the page body), so this is what keeps `/launch/7` and
+       * `/launch/INJINU` from competing with each other in search.
+       */
+      alternates: { canonical: launchPath(launch, await listLaunches().catch(() => [launch])) },
       openGraph: { title: `${sym} on ${BRAND_NAME}`, description, type: 'website' },
       twitter: { card: 'summary', title: `${sym} on ${BRAND_NAME}`, description },
     };
@@ -94,11 +100,34 @@ export async function generateMetadata({
 
 const ONE = 1_000_000_000_000_000_000n;
 
-export default async function LaunchPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params;
-  const numericId = Number(id);
+/**
+ * The launch a path segment names, or null.
+ *
+ * USED BY THE METADATA TOO, which is why it is a function rather than inline: a share
+ * card built from a different launch than the page renders is the quietest way to
+ * mislead somebody, and two separate resolutions is exactly how that happens.
+ *
+ * The numeric fast path exists because an id needs no board read, and `/launch/<id>`
+ * is what every link shared before this change looks like.
+ */
+async function launchForSlug(slug: string) {
+  const ref = parseLaunchRef(slug);
+  if (!ref) return null;
+  if (ref.kind === 'id') {
+    try {
+      return await getLaunch(ref.id);
+    } catch {
+      return null;
+    }
+  }
+  return resolveLaunchSlug(slug, await listLaunches()).launch;
+}
 
-  if ((!isDeployed() && !isDemoMode()) || !Number.isFinite(numericId)) {
+
+export default async function LaunchPage({ params }: { params: Promise<{ slug: string }> }) {
+  const { slug } = await params;
+
+  if (!isDeployed() && !isDemoMode()) {
     return (
       <div className="empty">
         <p>No factory is configured, so this launch cannot be loaded.</p>
@@ -109,9 +138,60 @@ export default async function LaunchPage({ params }: { params: Promise<{ id: str
     );
   }
 
+  /*
+   * Resolved against the board, because whether a ticker is ambiguous is a property
+   * of the board rather than of the launch. One read, reused for the redirect
+   * decision and for the clash list.
+   */
+  const board = await listLaunches().catch(() => []);
+  const { launch: resolved, candidates, canonical } = resolveLaunchSlug(slug, board);
+
+  /*
+   * One launch, one URL. `/launch/7` and `/launch/injinu` both land on
+   * `/launch/INJINU`: serving the same page at three addresses splits its search
+   * ranking and makes a shared link look unlike the one in the address bar. A
+   * permanent redirect is right because the canonical form does not change back.
+   */
+  /*
+   * TEMPORARY (307), not permanent, and that is deliberate. Which slug is canonical
+   * depends on the board: `/launch/INJINU` is canonical until a second creator uses
+   * the ticker, at which point `/launch/INJINU-1` becomes canonical instead. A 308 is
+   * cached by browsers for ever, so it would promise something this page cannot keep.
+   * `rel="canonical"` in the metadata is what tells a crawler which form to index.
+   */
+  if (resolved && canonical) redirect(pathForSlug(canonical));
+
+  /*
+   * A ticker two creators both used. The page lists them instead of choosing: sending
+   * someone to a different token than the one they were linked to is the worst thing
+   * a launchpad can do with a URL, and it would look like it worked.
+   */
+  if (!resolved && candidates.length > 1) {
+    return (
+      <div className="empty">
+        <h1>{symbolOf(candidates[0].denom)}</h1>
+        <p>
+          More than one launch uses this ticker. A ticker is not unique on Injective,
+          so pick the one you meant.
+        </p>
+        <ul className="plain-list" style={{ marginTop: 'var(--space-4)' }}>
+          {candidates.map((c) => (
+            <li key={c.id}>
+              <Link href={launchPath(c, board)}>
+                {symbolOf(c.denom)} by {short(c.creator)}
+              </Link>
+            </li>
+          ))}
+        </ul>
+      </div>
+    );
+  }
+
+  if (!resolved) notFound();
+
   let launch, detail, facts;
   try {
-    launch = await getLaunch(numericId);
+    launch = resolved;
     [detail, facts] = await Promise.all([
       getLaunchDetail(launch.curve),
       contractFacts(launch.curve, launch.denom),
@@ -210,7 +290,7 @@ export default async function LaunchPage({ params }: { params: Promise<{ id: str
       <CodeCheck status={codeStatus} curve={launch.curve} />
       <div className="share-row" style={{ margin: 'var(--space-4) 0' }}>
         <WatchButton id={launch.id} symbol={symbol} />
-        <ShareRow symbol={symbol} path={`/launch/${launch.id}`} />
+        <ShareRow symbol={symbol} path={launchPath(launch, board)} />
       </div>
 
       {links.length > 0 && (

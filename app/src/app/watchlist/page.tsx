@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import { DemoBanner } from '@/components/DemoBanner';
 import { WatchlistBoard } from '@/components/WatchlistBoard';
-import { loadRows, toRow } from '@/lib/boardRows';
+import { loadRows, toRows } from '@/lib/boardRows';
 import { isDevBuild } from '@/lib/config';
 
 export const dynamic = 'force-dynamic';
@@ -21,7 +21,7 @@ export default async function WatchlistPage() {
             {isDevBuild() && errorDetail && <code>{errorDetail}</code>}
           </div>
         ) : (
-          <WatchlistBoard rows={rows.map(toRow)} />
+          <WatchlistBoard rows={toRows(rows)} />
         )}
       </div>
     </>

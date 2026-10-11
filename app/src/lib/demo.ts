@@ -15,6 +15,7 @@
 import { EMPTY_PROFILE } from './tokenProfile.ts';
 import { NO_RULES } from './launchRules.ts';
 import { quoteBuy, type CurveConfig, type CurveState } from './curve.ts';
+import { fixedCurveFor, DEFAULT_FEE_BPS } from './launchLimits.ts';
 import type { Launch, LaunchDetail, Trade } from './chain.ts';
 
 /**
@@ -35,12 +36,16 @@ export function isDemoMode(): boolean {
   return process.env.NEXT_PUBLIC_DEMO === '1';
 }
 
+/*
+ * The real shape, not a restatement of it. This file's whole claim is that the demo
+ * is "internally consistent and the curve chart is a true projection of the config",
+ * which stops being true the moment the config here is a copy: it still held the
+ * pre-rescale 30/85 curve after launches moved to 60/170, so the demo board drew a
+ * steeper curve than any launch has.
+ */
 const BASE_CONFIG: CurveConfig = {
-  virtualInj: amt(30n),
-  virtualTokens: amt(1_073_000_000n),
-  curveSupply: amt(800_000_000n),
-  graduationTarget: amt(85n),
-  feeBps: 100n,
+  ...fixedCurveFor(18),
+  feeBps: BigInt(DEFAULT_FEE_BPS),
 };
 
 interface Seed {

@@ -1,6 +1,7 @@
 import type { MetadataRoute } from 'next';
 import { isDemoMode } from '@/lib/demo';
 import { listLaunches } from '@/lib/chain';
+import { launchPath } from '@/lib/launchPath';
 
 const SITE = process.env.NEXT_PUBLIC_SITE_URL?.trim() || 'https://injpad.vercel.app';
 
@@ -18,7 +19,16 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     const launches = await listLaunches(100);
     return [
       ...base,
-      ...launches.map((l) => ({ url: `${SITE}/launch/${l.id}`, changeFrequency: 'hourly' as const, priority: 0.8 })),
+      /*
+       * The canonical slug, resolved against the same list, so the sitemap submits
+       * the URL the page serves rather than the numeric form it redirects away from.
+       * A sitemap full of redirects is a sitemap a crawler discounts.
+       */
+      ...launches.map((l) => ({
+        url: `${SITE}${launchPath(l, launches)}`,
+        changeFrequency: 'hourly' as const,
+        priority: 0.8,
+      })),
     ];
   } catch {
     return base;

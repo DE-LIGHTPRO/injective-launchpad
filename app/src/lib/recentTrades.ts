@@ -26,6 +26,15 @@ export interface TickerTrade {
   quoteDecimals: number;
   quoteLabel: string;
   launchId: number;
+  /**
+   * The launch's canonical URL, carried through from the board.
+   *
+   * Not rebuilt here. Whether a ticker is ambiguous is a property of the whole
+   * board, and this feed only ever sees the newest handful of launches, so a path
+   * derived here could be shorter than the one the board links to for the same
+   * token.
+   */
+  launchPath: string;
   height: number;
   txHash: string;
 }
@@ -46,7 +55,7 @@ export interface Ticker {
  * worth delaying the board for.
  */
 export async function recentTrades(
-  launches: Array<{ id: number; curve: string; denom: string; quoteDecimals: number; quoteLabel: string }>,
+  launches: Array<{ id: number; curve: string; denom: string; path: string; quoteDecimals: number; quoteLabel: string }>,
   perLaunch = 5,
   limit = 8,
 ): Promise<Ticker> {
@@ -83,6 +92,7 @@ export async function recentTrades(
         quoteDecimals: launch.quoteDecimals,
         quoteLabel: launch.quoteLabel,
         launchId: launch.id,
+        launchPath: launch.path,
         height: t.height,
         txHash: t.txHash,
       });

@@ -99,6 +99,10 @@ export interface LaunchInput {
   lpReserve: bigint;
   /** What buyers pay in. Absent means the factory's default. */
   quoteDenom?: string;
+  /** Sell fee in bps. Absent mirrors the buy fee, as the contract does. */
+  feeSellBps?: number;
+  /** Where the creator's share of each fee goes. */
+  rewardRoute?: 'creator' | 'pool';
   factory: string;
 }
 
@@ -315,6 +319,17 @@ export function planLaunch(input: LaunchInput): LaunchPlan {
                 ? { initial_buy: input.initialBuy.toString() }
                 : {}),
               fee_bps: Number(input.curve.feeBps),
+              /*
+               * Both omitted when they match the contract's own defaults, so the
+               * common launch sends the message it always did and nothing new has to
+               * be understood to read it.
+               */
+              ...(input.feeSellBps !== undefined && input.feeSellBps !== Number(input.curve.feeBps)
+                ? { fee_sell_bps: input.feeSellBps }
+                : {}),
+              ...(input.rewardRoute && input.rewardRoute !== 'creator'
+                ? { reward_route: input.rewardRoute }
+                : {}),
               /*
                * Omitted when it is the factory's default, so the common launch sends
                * the same message it always did and an older factory still accepts it.

@@ -18,7 +18,7 @@ export async function TradeTicker({
   launches,
   currentHeight,
 }: {
-  launches: Array<{ id: number; curve: string; denom: string; quoteDecimals: number; quoteLabel: string }>;
+  launches: Array<{ id: number; curve: string; denom: string; path: string; quoteDecimals: number; quoteLabel: string }>;
   currentHeight: number | null;
 }) {
   /*
@@ -49,7 +49,7 @@ export async function TradeTicker({
         {ticker.trades.map((t) => (
           <li key={t.txHash + t.symbol}>
             <span className={t.side === 'buy' ? 'side-buy' : 'side-sell'}>{t.side}</span>
-            <Link href={`/launch/${t.launchId}`} className="ticker-sym">
+            <Link href={t.launchPath} className="ticker-sym">
               {t.symbol}
             </Link>
             <span className="mono ticker-amt">

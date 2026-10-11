@@ -28,6 +28,8 @@ const row = (
 ): LaunchRow => ({
   id,
   denom: `factory/inj1pad/${sym}`,
+  // Selection and sorting have no opinion about the URL; the shape needs one.
+  path: `/launch/${sym}`,
   curveAddress: `inj1curve${id}`,
   quoteDenom: 'inj',
   quoteDecimals: 18,

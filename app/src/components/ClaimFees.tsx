@@ -6,6 +6,7 @@ import { listLaunches, getLaunchDetail, resolveQuote, symbolOf, type Quote } fro
 import { useConnectedAccount } from '@/lib/walletStore';
 import { fmt } from '@/lib/curve';
 import { selectClaimable, type ClaimRow } from '@/lib/claimable';
+import { launchPath } from '@/lib/launchPath';
 
 /**
  * Every fee this wallet can claim, in one place and one transaction.
@@ -34,6 +35,8 @@ import { selectClaimable, type ClaimRow } from '@/lib/claimable';
  */
 interface Claimable extends ClaimRow {
   quote: Quote;
+  /** The launch's canonical URL, resolved against the whole board. */
+  path: string;
 }
 
 export function ClaimFees() {
@@ -65,6 +68,10 @@ export function ClaimFees() {
               id: l.id,
               curve: l.curve,
               symbol: symbolOf(l.denom),
+              // Resolved against every launch, not just this creator's: a ticker
+              // clash with somebody else's launch is exactly the case the short
+              // slug cannot serve.
+              path: launchPath(l, launches),
               creator: d.creator,
               owed: d.creatorOwed,
               quoteDenom: d.quoteDenom,
@@ -153,7 +160,7 @@ export function ClaimFees() {
             {withFees.map((r) => (
               <div className="metric-row" key={r.id}>
                 <span className="k">
-                  <Link href={`/launch/${r.id}`}>{r.symbol}</Link>
+                  <Link href={r.path}>{r.symbol}</Link>
                 </span>
                 <span className="v mono">
                   {fmt(r.owed, r.quote.decimals, 6)} {r.quote.label}

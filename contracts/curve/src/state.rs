@@ -38,6 +38,11 @@ pub struct Config {
     /// custodian of every graduated launch. The liquidity now stays in this contract
     /// as a constant-product pool with no withdrawal path; see `launchpad_math::pool`.
     pub lp_reserve: Uint128,
+    /// Where the creator's share of each fee goes. Chosen at launch and immutable,
+    /// like everything else about a launch: a route a creator could flip mid-flight
+    /// would let them divert fees buyers had already been told went to the pool.
+    #[serde(default)]
+    pub reward_route: RewardRoute,
     /// Share of the trading fee that goes to the creator, in bps of the fee
     /// itself. The remainder goes to the platform.
     pub creator_fee_share_bps: u16,
@@ -62,7 +67,39 @@ pub struct CurveConfigStored {
     pub virtual_tokens: Uint128,
     pub curve_supply: Uint128,
     pub graduation_target: Uint128,
+    /// The BUY fee, in bps. Named `fee_bps` still because it is the field the maths
+    /// crate reads, and a sell quote is built by swapping `fee_sell_bps` into it.
     pub fee_bps: u16,
+    /// The SELL fee, in bps.
+    ///
+    /// SEPARATE FROM THE BUY FEE because the two sides are not the same decision. A
+    /// creator may want entry cheap and exit taxed, or the reverse, and one number
+    /// forced the symmetric choice. `#[serde(default)]` so a curve stored before this
+    /// field existed reads 0 rather than failing every query against it; those
+    /// launches charged one fee on both sides and the buy side still carries it.
+    #[serde(default)]
+    pub fee_sell_bps: u16,
+}
+
+/// Where a launch sends the creator's share of each fee.
+///
+/// NOT "TO HOLDERS", and the absence is the important part. Distributing to holders
+/// needs a holder list, and Injective answers `denom_owners` with not-implemented for
+/// a tokenfactory denom. The claim-based alternative is gameable: buy immediately
+/// before claiming, claim a share earned by other people's trades, sell. There is no
+/// honest version of it on this chain without an indexer and a snapshot.
+///
+/// `Pool` is the closest thing that IS honest. It holds the creator's share back and
+/// pairs it into the liquidity at graduation, which benefits everyone still holding
+/// rather than whoever happened to be holding at a snapshot.
+#[cw_serde]
+#[derive(Default, Copy)]
+pub enum RewardRoute {
+    /// The creator claims it. The default, and what every launch did before this.
+    #[default]
+    Creator,
+    /// Held for the pool and paired in at graduation.
+    Pool,
 }
 
 impl From<&CurveConfigStored> for CurveConfig {

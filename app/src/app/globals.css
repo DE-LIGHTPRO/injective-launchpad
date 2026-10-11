@@ -1957,6 +1957,10 @@ table.board .dim { color: var(--text-faint); }
 .trending { margin-bottom: var(--space-4); }
 .trending-head h2 { margin: 0 0 var(--space-1); }
 .trending-list { list-style: none; margin: var(--space-2) 0 0; padding: 0; }
+
+/* The ticker-clash chooser on a launch page: a plain stack of links, no markers. */
+.plain-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-2); }
+.plain-list a { color: var(--accent); }
 .trending-row {
   display: flex;
   align-items: center;
@@ -1995,3 +1999,14 @@ table.board .dim { color: var(--text-faint); }
   background: var(--accent);
   opacity: 0.75;
 }
+
+/*
+ * Launch preview. Visually distinct from the form above it: it is a restatement, not
+ * another set of fields, and a reader skimming back should not mistake one for the
+ * other.
+ */
+.preview-card { border-color: var(--accent-deep); }
+.preview-head { display: flex; align-items: center; gap: var(--space-3); margin-bottom: var(--space-3); min-width: 0; }
+.preview-head strong { display: block; font-size: var(--text-lg); }
+.preview-logo { width: 44px; height: 44px; border-radius: var(--radius-md); object-fit: cover; flex: none; }
+.preview-logo-empty { background: var(--glass-well); border: 1px dashed var(--line-strong); }

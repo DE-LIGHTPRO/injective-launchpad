@@ -37,7 +37,7 @@ const PER_LAUNCH = [
   'components/KingOfTheHill.tsx',
   'components/CurveChart.tsx',
   'components/PairPanels.tsx',
-  'app/launch/[id]/page.tsx',
+  'app/launch/[slug]/page.tsx',
 ];
 
 function stripComments(src: string): string {

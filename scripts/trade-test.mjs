@@ -1,25 +1,21 @@
 /**
- * Create a real launch from the command line, to prove the contracts work.
+ * One real trade on one real curve, with the fee split checked against the config.
  *
- * This exists to SEPARATE TWO QUESTIONS that are otherwise answered together:
+ *   node scripts/trade-test.mjs <curve-address> [quote-to-spend]
  *
- *   1. do the four messages compose a launch the chain accepts?
- *   2. does the browser's signing path encode them correctly?
+ * It buys, reads the curve's state before and after, and asserts the fee that was
+ * charged split in exactly the ratio the contract reports, rather than printing two
+ * numbers and leaving the reader to divide them. Then it claims, and checks the
+ * platform's bank balance actually moved: an owed counter going to zero is not
+ * evidence anybody was paid.
  *
- * The create page answers both at once, so a failure there is ambiguous: the
- * contract could be wrong, or `app/src/lib/broadcast.ts` could be. This answers only
- * the first, with the same four messages built the same way, signed by the deploy key
- * through the SDK's own broadcaster rather than through a wallet.
+ * THIS FILE'S DOCBLOCK USED TO DESCRIBE A DIFFERENT SCRIPT. It was copied from
+ * `create-test-launch.mjs` and never rewritten, so it told the reader this file
+ * creates a launch from four messages and documented a `--ticker` argument it does
+ * not take. A comment describing a control is part of the control.
  *
- * If this lands and the browser does not, the fault is the browser encoding. If
- * neither lands, it is the contract. That is worth one script.
- *
- *   node scripts/create-test-launch.mjs           # ticker defaults to TEST<n>
- *   node scripts/create-test-launch.mjs KAIJU 2   # ticker, and 2 INJ opening buy
- *
- * Needs INJ_MNEMONIC in scripts/.env.local, the same as deploy.mjs, and roughly
- * 2 INJ: Injective charges a 1 INJ tokenfactory denom creation fee, plus gas, plus
- * whatever opening buy is asked for.
+ * Needs INJ_MNEMONIC in scripts/.env.local (chmod 600), the same as deploy.mjs, and
+ * enough of the launch's quote to spend plus gas.
  */
 import { readFileSync, existsSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';

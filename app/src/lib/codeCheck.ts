@@ -1,5 +1,9 @@
 /**
- * Is this launch running the contract code we audited, with no key that can change it?
+ * Is this launch running the contract code this launchpad published, with no key
+ * that can change it?
+ *
+ * NOT AN AUDIT, and no string here may say it is. `docs/AUDIT.md` begins "Not a
+ * third-party audit". This compares three chain reads against configuration.
  *
  * WHY THE APP CHECKS. The factory admin can point FUTURE launches at a new curve code id
  * (`SetCurveCodeId`). That is how a fix ships, and it is also how a compromised admin
@@ -10,7 +14,7 @@
  *
  * Two independent facts, both read from `/cosmwasm/wasm/v1/contract/{addr}`:
  *   - `code_id` must be one of `NEXT_PUBLIC_CURVE_CODE_IDS` (comma separated, so an
- *     audited upgrade can be added without dropping launches on the previous version);
+ *     published upgrade can be added without dropping launches on the previous version);
  *   - `admin` must be empty, or the "locked forever" claim on the page is false.
  */
 
@@ -54,8 +58,8 @@ export function assessCurveCode(
   if (curve && facts.denomAdmin != null && facts.denomAdmin !== curve) {
     return { kind: 'mint-key-held', holder: facts.denomAdmin };
   }
-  // The admin check outranks the code id: audited code that someone can replace is
-  // not audited code for long.
+  // The admin check outranks the code id: known code that someone can replace is
+  // not known code for long.
   if (facts.admin.trim() !== '') return { kind: 'has-admin', admin: facts.admin };
   if (pinned.length === 0) return { kind: 'unpinned', codeId: facts.codeId };
   if (!pinned.includes(facts.codeId)) {

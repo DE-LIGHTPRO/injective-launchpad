@@ -16,7 +16,7 @@ use thiserror::Error;
 
 use curve::msg::ExecuteMsg as CurveExecuteMsg;
 use curve::msg::InstantiateMsg as CurveInstantiateMsg;
-use curve::state::{CurveConfigStored, LaunchRules};
+use curve::state::{RewardRoute, CurveConfigStored, LaunchRules};
 
 /// Every launch has exactly this many tokens, and a creator cannot change it.
 ///
@@ -63,6 +63,18 @@ pub const FIXED_TOTAL_SUPPLY: Uint128 = Uint128::new(1_000_000_000_000_000_000_0
 /// both sides nothing. That is their launch to make uneconomic.
 pub const CREATOR_FEE_SHARE_BPS: u16 = 7_000;
 
+/// The most a launch may charge per side, in bps.
+///
+/// 1_000 is 10%, applied to the buy fee and the sell fee independently, so a creator
+/// can price entry and exit differently and neither can exceed a tenth. Above that a
+/// "fee" stops being a cost and becomes a trap, and the launchpad's name is on every
+/// launch whether or not it set the number.
+///
+/// Zero is allowed on either side. A creator who wants free entry and a taxed exit,
+/// or the reverse, is making a real choice about their own launch; what they cannot
+/// do is make it unsellable.
+pub const MAX_FEE_BPS: u16 = 1_000;
+
 /// The curve every launch gets. Shape is policy; only the fee on it is chosen.
 ///
 /// WHY THE CREATOR DOES NOT PICK THIS. Fixing the supply was supposed to make market
@@ -105,8 +117,8 @@ pub const CREATOR_FEE_SHARE_BPS: u16 = 7_000;
 /// quote unit buys 34,612,903,225,806,451,612,903,226 tokens at 18, 8 and 6 decimals
 /// alike. Getting it wrong instead puts 1 USDC at 35,766,666,666,666 tokens, out by
 /// twelve orders of magnitude.
-pub const CURVE_VIRTUAL_QUOTE_WHOLE: u128 = 30;
-pub const CURVE_GRADUATION_QUOTE_WHOLE: u128 = 85;
+pub const CURVE_VIRTUAL_QUOTE_WHOLE: u128 = 60;
+pub const CURVE_GRADUATION_QUOTE_WHOLE: u128 = 170;
 
 /// Token-denominated, and therefore NOT scaled by the quote.
 ///
@@ -140,7 +152,7 @@ pub fn lp_reserve() -> Uint128 {
 /// Only the two QUOTE-denominated figures scale. `virtual_tokens` and `curve_supply`
 /// are token amounts and every token this factory launches is 18 decimals, so they
 /// are the same on every launch whatever it is priced in.
-pub fn fixed_curve(fee_bps: u16, quote_decimals: u8) -> CurveConfigStored {
+pub fn fixed_curve(fee_bps: u16, fee_sell_bps: u16, quote_decimals: u8) -> CurveConfigStored {
     let unit = quote_unit(quote_decimals);
     CurveConfigStored {
         virtual_inj: unit * Uint128::new(CURVE_VIRTUAL_QUOTE_WHOLE),
@@ -148,6 +160,7 @@ pub fn fixed_curve(fee_bps: u16, quote_decimals: u8) -> CurveConfigStored {
         curve_supply: Uint128::new(CURVE_SUPPLY),
         graduation_target: unit * Uint128::new(CURVE_GRADUATION_QUOTE_WHOLE),
         fee_bps,
+        fee_sell_bps,
     }
 }
 
@@ -252,6 +265,9 @@ pub enum FactoryError {
 
     #[error("token profile field `{field}` is invalid: {reason}")]
     BadProfile { field: String, reason: String },
+
+    #[error("the {side} fee is {got} bps; the maximum is {max}")]
+    FeeTooHigh { side: String, got: u16, max: u16 },
 
     #[error("quote asset `{denom}` is not allowed on this launchpad")]
     QuoteNotAllowed { denom: String },
@@ -480,9 +496,16 @@ pub enum ExecuteMsg {
     /// curve contract, so the factory never holds launch funds itself.
     CreateLaunch {
         denom: String,
-        /// The trading fee, in bps. The only number about the curve a creator picks:
-        /// its shape is `fixed_curve()` and is identical on every launch in a quote.
+        /// The BUY fee, in bps. Capped at `MAX_FEE_BPS`.
         fee_bps: u16,
+        /// The SELL fee, in bps. Capped separately, because entry and exit are not
+        /// the same decision. Absent means the same as the buy fee, which is what
+        /// every launch charged before the sides could differ.
+        #[serde(default)]
+        fee_sell_bps: Option<u16>,
+        /// Where the creator's share of each fee goes.
+        #[serde(default)]
+        reward_route: RewardRoute,
         /// What buyers pay with. Must be allowlisted; absent means the factory's
         /// default, which is what every launch before this field existed used.
         #[serde(default)]
@@ -624,6 +647,8 @@ pub fn execute(
         ExecuteMsg::CreateLaunch {
             denom,
             fee_bps,
+            fee_sell_bps,
+            reward_route,
             quote_denom,
             profile,
             rules,
@@ -634,6 +659,8 @@ pub fn execute(
             info,
             denom,
             fee_bps,
+            fee_sell_bps,
+            reward_route,
             quote_denom,
             profile,
             rules,
@@ -734,6 +761,8 @@ fn create_launch(
     info: MessageInfo,
     denom: String,
     fee_bps: u16,
+    fee_sell_bps: Option<u16>,
+    reward_route: RewardRoute,
     quote_denom: Option<String>,
     profile: TokenProfile,
     rules: LaunchRules,
@@ -772,7 +801,23 @@ fn create_launch(
         .may_load(deps.storage, &quote)?
         .ok_or_else(|| FactoryError::QuoteNotAllowed { denom: quote.clone() })?;
 
-    let curve = fixed_curve(fee_bps, quote_decimals);
+    /*
+     * BOTH SIDES CAPPED, INDEPENDENTLY. A creator pricing entry and exit differently
+     * is making a real choice about their own launch; what they cannot do is make it
+     * unsellable, which an uncapped sell fee does without ever looking like a block.
+     */
+    let sell_bps = fee_sell_bps.unwrap_or(fee_bps);
+    for (side, bps) in [("buy", fee_bps), ("sell", sell_bps)] {
+        if bps > MAX_FEE_BPS {
+            return Err(FactoryError::FeeTooHigh {
+                side: side.to_string(),
+                got: bps,
+                max: MAX_FEE_BPS,
+            });
+        }
+    }
+
+    let curve = fixed_curve(fee_bps, sell_bps, quote_decimals);
     let lp_reserve = lp_reserve();
     let parsed: CurveConfig = (&curve).into();
     parsed.validate()?;
@@ -923,6 +968,7 @@ fn create_launch(
         // the figure it was launched under, so a later change to this constant does
         // not re-price a launch that is already running.
         creator_fee_share_bps: CREATOR_FEE_SHARE_BPS,
+        reward_route,
         curve,
     };
 

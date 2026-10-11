@@ -13,14 +13,25 @@ import { isDemoMode } from '@/lib/demo';
 import { DemoBanner } from '@/components/DemoBanner';
 import { LaunchList } from '@/components/LaunchList';
 import { Hero, type HeroStats } from '@/components/Hero';
-import { loadRows, toRow, type Row } from '@/lib/boardRows';
+import { loadRows, toRow, toRows, type Row } from '@/lib/boardRows';
+import { launchPath } from '@/lib/launchPath';
 
 export const dynamic = 'force-dynamic';
 
 /**
- * The hero's figures, for the busiest quote. Summing across quotes would add 18- and
- * 6-decimal base units together, so with several quotes the per-quote totals rows
- * further down carry the rest.
+ * The hero's figures.
+ *
+ * COUNTS SPAN THE BOARD; MONEY DOES NOT. Summing amounts across quotes would add
+ * 18-decimal INJ to 6-decimal USDC, and there is no oracle here to convert with, so
+ * the two money figures cover the busiest quote and SAY SO through `moneyQuote`. The
+ * per-quote panels further down carry the rest.
+ *
+ * `graduated` used to be scoped to that one quote as well, which put a figure meaning
+ * "graduated among the launches priced in E2EUSD" under the bare label "Graduated",
+ * next to a board-wide launch count. It was right by coincidence on a two-launch
+ * board and would have understated the moment a second pair graduated anything. A
+ * count of launches is comparable across pairs, which is the same reasoning the
+ * trending strip is built on, so it is counted over every row.
  */
 function heroStats(rows: Row[]): HeroStats | null {
   if (rows.length === 0) return null;
@@ -41,8 +52,10 @@ function heroStats(rows: Row[]): HeroStats | null {
   return {
     launches: rows.length,
     liquidity: `${compact(t.raised, decimals)} ${label}`,
-    graduated: t.graduated,
+    graduated: rows.filter((r) => r.graduated).length,
     paidToCreators: `${compact(t.paidToCreators, decimals)} ${label}`,
+    // Named only when it is a scope rather than the whole board.
+    moneyQuote: counts.size > 1 ? label : null,
   };
 }
 
@@ -130,6 +143,9 @@ export default async function Home() {
               id: r.launch.id,
               curve: r.launch.curve,
               denom: r.launch.denom,
+              // Resolved against the whole board, not against the eight the ticker
+              // covers, so it matches the link the grid below uses.
+              path: launchPath(r.launch, rows.map((x) => x.launch)),
               quoteDecimals: r.quoteDecimals,
               quoteLabel: r.quoteLabel,
             }))}
@@ -220,18 +236,18 @@ export default async function Home() {
             const counts = new Map<string, number>();
             for (const r of rows) counts.set(r.quoteDenom, (counts.get(r.quoteDenom) ?? 0) + 1);
             const biggest = [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
-            const forHill = rows.filter((r) => r.quoteDenom === biggest).map(toRow);
+            const forHill = rows.filter((r) => r.quoteDenom === biggest).map((r) => toRow(r, rows));
             return (
               <KingOfTheHill rows={forHill} nowSeconds={Math.floor(Date.now() / 1000)} />
             );
           })()}
 
-          <PairPanels rows={rows.map(toRow)} />
+          <PairPanels rows={toRows(rows)} />
 
           <div className="section-head" id="board">
             <h2>All launches</h2>
           </div>
-          <LaunchList rows={rows.map(toRow)} />
+          <LaunchList rows={toRows(rows)} />
         </>
       )}
 

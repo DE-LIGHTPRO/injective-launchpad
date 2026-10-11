@@ -23,7 +23,9 @@ export function TrustBadges({
     'Fixed supply',
     'No upgrade key',
     migrated ? 'Liquidity locked' : 'Liquidity locks at graduation',
-    ...(status.kind === 'verified' ? [`Audited code ${status.codeId}`] : []),
+    // "Verified", never "audited": this compares the deployed code id against the one
+    // this launchpad published. No third party has reviewed it. See `CodeCheck`.
+    ...(status.kind === 'verified' ? [`Verified code ${status.codeId}`] : []),
   ];
   return (
     <ul className="trust" aria-label="Verified on chain">

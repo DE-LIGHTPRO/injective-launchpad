@@ -63,7 +63,7 @@ export function PairPanels({ rows }: { rows: LaunchRow[] }) {
                 </span>
               </div>
               {top.map((r) => (
-                <Link key={r.id} href={`/launch/${r.id}`} className="pairs-row">
+                <Link key={r.id} href={r.path} className="pairs-row">
                   <TokenLogo profile={r.profile} symbol={symbolOf(r.denom)} size={24} />
                   <strong>{symbolOf(r.denom)}</strong>
                   {/*

@@ -52,7 +52,7 @@ export function Trending({
       <ol className="trending-list">
         {ranked.map(({ row: r, n }, i) => (
           <li key={r.id}>
-            <Link href={`/launch/${r.id}`} className="trending-row">
+            <Link href={r.path} className="trending-row">
               <span className="trending-rank mono">{i + 1}</span>
               <TokenLogo profile={r.profile} symbol={symbolOf(r.denom)} size={24} />
               <strong>{symbolOf(r.denom)}</strong>

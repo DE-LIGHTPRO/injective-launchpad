@@ -84,7 +84,8 @@ export function isLcdConfigured(): boolean {
 }
 
 /**
- * Curve code ids the operator has audited, comma separated. The launch page refuses to
+ * Curve code ids the operator has published and vouches for, comma separated. NOT an
+ * audit: see `codeCheck.ts`. The launch page refuses to
  * offer trading on a curve running anything else. Empty means not pinned (pre-audit).
  */
 export function getPinnedCurveCodeIdsRaw(): string {

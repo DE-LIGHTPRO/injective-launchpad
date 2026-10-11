@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { LogoUpload } from './LogoUpload';
+import { LaunchPreview } from './LaunchPreview';
 import { listQuotes, denomLabel, quoteLabel as quoteLabelOf, type QuoteAsset } from '@/lib/chain';
 import { CurveChart } from './CurveChart';
 import {
@@ -26,6 +27,9 @@ import {
   CREATOR_FEE_SHARE_BPS,
   PLATFORM_FEE_SHARE_BPS,
   MAX_INITIAL_BUY_BPS,
+  MAX_FEE_BPS,
+  DEFAULT_FEE_BPS,
+  REWARD_ROUTES,
   initialBuyCeiling,
   fixedCurveFor,
   FIXED_LP_RESERVE,
@@ -81,7 +85,15 @@ const DEFAULTS = {
   openingFeePct: '',
   openingFeeMins: '10',
   initialBuy: '',
-  feeBps: '100',
+  /*
+   * PERCENT, not basis points. These read '100' when the field took bps, and the
+   * field now takes percent: left alone the form would have defaulted every launch
+   * to a 100% fee, refused by the cap but only after the creator had filled the
+   * whole form.
+   */
+  feeBps: String(DEFAULT_FEE_BPS / 100),
+  feeSellBps: String(DEFAULT_FEE_BPS / 100),
+  rewardRoute: 'creator',
 };
 
 export function CreateLaunch() {
@@ -140,7 +152,7 @@ export function CreateLaunch() {
    * `virtual_tokens` is not, and asking for it directly is how a launch gets a
    * shape nobody intended.
    */
-  const built = useMemo((): { curve: CurveConfig; lpReserve: bigint } | { error: string } => {
+  const built = useMemo((): { curve: CurveConfig; lpReserve: bigint; feeSellBps: number } | { error: string } => {
     /*
      * The curve is POLICY, not input. It used to be derived from four numbers the
      * creator typed, and fixing the supply was supposed to make market caps
@@ -156,13 +168,33 @@ export function CreateLaunch() {
      * The fee stays a choice: it is a cost, badged per card, and it does not make two
      * launches incomparable the way a different price curve does.
      */
-    if (f.feeBps.trim() === '') return { error: 'Enter the trading fee.' };
-    const feeBps = Number(f.feeBps);
-    if (!Number.isInteger(feeBps) || feeBps < 0 || feeBps > 1_000) {
-      return { error: 'The trading fee is a whole number of basis points, 0 to 1000.' };
-    }
+    /*
+     * PERCENTAGES IN, BASIS POINTS OUT, converted once. A creator thinks in percent
+     * and the contract takes bps, and doing the conversion in two places is how the
+     * number shown and the number sent drift apart.
+     *
+     * `Math.round` on the product, not on the input: 0.05% is 5 bps, and parsing the
+     * percent as an integer would refuse every fraction of a percent a creator might
+     * reasonably want.
+     */
+    const asBps = (pct: string, label: string): number | { error: string } => {
+      if (pct.trim() === '') return { error: `Enter the ${label} fee.` };
+      const n = Number(pct);
+      if (!Number.isFinite(n) || n < 0) return { error: `The ${label} fee cannot be negative.` };
+      const bps = Math.round(n * 100);
+      if (bps > MAX_FEE_BPS) {
+        return { error: `The ${label} fee is ${n}%. The most a launch may charge is ${MAX_FEE_BPS / 100}%.` };
+      }
+      return bps;
+    };
+    const buy = asBps(f.feeBps, 'buy');
+    if (typeof buy !== 'number') return buy;
+    const sell = asBps(f.feeSellBps, 'sell');
+    if (typeof sell !== 'number') return sell;
+    const feeBps = buy;
     // In the chosen pair's own units, as the factory will build it.
     const curve: CurveConfig = { ...fixedCurveFor(quoteDecimals), feeBps: BigInt(feeBps) };
+    const feeSellBps = sell;
     try {
       // Still validated. The constants are hand-written, and a typo in one would
       // otherwise draw a chart for a curve no launch can actually have.
@@ -170,7 +202,7 @@ export function CreateLaunch() {
     } catch (e) {
       return { error: (e as Error).message };
     }
-    return { curve, lpReserve: FIXED_LP_RESERVE };
+    return { curve, lpReserve: FIXED_LP_RESERVE, feeSellBps };
   }, [f, quoteDecimals]);
 
 
@@ -282,6 +314,8 @@ export function CreateLaunch() {
           curve: built.curve,
           lpReserve: built.lpReserve,
           quoteDenom: quoteDenom ?? undefined,
+          feeSellBps: built.feeSellBps,
+          rewardRoute: f.rewardRoute as 'creator' | 'pool',
           factory,
         }),
       };
@@ -576,12 +610,68 @@ export function CreateLaunch() {
         </div>
 
         <div className="field-row">
+          {/*
+              TWO FEES, because entry and exit are not the same decision. Shown as
+              percentages because that is how a creator thinks about a fee and how
+              every other launchpad states it; the contract takes bps and the
+              conversion happens once, here.
+            */}
           <div className="field">
             <label htmlFor="cl-fee">
-              Trading fee <span className="hint">bps, max 1000</span>
+              Buy fee <span className="hint">%, up to {MAX_FEE_BPS / 100}</span>
             </label>
-            <input id="cl-fee" value={f.feeBps} onChange={(e) => set('feeBps')(e.target.value)} inputMode="numeric" />
+            <input
+              id="cl-fee"
+              value={f.feeBps}
+              onChange={(e) => set('feeBps')(e.target.value)}
+              inputMode="decimal"
+            />
           </div>
+          <div className="field">
+            <label htmlFor="cl-fee-sell">
+              Sell fee <span className="hint">%, up to {MAX_FEE_BPS / 100}</span>
+            </label>
+            <input
+              id="cl-fee-sell"
+              value={f.feeSellBps}
+              onChange={(e) => set('feeSellBps')(e.target.value)}
+              inputMode="decimal"
+            />
+          </div>
+          <div className="field">
+            <span className="field-label">
+              Your share goes <span className="hint">set once, cannot change</span>
+            </span>
+            <div className="segmented" role="group" aria-label="Where your fee share goes">
+              {REWARD_ROUTES.map((r) => (
+                <button
+                  key={r.value}
+                  type="button"
+                  aria-pressed={f.rewardRoute === r.value}
+                  onClick={() => set('rewardRoute')(r.value)}
+                >
+                  {r.label}
+                </button>
+              ))}
+            </div>
+            <p className="note">
+              {REWARD_ROUTES.find((r) => r.value === f.rewardRoute)?.detail}
+            </p>
+            {/*
+                NOT "to holders", and the absence is deliberate. Paying holders needs
+                a holder list, and Injective answers `denom_owners` with
+                not-implemented for a tokenfactory denom; a claim-based version is
+                gameable by buying immediately before claiming. The pool is the
+                honest version: it benefits everyone still holding rather than
+                whoever happened to hold at a snapshot.
+              */}
+            <p className="note">
+              Paying holders directly is not possible on Injective: a token transfer
+              runs no contract code, so nothing can see who holds what. The pool is
+              the closest honest version.
+            </p>
+          </div>
+
           {quotes !== null && quotes.quotes.length > 1 && (
             <div className="field">
               <label htmlFor="cl-quote">
@@ -813,6 +903,35 @@ export function CreateLaunch() {
           is every trade it settles, which is every trade until graduation.
         </p>
       </div>
+
+      {/*
+          THE PREVIEW SITS ABOVE SIGN, not beside the fields. A launch is immutable,
+          and until now the only way to check it was to scroll back up and reread the
+          boxes you filled in yourself, which is the worst way to catch a mistake in
+          them. It renders only when the form is coherent: a preview of an invalid
+          launch would show figures the contract will never accept.
+        */}
+      {!('error' in built) && (
+        <LaunchPreview
+          symbol={f.symbol}
+          name={f.name}
+          description={f.description}
+          image={f.image}
+          quoteLabel={quoteLabel}
+          buyFeePct={Number(built.curve.feeBps) / 100}
+          sellFeePct={built.feeSellBps / 100}
+          rewardRoute={f.rewardRoute as 'creator' | 'pool'}
+          rules={builtRules}
+          openingBuy={devBuy}
+          openingBuyShare={devBuyPreview?.share ?? null}
+          profile={{
+            image: f.image || null,
+            website: f.website || null,
+            x: f.x || null,
+            telegram: f.telegram || null,
+          }}
+        />
+      )}
 
       <div className="card">
         <h2>Sign</h2>

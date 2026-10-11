@@ -50,6 +50,15 @@ export interface ActivityIndex {
 export interface LaunchRow {
   id: number;
   denom: string;
+  /**
+   * Where this launch lives, resolved against the whole board by `toRow`.
+   *
+   * On the row rather than built at each link, because the slug's short form is only
+   * safe when no other launch shares the ticker, and a component rendering a filtered
+   * list cannot know that. Eight components linked to launches; each building its own
+   * path is eight chances for two of them to disagree about the same token's URL.
+   */
+  path: string;
   creator: string;
   /** Base units as a decimal string: bigints are not serialisable as props. */
   raised: string;

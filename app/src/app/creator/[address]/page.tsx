@@ -108,7 +108,7 @@ export default async function CreatorPage({ params }: { params: Promise<{ addres
               <p>This address has not launched anything here.</p>
             </div>
           ) : (
-            <LaunchList rows={mine.map(toRow)} />
+            <LaunchList rows={mine.map((r) => toRow(r, rows))} />
           )}
         </>
       )}

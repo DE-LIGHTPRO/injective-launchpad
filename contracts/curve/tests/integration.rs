@@ -51,6 +51,7 @@ fn curve_cfg() -> CurveConfigStored {
         curve_supply: amt(800_000_000),
         graduation_target: amt(85),
         fee_bps: 100,
+        fee_sell_bps: 100,
     }
 }
 
@@ -103,6 +104,7 @@ fn setup_with(rules: LaunchRules) -> Fixture {
                 lp_reserve: lp_reserve(),
                 creator_fee_share_bps: 5_000, // half the fee to the creator
                 curve: curve_cfg(),
+                reward_route: Default::default(),
             },
             &coins((curve_cfg().curve_supply + lp_reserve()).u128(), TOKEN),
             "curve",
@@ -199,6 +201,7 @@ fn seeding_requires_the_exact_supply() {
             lp_reserve: Uint128::zero(),
             creator_fee_share_bps: 0,
             curve: curve_cfg(),
+            reward_route: Default::default(),
         },
         &coins(amt(1).u128(), TOKEN),
         "curve",

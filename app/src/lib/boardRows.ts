@@ -9,6 +9,7 @@ import { graduationProgress, type CurveConfig } from './curve.ts';
 import { NETWORK } from './config.ts';
 import type { LaunchRules } from './launchRules.ts';
 import type { LaunchRow } from '../components/LaunchList.tsx';
+import { launchPath } from './launchPath.ts';
 
 export interface Row {
   launch: Launch;
@@ -25,6 +26,11 @@ export interface Row {
   quoteDenom: string;
   quoteDecimals: number;
   quoteLabel: string;
+}
+
+/** Every row, with each one's path resolved against all of them. */
+export function toRows(all: Row[]): LaunchRow[] {
+  return all.map((r) => toRow(r, all));
 }
 
 export async function loadRows(): Promise<{ rows: Row[]; error?: string; errorDetail?: string }> {
@@ -96,10 +102,21 @@ export async function loadRows(): Promise<{ rows: Row[]; error?: string; errorDe
  * passing it as a Number would silently lose precision at 18 decimals, which is
  * the quieter failure and the worse one.
  */
-export function toRow(r: Row): LaunchRow {
+/**
+ * A board row's view model, including the URL the launch lives at.
+ *
+ * THE PATH IS COMPUTED HERE, from `all`, and that is the point of the second
+ * argument. Whether `/launch/INJINU` is unambiguous is a property of the whole
+ * board, not of the launch or of whichever subset a component happens to be
+ * rendering, so a component holding a filtered list cannot work it out. Computing it
+ * once, where the full list exists, is what stops the creator page and the watchlist
+ * from emitting a shorter slug than the board does for the same token.
+ */
+export function toRow(r: Row, all: Row[]): LaunchRow {
   return {
     id: r.launch.id,
     denom: r.launch.denom,
+    path: launchPath(r.launch, all.map((x) => x.launch)),
     curveAddress: r.launch.curve,
     quoteDenom: r.quoteDenom,
     quoteDecimals: r.quoteDecimals,

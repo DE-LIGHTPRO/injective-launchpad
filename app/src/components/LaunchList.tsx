@@ -293,7 +293,7 @@ export function LaunchList({ rows }: { rows: LaunchRow[] }) {
                       <div className="tok">
                         <TokenLogo profile={r.profile} symbol={symbolOf(r.denom)} size={32} />
                         <div className="tok-text">
-                          <Link href={`/launch/${r.id}`} className="row-link">
+                          <Link href={r.path} className="row-link">
                             {symbolOf(r.denom)}
                           </Link>
                           <span className="tok-sub">

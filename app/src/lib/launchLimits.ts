@@ -95,10 +95,10 @@ export function initialBuyCeiling(curveSupply: bigint): bigint {
  * opens at the same price."
  */
 export const FIXED_CURVE = {
-  virtualInj: 30_000_000_000_000_000_000n,
+  virtualInj: 60_000_000_000_000_000_000n,
   virtualTokens: 1_073_000_000_000_000_000_000_000_000n,
   curveSupply: 800_000_000_000_000_000_000_000_000n,
-  graduationTarget: 85_000_000_000_000_000_000n,
+  graduationTarget: 170_000_000_000_000_000_000n,
 } as const;
 
 /**
@@ -123,5 +123,47 @@ export const FIXED_LP_RESERVE = FIXED_TOTAL_SUPPLY - FIXED_CURVE.curveSupply;
 /** Whole-token and whole-quote forms, for copy that should not print 27 digits. */
 export const CURVE_SUPPLY_TOKENS = 800_000_000;
 export const LP_RESERVE_TOKENS = 200_000_000;
-export const OPENING_RESERVE_QUOTE = 30;
-export const GRADUATION_TARGET_QUOTE = 85;
+export const OPENING_RESERVE_QUOTE = 60;
+export const GRADUATION_TARGET_QUOTE = 170;
+
+/**
+ * The most a launch may charge per side, in bps.
+ *
+ * Mirrors `MAX_FEE_BPS` in `contracts/factory/src/lib.rs`. 10%, applied to the buy
+ * fee and the sell fee independently.
+ */
+export const MAX_FEE_BPS = 1_000;
+
+/**
+ * What the create form starts a launch's fee at, per side, in bps.
+ *
+ * Here rather than inline in the form because the homepage hero quotes a trade on
+ * the default launch, so the two have to agree or the hero prices a launch nobody
+ * gets. The same duplication, in the curve's own shape, is what made that hero
+ * advertise an 88 INJ graduation after the curve moved to 170.
+ */
+export const DEFAULT_FEE_BPS = 100;
+
+/** Where the creator's share of each fee goes. Mirrors the contract's enum. */
+export type RewardRoute = 'creator' | 'pool';
+
+/**
+ * The route as the contract spells it.
+ *
+ * `cw_serde` renders a unit variant as a lowercase string, so `creator` and `pool`
+ * cross the wire exactly as typed here. Getting the casing wrong is refused as an
+ * unknown variant rather than silently defaulting, which is the good failure.
+ */
+export const REWARD_ROUTES: Array<{ value: RewardRoute; label: string; detail: string }> = [
+  {
+    value: 'creator',
+    label: 'To you',
+    detail: 'Your 70% accrues on the launch and you claim it whenever you like.',
+  },
+  {
+    value: 'pool',
+    label: 'To the pool',
+    detail:
+      'Your 70% is held back and paired into the liquidity at graduation, deepening the market everyone trades in. You keep nothing from the fee.',
+  },
+];

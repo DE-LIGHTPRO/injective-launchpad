@@ -450,8 +450,9 @@ test('a 6-decimal launch has a real market cap and price, not zero', () => {
   const cfg = { ...fixedCurveFor(6), feeBps: 100n };
   const st = { injCollected: 0n, tokensSold: 0n, graduated: false };
   const mc = marketCapExact(cfg, st, null, FIXED_TOTAL_SUPPLY);
-  // 30 * 1B / 1.073B = 27.959 whole units, the same figure an INJ launch shows.
-  assert.equal(mc, 27_958_993n, `market cap ${mc}`);
+  // 60 * 1B / 1.073B = 55.919 whole units, the same figure an INJ launch shows.
+  // It doubled with the opening reserve when the curve was scaled 30/85 -> 60/170.
+  assert.equal(mc, 55_917_986n, `market cap ${mc}`);
   const wad = spotPriceWad(cfg, st, null, ONE);
   assert.ok(wad > 0n, 'the wad price must not floor to zero');
   // Same shape as INJ: identical price once each is read at its own decimals.
@@ -462,7 +463,7 @@ test('a 6-decimal launch has a real market cap and price, not zero', () => {
 
 test('the 18-decimal fixed curve is exactly the factory constants', () => {
   const c = fixedCurveFor(18);
-  assert.equal(c.virtualInj, 30n * ONE);
-  assert.equal(c.graduationTarget, 85n * ONE);
-  assert.equal(fixedCurveFor(6).virtualInj, 30_000_000n);
+  assert.equal(c.virtualInj, 60n * ONE);
+  assert.equal(c.graduationTarget, 170n * ONE);
+  assert.equal(fixedCurveFor(6).virtualInj, 60_000_000n);
 });

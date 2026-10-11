@@ -149,7 +149,7 @@ export function Portfolio({ rows }: { rows: LaunchRow[] }) {
                   <div className="tok">
                     <TokenLogo profile={h.row.profile} symbol={symbolOf(h.row.denom)} size={32} />
                     <div className="tok-text">
-                      <Link href={`/launch/${h.row.id}`} className="row-link">
+                      <Link href={h.row.path} className="row-link">
                         {symbolOf(h.row.denom)}
                       </Link>
                       <span className="tok-sub">{h.row.graduated ? 'Graduated' : 'On the curve'}</span>

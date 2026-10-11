@@ -57,7 +57,7 @@ export function KingOfTheHill({ rows, nowSeconds }: { rows: LaunchRow[]; nowSeco
       </div>
 
       <div className="hill-grid">
-        <Link href={`/launch/${king.id}`} className="hill-king">
+        <Link href={king.path} className="hill-king">
           <div className="hill-crown">Holds the hill</div>
           <div className="hill-id">
             <TokenLogo profile={king.profile} symbol={symbolOf(king.denom)} size={44} />
@@ -97,7 +97,7 @@ export function KingOfTheHill({ rows, nowSeconds }: { rows: LaunchRow[]; nowSeco
 
         <div className="hill-rest">
           {rest.map((r, i) => (
-            <Link key={r.id} href={`/launch/${r.id}`} className="hill-row">
+            <Link key={r.id} href={r.path} className="hill-row">
               <span className="hill-rank mono">{i + 2}</span>
               <TokenLogo profile={r.profile} symbol={symbolOf(r.denom)} size={28} />
               <strong>{symbolOf(r.denom)}</strong>

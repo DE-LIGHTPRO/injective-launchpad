@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import { DemoBanner } from '@/components/DemoBanner';
 import { Portfolio } from '@/components/Portfolio';
-import { loadRows, toRow } from '@/lib/boardRows';
+import { loadRows, toRows } from '@/lib/boardRows';
 import { isDevBuild } from '@/lib/config';
 
 export const dynamic = 'force-dynamic';
@@ -21,7 +21,7 @@ export default async function PortfolioPage() {
             {isDevBuild() && errorDetail && <code>{errorDetail}</code>}
           </div>
         ) : (
-          <Portfolio rows={rows.map(toRow)} />
+          <Portfolio rows={toRows(rows)} />
         )}
       </div>
     </>

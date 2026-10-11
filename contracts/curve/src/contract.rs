@@ -11,7 +11,7 @@ use crate::msg::{
     ExecuteMsg, InstantiateMsg, QueryMsg, SimulateBuyResponse, SimulateSellResponse,
     SpotPriceResponse,
 };
-use crate::state::{PURCHASED, Config, State, CONFIG, STATE};
+use crate::state::{RewardRoute, PURCHASED, Config, State, CONFIG, STATE};
 
 const BPS: u128 = 10_000;
 
@@ -52,6 +52,7 @@ pub fn instantiate(
     }
 
     let cfg = Config {
+        reward_route: msg.reward_route,
         denom: msg.denom,
         quote_denom: msg.quote_denom,
         creator: deps.api.addr_validate(&msg.creator)?,
@@ -91,6 +92,32 @@ pub fn execute(
         ExecuteMsg::Graduate {} => exec_graduate(deps, env),
         ExecuteMsg::ClaimFees {} => exec_claim_fees(deps),
     }
+}
+
+/// Where the creator's share of a fee actually goes.
+///
+/// The platform's share is never routed: it is the launchpad's and the creator does
+/// not get to redirect it. Only the creator's own portion follows the route they
+/// chose at launch, which is the whole point of offering the choice.
+fn apply_route(state: &mut State, route: RewardRoute, creator_cut: Uint128) -> Result<(), ContractError> {
+    match route {
+        RewardRoute::Creator => {
+            state.creator_owed = state.creator_owed.checked_add(creator_cut)?;
+        }
+        RewardRoute::Pool => {
+            /*
+             * Into `lp_bonus`, the same place the opening-fee premium is held: quote
+             * kept out of `inj_collected` so it cannot move the curve, and paired
+             * into the liquidity at graduation.
+             *
+             * Deliberately NOT added to `inj_collected`. That figure is one side of
+             * the curve's invariant, and adding quote to it without issuing tokens
+             * would move every later price.
+             */
+            state.lp_bonus = state.lp_bonus.checked_add(creator_cut)?;
+        }
+    }
+    Ok(())
 }
 
 /// Split a fee between creator and platform. Creator's share rounds down, so
@@ -256,7 +283,7 @@ fn exec_buy(
     // Effects before interactions: state is written before any funds move.
     state.inj_collected = state.inj_collected.checked_add(q.inj_in_after_fee)?;
     state.tokens_sold = state.tokens_sold.checked_add(q.tokens_out)?;
-    state.creator_owed = state.creator_owed.checked_add(creator_cut)?;
+    apply_route(&mut state, cfg.reward_route, creator_cut)?;
     state.platform_owed = state.platform_owed.checked_add(platform_cut)?;
     state.lp_bonus = state.lp_bonus.checked_add(premium)?;
     let total_refund = q.refund.checked_add(carried_refund)?;
@@ -322,7 +349,14 @@ fn exec_sell(
     }
 
     let tokens_in = cw_utils::must_pay(&info, &cfg.denom)?;
-    let curve: CurveConfig = (&cfg.curve).into();
+    /*
+     * THE SELL FEE, not the buy fee. The maths crate takes one `fee_bps`, so the sell
+     * side swaps its own figure in rather than the crate growing a second field: the
+     * curve arithmetic is identical either way and only the skim differs.
+     */
+    let mut sell_cfg = cfg.curve.clone();
+    sell_cfg.fee_bps = cfg.curve.fee_sell_bps;
+    let curve: CurveConfig = (&sell_cfg).into();
     let q = quote_sell(&curve, &state.curve_state(), tokens_in)?;
 
     if q.inj_out < min_inj_out {
@@ -360,7 +394,7 @@ fn exec_sell(
     }
 
     state.tokens_sold = state.tokens_sold.checked_sub(tokens_in)?;
-    state.creator_owed = state.creator_owed.checked_add(creator_cut)?;
+    apply_route(&mut state, cfg.reward_route, creator_cut)?;
     state.platform_owed = state.platform_owed.checked_add(platform_cut)?;
     STATE.save(deps.storage, &state)?;
 
@@ -443,7 +477,7 @@ fn exec_pool_buy(
     let (creator_cut, platform_cut) = split_fee(q.fee, cfg.creator_fee_share_bps);
     state.pool_quote = state.pool_quote.checked_add(q.quote_in_after_fee)?;
     state.pool_tokens = state.pool_tokens.checked_sub(q.tokens_out)?;
-    state.creator_owed = state.creator_owed.checked_add(creator_cut)?;
+    apply_route(&mut state, cfg.reward_route, creator_cut)?;
     state.platform_owed = state.platform_owed.checked_add(platform_cut)?;
     STATE.save(deps.storage, &state)?;
 
@@ -479,7 +513,7 @@ fn exec_pool_sell(
     let (creator_cut, platform_cut) = split_fee(q.fee, cfg.creator_fee_share_bps);
     state.pool_quote = state.pool_quote.checked_sub(gross)?;
     state.pool_tokens = state.pool_tokens.checked_add(tokens_in)?;
-    state.creator_owed = state.creator_owed.checked_add(creator_cut)?;
+    apply_route(&mut state, cfg.reward_route, creator_cut)?;
     state.platform_owed = state.platform_owed.checked_add(platform_cut)?;
     STATE.save(deps.storage, &state)?;
 
@@ -630,6 +664,7 @@ mod tests {
             curve_supply: Uint128::new(800_000_000 * ONE),
             graduation_target: Uint128::new(85 * ONE),
             fee_bps: 100,
+            fee_sell_bps: 100,
         }
     }
 
@@ -655,6 +690,7 @@ mod tests {
             lp_reserve: Uint128::new(LP_RESERVE),
             creator_fee_share_bps: 2_000,
             curve: curve_cfg(),
+            reward_route: Default::default(),
         };
         let info = message_info(&who, &[coin(seed, TOKEN)]);
         instantiate(deps.as_mut(), mock_env(), info, msg).expect("instantiate");
@@ -678,6 +714,7 @@ mod tests {
             lp_reserve: Uint128::zero(),
             creator_fee_share_bps: 0,
             curve: curve_cfg(),
+            reward_route: Default::default(),
         };
         let info = message_info(&who, &[coin(1, QUOTE)]);
         let err = instantiate(deps.as_mut(), mock_env(), info, msg).unwrap_err();

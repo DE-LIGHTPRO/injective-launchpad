@@ -266,6 +266,8 @@ impl Fx {
                 &ExecuteMsg::CreateLaunch {
                     denom: denom.into(),
                     fee_bps: 100,
+                    fee_sell_bps: None,
+                    reward_route: Default::default(),
                 quote_denom: None,
                     profile,
                     rules,
@@ -304,6 +306,8 @@ impl Fx {
                     profile: Default::default(),
                     rules: Default::default(),
                     initial_buy: None,
+                    fee_sell_bps: None,
+                    reward_route: Default::default(),
                 },
                 &coins(seed_total().u128(), denom),
             )
@@ -400,6 +404,8 @@ fn wrong_seed_amount_is_refused() {
             initial_buy: None,
             denom: TOKEN.into(),
             fee_bps: 100,
+            fee_sell_bps: None,
+            reward_route: Default::default(),
                 quote_denom: None,
         },
         &coins(amt(1).u128(), TOKEN), // nowhere near the required seed
@@ -419,7 +425,7 @@ fn the_policy_curve_can_actually_reach_its_graduation_target() {
      * is stalled by design, with no caller to blame and nothing refusing it. So the
      * assertion is against the constants themselves.
      */
-    let curve: launchpad_math::CurveConfig = (&factory::fixed_curve(100, 18)).into();
+    let curve: launchpad_math::CurveConfig = (&factory::fixed_curve(100, 100, 18)).into();
     let ceiling = curve.max_collectable().expect("the policy curve cannot be priced");
     assert!(
         curve.graduation_target <= ceiling,
@@ -830,6 +836,8 @@ fn an_initial_buy_sends_the_tokens_to_the_creator_not_the_factory() {
             &ExecuteMsg::CreateLaunch {
                 denom: TOKEN.into(),
                 fee_bps: 100,
+                fee_sell_bps: None,
+                reward_route: Default::default(),
                 quote_denom: None,
                 profile: Default::default(),
                 rules: Default::default(),
@@ -882,6 +890,8 @@ fn the_attached_quote_must_match_the_declared_initial_buy() {
             &ExecuteMsg::CreateLaunch {
                 denom: TOKEN.into(),
                 fee_bps: 100,
+                fee_sell_bps: None,
+                reward_route: Default::default(),
                 quote_denom: None,
                 profile: Default::default(),
                 rules: Default::default(),
@@ -905,6 +915,8 @@ fn a_launch_with_no_initial_buy_still_takes_exactly_the_seed() {
         &ExecuteMsg::CreateLaunch {
             denom: TOKEN.into(),
             fee_bps: 100,
+            fee_sell_bps: None,
+            reward_route: Default::default(),
                 quote_denom: None,
             profile: Default::default(),
             rules: Default::default(),
@@ -930,6 +942,8 @@ fn a_third_denom_is_refused_rather_than_kept() {
         &ExecuteMsg::CreateLaunch {
             denom: TOKEN.into(),
             fee_bps: 100,
+            fee_sell_bps: None,
+            reward_route: Default::default(),
                 quote_denom: None,
             profile: Default::default(),
             rules: Default::default(),
@@ -962,6 +976,8 @@ fn the_factory_refuses_a_bad_seed_itself_rather_than_leaving_it_to_the_curve() {
         &ExecuteMsg::CreateLaunch {
             denom: TOKEN.into(),
             fee_bps: 100,
+            fee_sell_bps: None,
+            reward_route: Default::default(),
                 quote_denom: None,
             profile: Default::default(),
             rules: Default::default(),
@@ -1025,10 +1041,10 @@ fn every_launch_gets_the_same_curve_and_the_same_supply() {
     f.create(TOKEN).unwrap();
 
     let cfg = curve_config(&f, 1);
-    assert_eq!(cfg.curve.virtual_inj, amt(30), "opening reserve is not policy");
+    assert_eq!(cfg.curve.virtual_inj, amt(60), "opening reserve is not policy");
     assert_eq!(cfg.curve.virtual_tokens, amt(1_073_000_000));
     assert_eq!(cfg.curve.curve_supply, amt(800_000_000));
-    assert_eq!(cfg.curve.graduation_target, amt(85));
+    assert_eq!(cfg.curve.graduation_target, amt(170));
     assert_eq!(cfg.lp_reserve, amt(200_000_000));
     assert_eq!(
         cfg.curve.curve_supply + cfg.lp_reserve,
@@ -1143,6 +1159,8 @@ fn create_with_dev_buy(f: &mut Fx, denom: &str, spend: Uint128) -> Result<(), St
             &ExecuteMsg::CreateLaunch {
                 denom: denom.into(),
                 fee_bps: 100,
+                fee_sell_bps: None,
+                reward_route: Default::default(),
                 quote_denom: None,
                 profile: Default::default(),
                 rules: Default::default(),
@@ -1163,7 +1181,7 @@ fn a_creator_cannot_take_the_curve_in_their_own_opening_buy() {
      * address could see the token existed. 40 INJ against this curve takes 76.31% of
      * the supply, measured.
      */
-    let err = create_with_dev_buy(&mut f, TOKEN, amt(40)).expect_err("the dev took the curve");
+    let err = create_with_dev_buy(&mut f, TOKEN, amt(80)).expect_err("the dev took the curve");
     assert!(
         err.contains("the most a creator may take"),
         "the refusal does not name the cap: {err}"
@@ -1175,7 +1193,7 @@ fn a_modest_opening_buy_is_still_allowed() {
     let mut f = setup();
     // 1 INJ takes 4.28% of supply on this curve, measured: comfortably inside the cap
     // and the sort of opening position a creator actually makes.
-    create_with_dev_buy(&mut f, TOKEN, amt(1)).unwrap();
+    create_with_dev_buy(&mut f, TOKEN, amt(2)).unwrap();
     let st: CurveState = f
         .app
         .wrap()
@@ -1196,12 +1214,12 @@ fn the_opening_buy_cap_is_a_share_of_the_curve_not_of_the_total_supply() {
      * other test still passed, because none used an amount between the two bases.
      *
      * 10% of the curve is 80,000,000 tokens and 10% of the total is 100,000,000. A
-     * 2.5 INJ opening buy takes 81,775,982 (measured), which sits between them.
+     * 5 INJ opening buy takes 81,775,982 (measured), which sits between them.
      *
      * The curve supply is the right basis because it is what is actually purchasable:
      * the reserve is held back for the pool and nobody can buy it.
      */
-    let between = amt(25) / Uint128::new(10);
+    let between = amt(5);
     let err = create_with_dev_buy(&mut f, TOKEN, between)
         .expect_err("a buy above 10% of the curve was accepted");
     assert!(
@@ -1243,7 +1261,7 @@ fn the_curve_shape_is_identical_at_every_quote_decimals() {
      */
     let mut outs = vec![];
     for dec in [18u8, 8, 6] {
-        let cfg: launchpad_math::CurveConfig = (&factory::fixed_curve(100, dec)).into();
+        let cfg: launchpad_math::CurveConfig = (&factory::fixed_curve(100, 100, dec)).into();
         let one_whole = Uint128::new(10u128.pow(dec as u32));
         let q = launchpad_math::quote_buy(
             &cfg,
@@ -1265,9 +1283,9 @@ fn the_curve_shape_is_identical_at_every_quote_decimals() {
 fn a_six_decimal_quote_scales_the_curve_rather_than_inheriting_eighteen() {
     // The specific disaster: 18-decimal constants against a 6-decimal quote put the
     // graduation target at 85 trillion USDC. It must be 85.
-    let c = factory::fixed_curve(100, 6);
-    assert_eq!(c.graduation_target, Uint128::new(85_000_000));
-    assert_eq!(c.virtual_inj, Uint128::new(30_000_000));
+    let c = factory::fixed_curve(100, 100, 6);
+    assert_eq!(c.graduation_target, Uint128::new(170_000_000));
+    assert_eq!(c.virtual_inj, Uint128::new(60_000_000));
     // Token amounts do NOT scale: every launched token is 18 decimals.
     assert_eq!(c.curve_supply, amt(800_000_000));
     assert_eq!(c.virtual_tokens, amt(1_073_000_000));
@@ -1284,6 +1302,8 @@ fn a_quote_nobody_allowlisted_is_refused() {
             &ExecuteMsg::CreateLaunch {
                 denom: TOKEN.into(),
                 fee_bps: 100,
+                fee_sell_bps: None,
+                reward_route: Default::default(),
                 quote_denom: Some(USDC.into()),
                 profile: Default::default(),
                 rules: Default::default(),
@@ -1316,6 +1336,8 @@ fn an_allowlisted_quote_launches_with_its_own_scale() {
             &ExecuteMsg::CreateLaunch {
                 denom: TOKEN.into(),
                 fee_bps: 100,
+                fee_sell_bps: None,
+                reward_route: Default::default(),
                 quote_denom: Some(USDC.into()),
                 profile: Default::default(),
                 rules: Default::default(),
@@ -1329,7 +1351,7 @@ fn an_allowlisted_quote_launches_with_its_own_scale() {
     assert_eq!(cfg.quote_denom, USDC, "the curve was given the wrong quote");
     assert_eq!(
         cfg.curve.graduation_target,
-        Uint128::new(85_000_000),
+        Uint128::new(170_000_000),
         "the curve kept 18-decimal constants against a 6-decimal quote"
     );
 }
@@ -1460,6 +1482,8 @@ fn create_with_buy(f: &mut Fx, rules: LaunchRules, spend: Uint128) -> anyhow::Re
             &ExecuteMsg::CreateLaunch {
                 denom: TOKEN.into(),
                 fee_bps: 100,
+                fee_sell_bps: None,
+                reward_route: Default::default(),
                 quote_denom: None,
                 profile: Default::default(),
                 rules,
@@ -1542,4 +1566,190 @@ fn a_quote_can_carry_a_display_symbol_and_bad_ones_are_refused() {
     let q: factory::QuotesResponse =
         f.app.wrap().query_wasm_smart(f.factory.clone(), &QueryMsg::Quotes {}).unwrap();
     assert_eq!(q.quotes.iter().find(|x| x.denom == hex).unwrap().symbol.as_deref(), Some("USDT"));
+}
+
+/*
+ * ---------------------------------------------------------------------------
+ * Per-side fees and reward routing.
+ * ---------------------------------------------------------------------------
+ */
+
+fn create_with_fees(
+    f: &mut Fx,
+    denom: &str,
+    buy: u16,
+    sell: Option<u16>,
+    route: curve::state::RewardRoute,
+) -> Result<(), String> {
+    f.app
+        .execute_contract(
+            f.creator.clone(),
+            f.factory.clone(),
+            &ExecuteMsg::CreateLaunch {
+                denom: denom.into(),
+                fee_bps: buy,
+                fee_sell_bps: sell,
+                reward_route: route,
+                quote_denom: None,
+                profile: Default::default(),
+                rules: Default::default(),
+                initial_buy: None,
+            },
+            &coins(seed_total().u128(), denom),
+        )
+        .map(|_| ())
+        .map_err(|e| format!("{e:#}"))
+}
+
+#[test]
+fn each_side_of_the_fee_is_capped_on_its_own() {
+    let mut f = setup();
+    /*
+     * Capped separately because entry and exit are not the same decision. A creator
+     * pricing them differently is making a real choice about their own launch; what
+     * they cannot do is make it unsellable, which an uncapped sell fee does without
+     * ever looking like a block.
+     */
+    let err = create_with_fees(&mut f, TOKEN, 1_001, None, Default::default())
+        .expect_err("a buy fee over 10% was accepted");
+    assert!(err.contains("buy fee is 1001 bps"), "unexpected: {err}");
+
+    let err = create_with_fees(&mut f, TOKEN, 100, Some(1_001), Default::default())
+        .expect_err("a sell fee over 10% was accepted");
+    assert!(err.contains("sell fee is 1001 bps"), "unexpected: {err}");
+}
+
+#[test]
+fn the_two_sides_can_differ_and_either_may_be_free() {
+    let mut f = setup();
+    // Free entry, taxed exit is a legitimate shape and must not be refused.
+    create_with_fees(&mut f, TOKEN, 0, Some(1_000), Default::default()).unwrap();
+    let c = curve_config(&f, 1);
+    assert_eq!(c.curve.fee_bps, 0);
+    assert_eq!(c.curve.fee_sell_bps, 1_000);
+}
+
+#[test]
+fn an_absent_sell_fee_mirrors_the_buy_fee() {
+    let mut f = setup();
+    // What every launch charged before the sides could differ, so an older caller
+    // that sends no sell fee still gets the symmetric launch it expects.
+    create_with_fees(&mut f, TOKEN, 250, None, Default::default()).unwrap();
+    let c = curve_config(&f, 1);
+    assert_eq!(c.curve.fee_bps, 250);
+    assert_eq!(c.curve.fee_sell_bps, 250);
+}
+
+#[test]
+fn routing_to_the_pool_sends_the_creators_share_there_instead() {
+    let mut f = setup();
+    create_with_fees(&mut f, TOKEN, 100, None, curve::state::RewardRoute::Pool).unwrap();
+    let curve = f.launch(1).curve;
+
+    f.app
+        .execute_contract(
+            f.buyer.clone(),
+            curve.clone(),
+            &CurveExec::Buy { min_tokens_out: Uint128::zero(), recipient: None },
+            &coins(amt(10).u128(), QUOTE),
+        )
+        .unwrap();
+
+    let st: CurveState = f
+        .app
+        .wrap()
+        .query_wasm_smart(curve, &CurveQuery::State {})
+        .unwrap();
+
+    /*
+     * The creator is owed NOTHING and the pool holds their share. The platform's cut
+     * is untouched: a creator routes their own portion, not the launchpad's.
+     */
+    assert!(st.creator_owed.is_zero(), "the creator was still credited");
+    assert!(!st.platform_owed.is_zero(), "the platform's share was routed away too");
+    assert!(!st.lp_bonus.is_zero(), "nothing reached the pool");
+    assert_eq!(
+        st.lp_bonus + st.platform_owed,
+        amt(10) / Uint128::new(100),
+        "the routed share plus the platform's is not the whole 1% fee"
+    );
+}
+
+#[test]
+fn the_default_route_still_credits_the_creator() {
+    let mut f = setup();
+    // The absence of a choice must behave exactly as the launchpad did before the
+    // choice existed, or every older caller silently changes behaviour.
+    create_with_fees(&mut f, TOKEN, 100, None, Default::default()).unwrap();
+    let curve = f.launch(1).curve;
+    f.app
+        .execute_contract(
+            f.buyer.clone(),
+            curve.clone(),
+            &CurveExec::Buy { min_tokens_out: Uint128::zero(), recipient: None },
+            &coins(amt(10).u128(), QUOTE),
+        )
+        .unwrap();
+    let st: CurveState = f.app.wrap().query_wasm_smart(curve, &CurveQuery::State {}).unwrap();
+    assert!(!st.creator_owed.is_zero(), "the creator was not credited");
+    assert!(st.lp_bonus.is_zero(), "the pool took a share it was not routed");
+}
+
+#[test]
+fn a_sell_is_charged_the_sell_fee_not_the_buy_fee() {
+    let mut f = setup();
+    /*
+     * ADDED AFTER A MUTATION ESCAPED. Every test above asserts the two fees are
+     * STORED separately; none made a sell, so swapping the sell quote back to
+     * `fee_bps` left the whole suite green while the feature did nothing.
+     *
+     * Asymmetric on purpose, and at the extremes: free entry, 10% exit. If the sell
+     * were charged the buy fee the seller would pay nothing, which is the exact
+     * shape of the escaped mutation.
+     */
+    create_with_fees(&mut f, TOKEN, 0, Some(1_000), Default::default()).unwrap();
+    let curve = f.launch(1).curve;
+
+    f.app
+        .execute_contract(
+            f.buyer.clone(),
+            curve.clone(),
+            &CurveExec::Buy { min_tokens_out: Uint128::zero(), recipient: None },
+            &coins(amt(10).u128(), QUOTE),
+        )
+        .unwrap();
+
+    let after_buy: CurveState = f
+        .app
+        .wrap()
+        .query_wasm_smart(curve.clone(), &CurveQuery::State {})
+        .unwrap();
+    // Free entry: the buy must have skimmed nothing at all.
+    assert!(
+        after_buy.creator_owed.is_zero() && after_buy.platform_owed.is_zero(),
+        "a 0 bps buy charged a fee"
+    );
+
+    let held = f.balance(&f.buyer, TOKEN);
+    assert!(!held.is_zero(), "the buy produced no tokens");
+
+    f.app
+        .execute_contract(
+            f.buyer.clone(),
+            curve.clone(),
+            &CurveExec::Sell { min_inj_out: Uint128::zero() },
+            &coins(held.u128(), TOKEN),
+        )
+        .unwrap();
+
+    let after_sell: CurveState = f
+        .app
+        .wrap()
+        .query_wasm_smart(curve, &CurveQuery::State {})
+        .unwrap();
+    let charged = after_sell.creator_owed + after_sell.platform_owed;
+    assert!(
+        !charged.is_zero(),
+        "the sell was charged the 0 bps BUY fee instead of the 10% sell fee"
+    );
 }
