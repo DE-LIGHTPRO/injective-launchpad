@@ -1966,3 +1966,24 @@ table.board .dim { color: var(--text-faint); }
 /* Claimable-fee rows on /claim. Spaced from the button below so a sweep is not
    one keystroke away from a misread row. */
 .claim-rows { margin-bottom: var(--space-4); }
+
+/*
+ * Launches-per-day bars. Deliberately unlabelled per bar: the shape is the point and
+ * a number on each would be false precision on a 14-bucket histogram.
+ */
+.daybars {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 72px;
+  margin-top: var(--space-3);
+}
+.daybar { flex: 1; min-width: 0; display: flex; align-items: flex-end; height: 100%; }
+.daybar > i {
+  display: block;
+  width: 100%;
+  min-height: 2px;
+  border-radius: 2px 2px 0 0;
+  background: var(--accent);
+  opacity: 0.75;
+}
