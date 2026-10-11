@@ -4,6 +4,31 @@ Not a third-party audit. Findings from reviewing the contracts, app and scripts
 against what Pons (`ponsdotdev/pons-labs`) and nearly.trade do. Newest first.
 Severity uses the usual scale: Critical / High / Medium / Low / Info.
 
+## 2026-10-11 review, sixth pass (the chart, the curve scale, and a share link)
+
+Triggered by promoting candles to the launch page's main chart and rescaling the curve
+so a launch opens at about a $5,000 market cap.
+
+### Fixed
+
+| # | Sev | Finding | Fix |
+|---|---|---|---|
+| 37 | Medium | **Every candle was a 1-pixel dash.** Measured on the live page: 5 trades across 9 blocks asked for 40 candles gave a span of 1 block, so each bucket held exactly ONE trade and every candle had `open == close == high == low`. Every figure was correct and the chart showed nothing. This is the normal state of a new launch, which is when the chart matters most. | The bucket count is bounded by trade density (two per candle) as well as by the block range; a busy launch still fills all 40. Re-measured on the deployed page: 3 candles, bodies 7.7px, 178.6px and one doji. |
+| 38 | Medium | **The bonding curve was the headline and the candles were a 60-pixel strip underneath it.** The curve is a property of the contract, identical on every launch here, and it does not move when the market does. | Candles are the main chart with a price axis and a last-close line; the curve is a tab. With no trades the curve still leads, because an empty candle chart is worse than no chart. |
+| 39 | Medium | **Sharing a launch produced a relative URL.** `ShareRow` read `window.location`, so the server rendered the X intent with `url=/launch/VETTA` and the client replaced it after hydration: a mismatch React reports, and a share link that went nowhere for anyone clicking before hydration or reading the markup without running it. The site origin was also written out three times. | One `SITE_URL` in `brand.ts`, used by the layout, the sitemap and the share row. |
+| 40 | Medium | **One opening reserve for every quote asset.** The constant that opens an INJ launch at about $5,000 opens a 6-decimal dollar-stablecoin launch at about $630, and nothing on chain or on screen said so. The e2e suite itself runs a second quote, so this was exercised. | `QuoteSpec { decimals, virtual_quote_whole }`: the scale is stated by the admin when an asset is allowlisted, refused at zero or beyond a cap, reported on `Quotes {}` and read by the app instead of its own constant. |
+| 41 | Low | **The deploy script could not store a 356 KB module.** The SDK simulates to estimate gas and Injective charges txSize gas against the simulate's own limit; ~3.65M needed against a 600,000 default, reported only as `INVALID_ARGUMENT`. | `storeCode` passes an explicit limit. 300 KB of random bytes simulating fine is what ruled out size and transport: an invalid module is rejected before the txSize charge, a valid one is not. |
+
+### Measurement notes
+
+- **A `NEXT_PUBLIC_*` env change needs a redeploy, and the push-triggered build races it.**
+  Twice in one day a build started seconds before the env edit landed and shipped the
+  previous factory while reporting Ready. Grepping the served chunks for the address is
+  the check; the page looks right either way.
+- **Deleting `.next` under a running `next dev` breaks it the same way a `next build`
+  does**, and the page then renders as server HTML with every client figure empty. I did
+  it to myself this time, having diagnosed the identical symptom an hour earlier.
+
 ## 2026-10-11 review, fifth pass (deploying 39974/39975, and the front page's claims)
 
 Triggered by pointing the app at the newly deployed contracts and reading the rendered

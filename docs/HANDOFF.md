@@ -4,15 +4,15 @@ Continue point for picking this up in another Claude Code session. Delete once c
 Branch: `claude/eager-ramanujan-0yui7v`, merged to `main`. Everything below is committed
 and pushed.
 
-## Current deployment (11 Oct 2026, 18:50 UTC+1)
+## Current deployment (11 Oct 2026, 23:40 UTC+1)
 
 Injective **testnet**. These are what production runs; anything earlier in this file that
 names a different factory or code id is superseded.
 
 | | |
 |---|---|
-| factory | `inj1pxh0ar2s64h0334yy7meygllffez0j95hg05d5` |
-| curve code id | `39974` (factory code id `39975`) |
+| factory | `inj198s2h3ns8u54jllxgt7u5nurqnvezqk6jt659c` |
+| curve code id | `39974` (factory code id `39976`) |
 | deploy / platform wallet | `inj10lx8xhswguun9s0htmqk8wvzymjteudmt9hjhl` |
 | site | https://injpad.vercel.app, Git-sourced from `main` |
 
@@ -22,8 +22,28 @@ that happened to start before the env change shipped the previous factory, and t
 that was caught was grepping the served chunks for the address.
 
 What the new contracts added over `39971/39972`: separate buy and sell fees capped at 10%
-per side, a reward route (`creator` | `pool`), and a flatter curve (virtual reserve 30 to 60,
-graduation target 85 to 170, which halves price impact).
+per side, a reward route (`creator` | `pool`), and a rescaled curve.
+
+**The curve opens a launch at a market cap of 630 INJ**, about $4,990 at the INJ price
+measured on 11 Oct 2026 (Coinbase 7.923, Binance 7.917). It was 55.92 INJ, about $443.
+Graduation is a RATIO of the opening reserve (17/6), not a second constant, so the shape
+is identical whatever a quote is scaled to: target is 96.7% of the curve ceiling, 99.1%
+of the curve supply sold at graduation, 14.69x from open to graduation. A 10 INJ buy at
+the open now costs 2.49% in impact instead of 17.68%.
+
+**The opening reserve belongs to the QUOTE, not to the launchpad.** `QuoteSpec` carries
+`virtual_quote_whole` per allowlisted asset, because 676 opens an INJ launch at about
+$5,000 and would open a dollar-stablecoin launch at about $630. Set it deliberately when
+allowlisting an asset; zero and absurd values are refused. The dollar figure is a premise
+about one day's INJ price, not a property: there is no oracle and nothing renders a
+dollar amount.
+
+**Storing a contract needs an explicit gas limit.** `MsgBroadcasterWithPk` simulates to
+estimate gas and Injective charges txSize gas against the simulate's own limit; a 356 KB
+module costs ~3.65M against a 600,000 default and the SDK reports only
+`Simulate ... failed with INVALID_ARGUMENT`. `scripts/deploy.mjs` passes `STORE_CODE_GAS`.
+`INJ_CURVE_CODE_ID` / `INJ_FACTORY_CODE_ID` reuse an existing code id after verifying its
+hash, which is the right move when only one contract changed.
 
 Verified on chain, not just in tests: `scripts/dry-run-create.mjs` (both message shapes),
 `scripts/e2e-testnet.mjs` (all 8 steps including graduation and a 70/30 payout), and a live
