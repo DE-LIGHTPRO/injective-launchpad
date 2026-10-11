@@ -2,7 +2,7 @@ import { short, type Quote } from '@/lib/chain';
 import { fmt } from '@/lib/curve';
 import { NETWORK } from '@/lib/config';
 import { compact } from '@/lib/boardMetrics';
-import type { TradeViewResult } from '@/lib/tradeView';
+import { TRADE_LIST_LIMIT, type TradeViewResult } from '@/lib/tradeView';
 
 /**
  * Recent trades, read from transaction events.
@@ -111,7 +111,9 @@ export function Trades({ result, quote }: { result: TradeViewResult; quote: Quot
       )}
       {trades.length > 0 && (
         <ul className="trades">
-          {trades.map((t, i) => (
+          {/* The newest few. The chart above reads the whole page; a list of two
+              hundred rows is a scroll, not a feed. */}
+          {trades.slice(0, TRADE_LIST_LIMIT).map((t, i) => (
             <li key={`${t.txHash}-${i}`}>
               <span className={`trade-side ${t.kind}`}>{t.kind}</span>
               <span className="mono" style={{ fontSize: 'var(--text-sm)', minWidth: 0 }}>

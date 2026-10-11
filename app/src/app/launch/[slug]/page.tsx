@@ -409,6 +409,8 @@ export default async function LaunchPage({ params }: { params: Promise<{ slug: s
               quoteLabel={quote.label}
               quoteDecimals={quote.decimals}
               sym={symbol}
+              /* Whole tokens, which turns a fill price into a market cap. */
+              totalSupplyTokens={Number(totalSupply / 10n ** 18n)}
             />
             <div className="bar" style={{ marginTop: 'var(--space-2)' }}>
               <i style={{ width: `${Math.min(100, progress * 100).toFixed(1)}%` }} />

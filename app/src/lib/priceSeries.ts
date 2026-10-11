@@ -20,11 +20,21 @@ import type { Trade } from './chain.ts';
  */
 
 export interface PricePoint {
-  /** Block height, which is the only ordering the chain gives us. */
+  /** Block height. Kept for the explorer link and for ordering within a block. */
   height: number;
+  /**
+   * Block time in UNIX seconds, or 0 when the chain did not give one.
+   *
+   * This is what a candle interval is measured in. It used to be absent, and the
+   * comment here claimed height was "the only ordering the chain gives us", which
+   * was never true: the tx search returns an RFC 3339 `timestamp` per transaction.
+   */
+  time: number;
   /** Quote per whole token, as a float for drawing only. */
   price: number;
   side: 'buy' | 'sell';
+  /** Quote that moved in this fill, base units. Drives the volume bars. */
+  quote: bigint;
   txHash: string;
 }
 
@@ -121,7 +131,14 @@ export function buildSeries(trades: readonly Trade[], quoteDecimals = 18): Serie
       unpriceable += 1;
       continue;
     }
-    points.push({ height: t.height, price, side: t.kind, txHash: t.txHash });
+    points.push({
+      height: t.height,
+      time: t.time,
+      price,
+      side: t.kind,
+      quote: (t.kind === 'buy' ? t.injIn : t.injOut) ?? 0n,
+      txHash: t.txHash,
+    });
   }
 
   points.sort((a, b) => a.height - b.height);

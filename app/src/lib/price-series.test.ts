@@ -18,6 +18,7 @@ const ONE = 10n ** 18n;
 const trade = (over: Partial<Trade> = {}): Trade => ({
   kind: 'buy',
   who: 'inj1someone',
+  time: 0,
   injIn: ONE,
   injOut: null,
   tokens: 1_000n * ONE,

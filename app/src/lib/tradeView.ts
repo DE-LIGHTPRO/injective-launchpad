@@ -52,8 +52,19 @@ export type TradeViewResult =
   | { kind: 'error'; message: string }
   | { kind: 'view'; view: TradeView };
 
-/** How many trades one page load reads. Bounds the series, the sum and the list. */
-export const TRADE_LIMIT = 25;
+/**
+ * How many trades one page load reads. Bounds the chart, the 24h sum and the list.
+ *
+ * RAISED FROM 25 FOR THE CHART. The trade list only ever shows the newest handful,
+ * but a candle chart with 25 fills has a dozen candles on any useful interval, and
+ * the 24h volume is a floor rather than a total the moment the window holds more
+ * than this. One page of a tx search costs one request whatever the limit, so the
+ * cost is the response size rather than another round trip.
+ */
+export const TRADE_LIMIT = 200;
+
+/** How many of them the trade list renders. The chart uses all of them. */
+export const TRADE_LIST_LIMIT = 25;
 
 export async function loadTradeView({
   curve,

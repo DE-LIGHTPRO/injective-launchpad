@@ -57,6 +57,13 @@
   --accent-wash: rgba(47, 107, 240, 0.12);
   --buy: #2ebd85;
   --sell: #f6465d;
+  /*
+   * Text that sits ON a buy or sell fill, such as the chart's last-value tag. Dark
+   * rather than white: white on #2ebd85 is 2.4:1 and fails, dark is about 8:1 there
+   * and 5.5:1 on the red, so one token reads on both. The fills are the same in
+   * either theme, so this does not get a light-mode override.
+   */
+  --on-ticker: #0a0d12;
   --gold: #d9ad55;
   --warn: #e3a23b;
   --danger: #f6465d;
@@ -1005,7 +1012,7 @@ button.ghost { background: transparent; border: 1px solid var(--line); color: va
 .spark-foot { display: flex; justify-content: space-between; font-size: var(--text-micro); color: var(--text-faint); }
 
 /* The launch page's main chart: candles by default, the bonding curve behind a tab. */
-.chart-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); margin-bottom: var(--space-2); }
+.chart-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); margin-bottom: var(--space-3); }
 .chart-head h2 { margin: 0; }
 .chart-tabs { display: inline-flex; gap: 2px; padding: 2px; border-radius: var(--radius-md); background: var(--surface-sunken); }
 .chart-tab {
@@ -1017,20 +1024,52 @@ button.ghost { background: transparent; border: 1px solid var(--line); color: va
 .chart-tab.on { background: var(--surface-2); color: var(--text); }
 /* Disabled, not hidden: "no trades yet" is an answer, a missing control is not. */
 .chart-tab:disabled { opacity: 0.45; cursor: default; }
-.chart-meta { display: flex; align-items: baseline; gap: var(--space-3); margin-bottom: var(--space-2); }
-.chart-last { font-size: var(--text-lg); }
-.chart-unit { font-size: var(--text-xs); color: var(--text-faint); }
-.chart-change { font-size: var(--text-sm); }
+
+/* Mode on the left, intervals beside it, the interval's totals pushed right. Wraps
+   on a narrow screen rather than squeezing the buttons into an unhittable row. */
+.chart-bar { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
+.chart-summary { font-size: var(--text-micro); color: var(--text-faint); margin-left: auto; }
+
+.tf-row { display: inline-flex; gap: 2px; padding: 2px; border-radius: var(--radius-md); background: var(--surface-sunken); }
+.tf-btn {
+  border: 0; background: transparent; color: var(--text-faint);
+  font: inherit; font-size: var(--text-xs); line-height: 1;
+  padding: var(--space-2) var(--space-2); border-radius: var(--radius-sm);
+  cursor: pointer; min-width: 30px;
+}
+.tf-btn.wide { min-width: 44px; }
+.tf-btn:hover { color: var(--text); }
+.tf-btn.on { background: var(--surface-2); color: var(--text); }
+
+/* The pair, the interval and OHLC on one line, as every chart puts it. */
+.chart-ohlc {
+  display: flex; flex-wrap: wrap; align-items: baseline;
+  gap: var(--space-1) var(--space-3);
+  font-size: var(--text-micro); color: var(--text-muted);
+  margin: var(--space-3) 0 var(--space-2);
+}
+.chart-ohlc strong { color: var(--text); font-size: var(--text-xs); }
+.chart-ohlc i { font-style: normal; color: var(--text-faint); margin-right: 4px; }
+.chart-ohlc .up { color: var(--buy); }
+.chart-ohlc .down { color: var(--danger); }
+.chart-ohlc-tf { color: var(--text-faint); }
+/* The session change, which lives in the OHLC row beside the close. */
+.chart-change { font-weight: 600; }
 .chart-change.up { color: var(--buy); }
 .chart-change.down { color: var(--danger); }
-.chart-foot { display: flex; justify-content: space-between; gap: var(--space-2); font-size: var(--text-micro); color: var(--text-faint); margin-top: var(--space-1); }
+.chart-ohlc time { color: var(--text-faint); margin-left: auto; }
+
+.chart-foot-note { margin-top: var(--space-2); }
 /* The SVG sets its own height and stretches; min-width 0 keeps it off the page edge. */
 .chart { min-width: 0; }
 .chart svg { display: block; }
+/* The hit targets are transparent rects; this keeps the cursor honest about them. */
+.chart svg rect[fill='transparent'] { cursor: crosshair; }
 
 @media (pointer: coarse) {
-  /* WCAG 2.5.8: a tab a thumb can hit without growing the type. */
+  /* WCAG 2.5.8: a control a thumb can hit without growing the type. */
   .chart-tab { min-height: 24px; padding: var(--space-2) var(--space-4); }
+  .tf-btn { min-height: 24px; min-width: 36px; }
 }
 
 .copy-btn {

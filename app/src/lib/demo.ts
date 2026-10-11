@@ -217,6 +217,14 @@ export function demoTrades(curveAddress: string, limit: number): Trade[] {
       tokens: BigInt(Math.round(next() * 5_000_000 * 1e18)),
       fee: quote / 100n,
       height: base - i * (2 + Math.floor(next() * 40)),
+      /*
+       * Dated from the DEMO height rather than from the wall clock, by the same
+       * ~0.65s block time the rest of the app uses, so the demo chart's time axis is
+       * consistent with its own heights. `DEMO_HEIGHT` is the shared clock here for
+       * exactly the reason the comment above it gives: two clocks produced a ticker
+       * reporting every trade as three years old.
+       */
+      time: Math.floor(Date.now() / 1000) - Math.round(i * (2 + next() * 40) * 0.65),
       txHash: `DEMO${curveAddress.slice(-6).toUpperCase()}${String(i).padStart(3, '0')}`,
     });
   }

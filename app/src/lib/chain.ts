@@ -387,7 +387,32 @@ export interface Trade {
   tokens: bigint | null;
   fee: bigint | null;
   height: number;
+  /**
+   * Block time in UNIX seconds, or 0 when the search did not carry one.
+   *
+   * THE CHAIN GIVES THIS AND THIS CODE USED TO THROW IT AWAY. Every note here said
+   * block height was the only ordering a trade had, so the chart bucketed by height
+   * and the axis read "by block", which is unreadable on a trading surface and makes
+   * timeframes impossible. `tx_responses[].timestamp` is an RFC 3339 block time and
+   * has been there all along; nobody re-measured the claim. Rule: a documented
+   * limitation that was never re-tested reads as a live constraint.
+   *
+   * It is the BLOCK's time, so every trade in a block shares it. That is correct:
+   * they did happen at the same moment.
+   */
+  time: number;
   txHash: string;
+}
+
+/** An RFC 3339 block time as UNIX seconds, or 0 when there is not one to read. */
+export function parseBlockTime(raw: unknown): number {
+  if (typeof raw !== 'string' || raw === '') return 0;
+  const ms = Date.parse(raw);
+  if (!Number.isFinite(ms)) return 0;
+  const secs = Math.floor(ms / 1000);
+  // A time before the chain existed, or in the future, is not a block time. Both
+  // would place a candle somewhere no trade happened.
+  return secs > 1_600_000_000 && secs < Date.now() / 1000 + 86_400 ? secs : 0;
 }
 
 /** The attribute set each handler emits, read back off the event log. */
@@ -409,6 +434,7 @@ function tradeFromAttrs(attrs: Array<{ key: string; value: string }>): Trade | n
     tokens: big('tokens_out') ?? big('tokens_in'),
     fee: big('fee'),
     height: 0,
+    time: 0,
     txHash: '',
   };
 }
@@ -433,6 +459,8 @@ export async function listTrades(curve: string, limit = 20): Promise<Trade[]> {
     tx_responses?: Array<{
       txhash?: string;
       height?: string;
+      /** RFC 3339 block time, e.g. "2026-10-11T21:15:30Z". */
+      timestamp?: string;
       code?: number;
       events?: Array<{ type: string; attributes: Array<{ key: string; value: string }> }>;
     }>;
@@ -468,7 +496,15 @@ export async function listTrades(curve: string, limit = 20): Promise<Trade[]> {
       if (addr !== undefined && addr !== curve) continue;
       const t = tradeFromAttrs(ev.attributes ?? []);
       if (!t || t.kind === 'other') continue;
-      out.push({ ...t, height: Number(tx.height ?? 0), txHash: tx.txhash ?? '' });
+      out.push({
+        ...t,
+        height: Number(tx.height ?? 0),
+        // `Date.parse` of an RFC 3339 string, in seconds. 0 when absent or
+        // unparseable, never `Date.now()`: a trade dated to the moment it was read
+        // would put old history at the right-hand edge of the chart.
+        time: parseBlockTime(tx.timestamp),
+        txHash: tx.txhash ?? '',
+      });
     }
   }
   return out;

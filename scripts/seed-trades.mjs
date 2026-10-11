@@ -1,7 +1,7 @@
 /**
  * Put a spread of real trades on one launch, so the chart has something to draw.
  *
- *   node scripts/seed-trades.mjs <curve-address> [count]
+ *   node scripts/seed-trades.mjs <curve-address> [count] [gap-seconds]
  *
  * WHY A SCRIPT. The candle chart, the 24h trade count, the trending strip and the
  * price series are all derived from trade history, and a launch with one trade
@@ -9,10 +9,15 @@
  * the browser pane here (no wallet extension), so the only way to look at a populated
  * chart is to put real trades on chain.
  *
- * SEPARATE TRANSACTIONS, deliberately. `candles.ts` buckets by BLOCK HEIGHT, so
- * several trades batched into one transaction land in one bucket and draw one candle.
- * These go one at a time and alternate direction, which is also what makes a candle
- * have a body rather than being a doji.
+ * SEPARATE TRANSACTIONS, deliberately. `candles.ts` buckets by wall-clock interval,
+ * so several trades batched into one transaction land in one candle. These go one at
+ * a time and alternate direction, which is what makes a candle have a body rather
+ * than being a doji.
+ *
+ * THE GAP MATTERS. Back to back, every trade lands within a block or two of the last
+ * and the whole run is one or two candles however many trades it contains. A gap
+ * spreads them across intervals, which is the only way to look at a chart that
+ * resembles one a real launch will produce.
  *
  * Buys and sells only, and nothing is claimed: the claim page should have a non-zero
  * balance to show afterwards, and claiming here would hide the thing being verified.
@@ -63,6 +68,8 @@ const { NETWORK } = await import(join(APP, 'src/lib/config.ts'));
 
 const curve = process.argv[2];
 const count = Number(process.argv[3] ?? 6);
+/** Seconds to wait between trades, so they land in different candles. */
+const gap = Number(process.argv[4] ?? 0);
 if (!curve?.startsWith('inj1')) die('Usage: node scripts/seed-trades.mjs <curve-address> [count]');
 
 const privateKey = PrivateKey.fromMnemonic(mnemonic);
@@ -100,6 +107,7 @@ const quoteBefore = await bal(quoteDenom);
  */
 let spentTotal = 0n;
 for (let i = 0; i < count; i += 1) {
+  if (i > 0 && gap > 0) await new Promise((r) => setTimeout(r, gap * 1000));
   const sell = i > 0 && i % 3 === 0;
   try {
     if (sell) {
@@ -131,8 +139,14 @@ for (let i = 0; i < count; i += 1) {
       if (res.code !== 0) die(`sell refused (code ${res.code})`, res.rawLog);
       console.log(`  ${i + 1}/${count}  sell  ${res.txHash}`);
     } else {
-      // A different amount each time, so consecutive trades are not the same price.
-      const spend = (unit * BigInt(20 + i * 17)) / 100n;
+      /*
+       * A different amount each time, CYCLING rather than growing. It was
+       * `20 + i * 17` hundredths, which climbs without limit: a run of 28 asks for
+       * 4.9 quote on the last trade and exhausts a testnet wallet about halfway
+       * through, reporting insufficient funds for a script whose job is to produce
+       * a full chart.
+       */
+      const spend = (unit * BigInt(20 + ((i * 17) % 60))) / 100n;
       const res = await broadcaster.broadcast({
         msgs: MsgExecuteContract.fromJSON({
           sender,
