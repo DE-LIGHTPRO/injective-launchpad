@@ -2,6 +2,7 @@ import {
   MsgCreateDenom,
   MsgMint,
   MsgSetDenomMetadata,
+  MsgChangeAdmin,
   MsgExecuteContract,
   createTransaction,
   ChainRestAuthApi,
@@ -12,6 +13,7 @@ import {
   MSG_CREATE_DENOM,
   MSG_MINT,
   MSG_SET_METADATA,
+  MSG_CHANGE_ADMIN,
   MSG_EXECUTE,
   type LaunchPlan,
 } from './createLaunch.ts';
@@ -107,6 +109,10 @@ export function composeMessages(plan: LaunchPlan, sender: string) {
       case MSG_SET_METADATA: {
         const meta = (v as { metadata: Record<string, unknown> }).metadata;
         return MsgSetDenomMetadata.fromJSON({ sender, metadata: meta as never });
+      }
+      case MSG_CHANGE_ADMIN: {
+        const c = v as { denom: string; new_admin: string };
+        return MsgChangeAdmin.fromJSON({ sender, denom: c.denom, newAdmin: c.new_admin });
       }
       case MSG_EXECUTE: {
         const e = v as unknown as {

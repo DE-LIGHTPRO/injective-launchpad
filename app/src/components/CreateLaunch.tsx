@@ -830,7 +830,7 @@ export function CreateLaunch() {
             </ul>
 
             <details className="raw">
-              <summary>The four messages, exactly as they will be sent</summary>
+              <summary>The five messages, exactly as they will be sent</summary>
               <pre>{JSON.stringify(plan.plan.messages, null, 2)}</pre>
             </details>
 
@@ -842,8 +842,8 @@ export function CreateLaunch() {
                 onChange={(e) => setConfirmed(e.target.checked)}
               />
               <span>
-                I understand the supply is fixed, all of it leaves my wallet, and none of this can
-                be changed afterwards.
+                I understand the supply is fixed, all of it leaves my wallet, the right to mint more
+                is given up for good, and none of this can be changed afterwards.
               </span>
             </label>
 
@@ -875,13 +875,13 @@ export function CreateLaunch() {
                 like it works. The messages are built by a tested function and shown
                 above exactly as they will be sent, but the ENCODING has never run
                 against a node, and I cannot run it: that needs a wallet extension.
-                What makes it safe to offer anyway is that all four messages are one
+                What makes it safe to offer anyway is that all five messages are one
                 transaction, so a mis-built launch is a rejected transaction rather
                 than a denom created with no curve behind it, and the factory refuses
                 any attached amount but the exact supply.
               */}
             <p className="note">
-              This signing path has not yet been run against a chain. All four messages
+              This signing path has not yet been run against a chain. All five messages
               go in a single transaction, so if anything is wrong the chain refuses the
               whole thing and nothing is created. Try it on testnet first.
             </p>

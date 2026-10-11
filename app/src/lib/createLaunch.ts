@@ -30,6 +30,7 @@ import { profileFieldError } from './tokenProfile.ts';
 export const MSG_CREATE_DENOM = '/injective.tokenfactory.v1beta1.MsgCreateDenom';
 export const MSG_MINT = '/injective.tokenfactory.v1beta1.MsgMint';
 export const MSG_SET_METADATA = '/injective.tokenfactory.v1beta1.MsgSetDenomMetadata';
+export const MSG_CHANGE_ADMIN = '/injective.tokenfactory.v1beta1.MsgChangeAdmin';
 export const MSG_EXECUTE = '/cosmwasm.wasm.v1.MsgExecuteContract';
 
 /**
@@ -260,6 +261,20 @@ export function planLaunch(input: LaunchInput): LaunchPlan {
         },
       },
       {
+        /*
+         * The mint key, handed to the factory, which hands it on to the curve. A denom
+         * admin can mint without limit, so a creator who kept it could mint after
+         * graduation and sell into the locked pool until it was empty. The factory
+         * refuses to complete a launch unless it holds this, so leaving it out does not
+         * create an unsafe launch, it fails the whole transaction.
+         *
+         * After metadata, which needs the creator to still be admin, and before the
+         * execute, which needs the factory to be.
+         */
+        typeUrl: MSG_CHANGE_ADMIN,
+        value: { sender: input.creator, denom, new_admin: input.factory },
+      },
+      {
         typeUrl: MSG_EXECUTE,
         value: {
           sender: input.creator,
@@ -330,7 +345,10 @@ export function describePlan(
   const lines = [
     `Create the denom ${plan.denom}`,
     `Name it, with a display unit at ${TOKEN_DECIMALS} decimals so wallets show whole tokens`,
-    `Mint ${whole(plan.seedAmount)} tokens to you, and nothing can mint more afterwards`,
+    `Mint ${whole(plan.seedAmount)} tokens to you`,
+    // This line was here before it was true: the creator stayed denom admin and could
+    // mint at will. It is true now because of the step below, which is why it names it.
+    `Give up the right to mint: it passes to the launch's contract, which has no code that mints, so the supply is fixed for good`,
     `Send all ${whole(plan.seedAmount)} to the launchpad: ${whole(curve.curveSupply)} onto the curve and ${whole(lpReserve)} held back to pair at graduation`,
     `Buyers pay ${NETWORK.quoteSymbol} and the curve prices every trade until it reaches the target`,
   ];

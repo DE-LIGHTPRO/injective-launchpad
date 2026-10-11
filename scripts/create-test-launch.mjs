@@ -30,6 +30,7 @@ import {
   MsgCreateDenom,
   MsgMint,
   MsgSetDenomMetadata,
+  MsgChangeAdmin,
   MsgExecuteContract,
   MsgBroadcasterWithPk,
 } from '@injectivelabs/sdk-ts';
@@ -121,6 +122,9 @@ const msgs = [
       decimals: 18,
     },
   }),
+  // The mint key to the factory, which passes it to the curve. The factory refuses the
+  // launch without it, exactly as it would from the browser.
+  MsgChangeAdmin.fromJSON({ sender, denom, newAdmin: factory }),
   MsgExecuteContract.fromJSON({
     sender,
     contractAddress: factory,

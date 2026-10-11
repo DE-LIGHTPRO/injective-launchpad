@@ -5,8 +5,142 @@
 //! funded, and then unreachable forever. That is the failure mode of this
 //! pattern, so it gets tested directly.
 
-use cosmwasm_std::{coin, coins, Addr, Empty, Uint128};
-use cw_multi_test::{App, AppBuilder, BankSudo, Contract, ContractWrapper, Executor, SudoMsg};
+use cosmwasm_std::{coin, coins, Addr, Api, Binary, BlockInfo, CustomMsg, CustomQuery, Empty, Querier, Storage, Uint128};
+use cw_multi_test::{
+    App, AppBuilder, AppResponse, BankKeeper, BankSudo, Contract, ContractWrapper, CosmosRouter,
+    DistributionKeeper, Executor, FailingModule, GovFailingModule, IbcFailingModule, StakeKeeper,
+    Stargate, SudoMsg, WasmKeeper,
+};
+use cosmwasm_std::testing::{MockApi, MockStorage};
+use cosmwasm_schema::serde::de::DeserializeOwned;
+
+/// A stand-in for Injective's tokenfactory admin rule, which is the only part of that
+/// module these contracts depend on: `MsgChangeAdmin` is refused unless its sender is
+/// the denom's current admin.
+///
+/// A denom nobody has registered is treated as already administered by the factory,
+/// which models what every launch transaction does first (the creator's own
+/// `MsgChangeAdmin` to the factory), so the existing tests describe a well-formed
+/// launch. `/test.SetAdmin` registers a different admin, which is how
+/// `a_creator_who_keeps_the_mint_key_cannot_launch` models a creator who did not.
+struct TokenFactorySim;
+
+const TF_DEFAULT: &[u8] = b"tfsim:default";
+fn tf_key(denom: &str) -> Vec<u8> {
+    [b"tfsim:admin:".as_slice(), denom.as_bytes()].concat()
+}
+
+/// Decode the three length-delimited strings of a `MsgChangeAdmin`.
+fn decode_change_admin(b: &[u8]) -> (String, String, String) {
+    let mut fields = [String::new(), String::new(), String::new()];
+    let mut i = 0;
+    while i < b.len() {
+        let tag = b[i] >> 3;
+        i += 1;
+        let (mut len, mut shift) = (0usize, 0);
+        loop {
+            let byte = b[i];
+            i += 1;
+            len |= ((byte & 0x7f) as usize) << shift;
+            if byte & 0x80 == 0 {
+                break;
+            }
+            shift += 7;
+        }
+        fields[(tag - 1) as usize] = String::from_utf8(b[i..i + len].to_vec()).unwrap();
+        i += len;
+    }
+    let [a, d, n] = fields;
+    (a, d, n)
+}
+
+impl Stargate for TokenFactorySim {
+    fn execute_stargate<ExecC, QueryC>(
+        &self,
+        _api: &dyn Api,
+        storage: &mut dyn Storage,
+        _router: &dyn CosmosRouter<ExecC = ExecC, QueryC = QueryC>,
+        _block: &BlockInfo,
+        sender: Addr,
+        type_url: String,
+        value: Binary,
+    ) -> anyhow::Result<AppResponse>
+    where
+        ExecC: CustomMsg + DeserializeOwned + 'static,
+        QueryC: CustomQuery + DeserializeOwned + 'static,
+    {
+        match type_url.as_str() {
+            "/test.DefaultAdmin" => storage.set(TF_DEFAULT, value.as_slice()),
+            "/test.SetAdmin" => {
+                let (denom, admin) = String::from_utf8(value.to_vec())?
+                    .split_once('|')
+                    .map(|(a, b)| (a.to_string(), b.to_string()))
+                    .unwrap();
+                storage.set(&tf_key(&denom), admin.as_bytes());
+            }
+            factory::MSG_CHANGE_ADMIN => {
+                let (from, denom, to) = decode_change_admin(value.as_slice());
+                anyhow::ensure!(from == sender.as_str(), "signer mismatch");
+                let current = storage
+                    .get(&tf_key(&denom))
+                    .or_else(|| storage.get(TF_DEFAULT))
+                    .unwrap_or_default();
+                anyhow::ensure!(
+                    current == from.as_bytes(),
+                    "unauthorized account: {from} is not the admin of {denom}"
+                );
+                storage.set(&tf_key(&denom), to.as_bytes());
+            }
+            other => anyhow::bail!("unexpected stargate message {other}"),
+        }
+        Ok(AppResponse::default())
+    }
+
+    fn query_stargate(
+        &self,
+        _api: &dyn Api,
+        storage: &dyn Storage,
+        _querier: &dyn Querier,
+        _block: &BlockInfo,
+        path: String,
+        data: Binary,
+    ) -> anyhow::Result<Binary> {
+        anyhow::ensure!(path == "/test.Admin", "unexpected stargate query {path}");
+        let denom = String::from_utf8(data.to_vec())?;
+        let admin = storage
+            .get(&tf_key(&denom))
+            .or_else(|| storage.get(TF_DEFAULT))
+            .unwrap_or_default();
+        Ok(cosmwasm_std::to_json_binary(&String::from_utf8(admin)?)?)
+    }
+}
+
+type TestApp = App<
+    BankKeeper,
+    MockApi,
+    MockStorage,
+    FailingModule<Empty, Empty, Empty>,
+    WasmKeeper<Empty, Empty>,
+    StakeKeeper,
+    DistributionKeeper,
+    IbcFailingModule,
+    GovFailingModule,
+    TokenFactorySim,
+>;
+
+#[allow(deprecated)]
+fn stargate(type_url: &str, value: Vec<u8>) -> cosmwasm_std::CosmosMsg {
+    cosmwasm_std::CosmosMsg::Stargate { type_url: type_url.into(), value: Binary::from(value) }
+}
+
+fn denom_admin(app: &TestApp, denom: &str) -> String {
+    #[allow(deprecated)]
+    let q = cosmwasm_std::QueryRequest::Stargate {
+        path: "/test.Admin".into(),
+        data: Binary::from(denom.as_bytes().to_vec()),
+    };
+    app.wrap().query(&q).unwrap()
+}
 
 use curve::msg::{ExecuteMsg as CurveExec, QueryMsg as CurveQuery};
 use curve::state::State as CurveState;
@@ -41,7 +175,7 @@ fn factory_contract() -> Box<dyn Contract<Empty>> {
 }
 
 struct Fx {
-    app: App,
+    app: TestApp,
     factory: Addr,
     admin: Addr,
     creator: Addr,
@@ -51,7 +185,7 @@ struct Fx {
 }
 
 fn setup() -> Fx {
-    let mut app = AppBuilder::new().build(|_, _, _| {});
+    let mut app = AppBuilder::new().with_stargate(TokenFactorySim).build(|_, _, _| {});
     let api = app.api().clone();
     let admin = api.addr_make("admin");
     let creator = api.addr_make("creator");
@@ -101,6 +235,8 @@ fn setup() -> Fx {
             "factory",
             None,
         )
+        .unwrap();
+    app.execute(admin.clone(), stargate("/test.DefaultAdmin", factory.as_bytes().to_vec()))
         .unwrap();
 
     Fx { app, factory, admin, creator, buyer, platform }
@@ -361,6 +497,52 @@ fn only_admin_can_repoint_the_curve_code() {
         .query_wasm_smart(f.factory.clone(), &QueryMsg::Config {})
         .unwrap();
     assert_eq!(cfg.curve_code_id, 999);
+}
+
+#[test]
+fn the_mint_key_ends_with_the_curve_where_nothing_can_use_it() {
+    // A denom admin can mint without limit, so a creator who kept it could mint after
+    // graduation and empty the locked pool. After a launch the admin must be the curve.
+    let mut f = setup();
+    f.create(TOKEN).unwrap();
+    let curve = f.launch(1).curve;
+    assert_eq!(denom_admin(&f.app, TOKEN), curve.to_string());
+}
+
+#[test]
+fn a_creator_who_keeps_the_mint_key_cannot_launch() {
+    let mut f = setup();
+    let creator = f.creator.clone();
+    // The creator still administers the denom: they skipped the handover to the factory.
+    f.app
+        .execute(
+            creator.clone(),
+            stargate("/test.SetAdmin", format!("{TOKEN}|{creator}").into_bytes()),
+        )
+        .unwrap();
+    let err = f.create(TOKEN).unwrap_err().to_string();
+    assert!(err.contains("not the admin") || err.contains("Error executing"), "{err}");
+    // Nothing was created and the seed is back with the creator: the tx reverted whole.
+    assert_eq!(f.balance(&creator, TOKEN), seed_total());
+    let all: LaunchesResponse = f
+        .app
+        .wrap()
+        .query_wasm_smart(f.factory.clone(), &QueryMsg::Launches { start_after: None, limit: None })
+        .unwrap();
+    assert!(all.launches.is_empty(), "a launch exists whose creator kept the mint key");
+
+    // Handing admin to the factory, as the app does in the same transaction, fixes it.
+    f.app
+        .execute(
+            creator.clone(),
+            stargate(
+                factory::MSG_CHANGE_ADMIN,
+                factory::encode_change_admin(creator.as_str(), TOKEN, f.factory.as_str()).to_vec(),
+            ),
+        )
+        .unwrap();
+    f.create(TOKEN).unwrap();
+    assert_eq!(denom_admin(&f.app, TOKEN), f.launch(1).curve.to_string());
 }
 
 #[test]

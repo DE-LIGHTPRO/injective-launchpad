@@ -49,7 +49,7 @@ test('every message in the plan is composed, none dropped', () => {
   const plan = planLaunch(input());
   const msgs = composeMessages(plan, CREATOR);
   assert.equal(msgs.length, plan.messages.length, 'a message was dropped during composition');
-  assert.equal(msgs.length, 4);
+  assert.equal(msgs.length, 5);
 });
 
 test('an unknown message type throws rather than being skipped', () => {

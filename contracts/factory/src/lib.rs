@@ -8,8 +8,8 @@
 
 use cosmwasm_schema::{cw_serde, QueryResponses};
 use cosmwasm_std::{
-    entry_point, to_json_binary, Addr, Binary, Coin, Deps, DepsMut, Env, MessageInfo, Order, Reply,
-    Response, StdResult, SubMsg, Uint128, WasmMsg, coins};
+    entry_point, to_json_binary, Addr, Binary, Coin, CosmosMsg, Deps, DepsMut, Env, MessageInfo,
+    Order, Reply, Response, StdResult, SubMsg, Uint128, WasmMsg, coins};
 use cw_storage_plus::{Item, Map};
 use launchpad_math::CurveConfig;
 use thiserror::Error;
@@ -908,7 +908,7 @@ fn create_launch(
 }
 
 #[entry_point]
-pub fn reply(deps: DepsMut, _env: Env, msg: Reply) -> Result<Response, FactoryError> {
+pub fn reply(deps: DepsMut, env: Env, msg: Reply) -> Result<Response, FactoryError> {
     if msg.id != REPLY_INSTANTIATE_CURVE {
         return Err(FactoryError::UnknownReply { id: msg.id });
     }
@@ -930,10 +930,40 @@ pub fn reply(deps: DepsMut, _env: Env, msg: Reply) -> Result<Response, FactoryEr
     LAUNCHES.save(deps.storage, pending.id, &launch)?;
     BY_DENOM.save(deps.storage, &pending.denom, &pending.id)?;
 
+    /*
+     * THE MINT KEY GOES TO THE CURVE, where no code can use it.
+     *
+     * A tokenfactory denom's admin can mint without limit. Left with the creator, that
+     * is a drain on every launch: mint a billion more after graduation and sell them
+     * into the locked pool until it is empty. Pons's tokens are fixed-supply ERC-20s
+     * with no mint function at all; this is the Injective equivalent.
+     *
+     * The creator hands admin to this factory in the launch transaction (the app's
+     * `MsgChangeAdmin` before `CreateLaunch`), and this hands it on to the curve. The
+     * curve has no message that mints and no wasm admin to give it one, so the supply
+     * is fixed for good, and anyone can verify it: the denom's authority metadata names
+     * the curve.
+     *
+     * ENFORCED BY FAILURE rather than by a query. If the creator did not hand admin to
+     * the factory, this message is refused by the tokenfactory module and the whole
+     * launch reverts, so a launch whose creator kept the mint key cannot exist.
+     */
+    #[allow(deprecated)]
+    let hand_over = CosmosMsg::Stargate {
+        type_url: MSG_CHANGE_ADMIN.to_string(),
+        value: encode_change_admin(
+            env.contract.address.as_str(),
+            &pending.denom,
+            curve.as_str(),
+        ),
+    };
+
     let mut res = Response::new()
+        .add_message(hand_over)
         .add_attribute("action", "launch_created")
         .add_attribute("id", pending.id.to_string())
-        .add_attribute("curve", curve.as_str());
+        .add_attribute("curve", curve.as_str())
+        .add_attribute("denom_admin", curve.as_str());
 
     /*
      * The creator's opening buy, spent on the curve that was just created.
@@ -966,6 +996,31 @@ pub fn reply(deps: DepsMut, _env: Env, msg: Reply) -> Result<Response, FactoryEr
     Ok(res)
 }
 
+/// Injective tokenfactory's admin handover. Fields, from
+/// `injective/tokenfactory/v1beta1/tx.proto`: `sender = 1`, `denom = 2`, `new_admin = 3`.
+pub const MSG_CHANGE_ADMIN: &str = "/injective.tokenfactory.v1beta1.MsgChangeAdmin";
+
+/// Protobuf-encode a `MsgChangeAdmin`. Three length-delimited strings, so it is written
+/// out by hand rather than pulling a protobuf crate into the contract.
+pub fn encode_change_admin(sender: &str, denom: &str, new_admin: &str) -> Binary {
+    let mut out = Vec::with_capacity(sender.len() + denom.len() + new_admin.len() + 12);
+    for (tag, s) in [(0x0au8, sender), (0x12, denom), (0x1a, new_admin)] {
+        out.push(tag);
+        let mut n = s.len();
+        loop {
+            let byte = (n & 0x7f) as u8;
+            n >>= 7;
+            if n == 0 {
+                out.push(byte);
+                break;
+            }
+            out.push(byte | 0x80);
+        }
+        out.extend_from_slice(s.as_bytes());
+    }
+    Binary::from(out)
+}
+
 /// Dig the new contract address out of the instantiate reply. Reading the
 /// event rather than the response data keeps this working whether or not the
 /// child sets `data`.
@@ -983,6 +1038,22 @@ fn instantiated_address(msg: &Reply) -> Option<String> {
                 .find(|a| a.key == "_contract_address" || a.key == "contract_address")
         })
         .map(|a| a.value.clone())
+}
+
+#[cfg(test)]
+mod unit {
+    use super::*;
+
+    #[test]
+    fn change_admin_encodes_as_the_protobuf_the_chain_expects() {
+        // Hand-checked bytes: tag, length, payload, for each of the three fields.
+        let b = encode_change_admin("ab", "c", "");
+        assert_eq!(b.as_slice(), &[0x0a, 2, b'a', b'b', 0x12, 1, b'c', 0x1a, 0]);
+        // A length past 127 takes a two-byte varint.
+        let long = "x".repeat(200);
+        let b = encode_change_admin(&long, "", "");
+        assert_eq!(&b.as_slice()[..3], &[0x0a, 0xc8, 0x01]);
+    }
 }
 
 #[entry_point]
