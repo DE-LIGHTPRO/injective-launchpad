@@ -87,6 +87,7 @@ const { planLaunch, describePlan } = await import(join(APP, 'src/lib/createLaunc
 const { composeMessages } = await import(join(APP, 'src/lib/broadcast.ts'));
 const { fixedCurveFor, FIXED_LP_RESERVE } = await import(join(APP, 'src/lib/launchLimits.ts'));
 const { NETWORK } = await import(join(APP, 'src/lib/config.ts'));
+const { factoryLaunchFee } = await import(join(APP, 'src/lib/chain.ts'));
 
 const symbol = (process.argv[2] ?? `TEST${Date.now().toString().slice(-4)}`).toUpperCase();
 const openingBuyQuote = Number(process.argv[3] ?? 0);
@@ -97,6 +98,17 @@ const network = NETWORK.name === 'mainnet' ? Network.Mainnet : Network.Testnet;
 
 const curve = { ...fixedCurveFor(NETWORK.quoteDecimals), feeBps: 100n };
 const initialBuy = BigInt(Math.round(openingBuyQuote * 10 ** NETWORK.quoteDecimals));
+
+/*
+ * The launchpad's own charge, read from the factory rather than assumed. The app
+ * does exactly this; a script that hardcoded zero would pass on a free testnet and
+ * fail on a configured mainnet, which is the wrong way round for a script whose job
+ * is to catch that before a creator does.
+ */
+const launchFee = await factoryLaunchFee();
+if (launchFee.amount > 0n) {
+  console.log(`  launchpad fee: ${Number(launchFee.amount) / 1e18} ${launchFee.denom}`);
+}
 
 let plan;
 try {
@@ -117,6 +129,7 @@ try {
     lpReserve: FIXED_LP_RESERVE,
     factory,
     ...(initialBuy > 0n ? { initialBuy } : {}),
+    ...(launchFee.amount > 0n ? { launchFee } : {}),
   });
 } catch (e) {
   // The app's own validation, reached before anything is signed, which is the whole

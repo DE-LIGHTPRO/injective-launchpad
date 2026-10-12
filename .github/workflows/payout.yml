@@ -1,0 +1,75 @@
+#
+# Pay every launch's accrued fees out to its creator and to the platform.
+#
+# WHY HERE AND NOT ON A LAPTOP. "Automatic" means it runs when nobody is watching,
+# and a cron on somebody's machine stops the moment that machine sleeps. The repo is
+# public, so scheduled Actions are free, and this needs nothing but gas.
+#
+# WHY A CRON AND NOT A CONTRACT. A CosmWasm contract cannot schedule itself: there is
+# no on-chain timer on Injective, so a contract only ever runs because something sent
+# it a message. See docs/PAYOUT-KEEPER.md for the alternative that was rejected
+# (paying out inside every trade, which charges every trader gas for somebody else's
+# payout and lets one unreceivable address break trading for that launch).
+#
+# THE SECRET IS A GAS-ONLY WALLET, and that is the whole safety argument. `claim_fees`
+# pays the creator and the platform at the addresses stored when the launch was
+# created; this wallet cannot redirect a single unit of it, only pay the gas to make
+# the transfer happen. A leak of KEEPER_MNEMONIC costs the gas in that wallet and
+# nothing else. It must NEVER be the deploy key, which is also the factory admin and
+# the platform recipient.
+#
+name: payout
+
+on:
+  schedule:
+    # Every fifteen minutes. GitHub runs scheduled jobs on a best-effort basis and
+    # can be several minutes late under load, which is fine: the keeper is
+    # idempotent, so a late run or a double run pays what is owed and nothing more.
+    - cron: '*/15 * * * *'
+  # So it can be run by hand without waiting for the schedule, which is also how you
+  # check it works after changing a secret.
+  workflow_dispatch:
+
+# Only one sweep at a time. Two overlapping runs would both read the same owed
+# balances and the second would find them already paid, wasting gas on a transaction
+# the chain refuses.
+concurrency:
+  group: payout
+  cancel-in-progress: false
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    # A sweep is seconds of work; anything longer means something is wrong and the
+    # job should fail rather than sit burning minutes.
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # Only the scripts' own dependencies. The app is not built or run here.
+      - name: Install
+        working-directory: scripts
+        run: npm ci || npm install
+
+      - name: Sweep
+        env:
+          INJ_MNEMONIC: ${{ secrets.KEEPER_MNEMONIC }}
+          NEXT_PUBLIC_NETWORK: ${{ vars.NEXT_PUBLIC_NETWORK }}
+          NEXT_PUBLIC_FACTORY_ADDRESS: ${{ vars.NEXT_PUBLIC_FACTORY_ADDRESS }}
+          NEXT_PUBLIC_LCD_URL: ${{ vars.NEXT_PUBLIC_LCD_URL }}
+        run: |
+          if [ -z "$INJ_MNEMONIC" ]; then
+            echo "KEEPER_MNEMONIC is not set. Add it under Settings > Secrets and"
+            echo "variables > Actions. It must be a wallet holding gas and nothing"
+            echo "else, NOT the deploy key."
+            exit 1
+          fi
+          if [ -z "$NEXT_PUBLIC_FACTORY_ADDRESS" ]; then
+            echo "NEXT_PUBLIC_FACTORY_ADDRESS is not set as a repository variable."
+            exit 1
+          fi
+          node scripts/payout-keeper.mjs
