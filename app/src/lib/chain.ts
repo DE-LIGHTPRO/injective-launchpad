@@ -624,6 +624,44 @@ export function quoteLabel(denom: string, quotes: QuoteAsset[] | undefined): str
  * which is what it did before this existed, rather than offering a quote the chain
  * will refuse.
  */
+/** The launchpad's own one-off charge for creating a launch, read from the factory. */
+export interface FactoryFee {
+  amount: bigint;
+  denom: string;
+}
+
+/**
+ * What this launchpad charges to create a launch.
+ *
+ * ZERO WHEN IT CANNOT BE READ, and that is the safe direction: the create form uses
+ * this to decide how much to attach, and guessing high would attach funds the
+ * factory refuses as unexpected, failing a launch that would otherwise have worked.
+ * An older factory has no such field and genuinely charges nothing. The chain is
+ * still the authority at signing time either way.
+ */
+export async function factoryLaunchFee(): Promise<FactoryFee> {
+  const none = { amount: 0n, denom: NETWORK.quoteDenom };
+  const factory = getFactoryAddress();
+  if (!factory || isDemoMode()) return none;
+  try {
+    const raw = await smartQuery<{ launch_fee?: unknown; launch_fee_denom?: unknown }>(
+      factory,
+      { config: {} },
+    );
+    const amount =
+      typeof raw.launch_fee === 'string' && /^[0-9]+$/.test(raw.launch_fee)
+        ? BigInt(raw.launch_fee)
+        : 0n;
+    const denom =
+      typeof raw.launch_fee_denom === 'string' && raw.launch_fee_denom.length > 0
+        ? raw.launch_fee_denom
+        : NETWORK.quoteDenom;
+    return { amount, denom };
+  } catch {
+    return none;
+  }
+}
+
 export async function listQuotes(): Promise<{ quotes: QuoteAsset[]; defaultDenom: string }> {
   const fallback = { quotes: [{ denom: NETWORK.quoteDenom, decimals: NETWORK.quoteDecimals }], defaultDenom: NETWORK.quoteDenom };
   const factory = getFactoryAddress();

@@ -103,6 +103,14 @@ export interface LaunchInput {
   feeSellBps?: number;
   /** Where the creator's share of each fee goes. */
   rewardRoute?: 'creator' | 'pool';
+  /**
+   * The launchpad's own one-off charge, attached alongside the seed.
+   *
+   * NOT Injective's denom-creation fee: that one is charged by the chain on
+   * `MsgCreateDenom` and never appears in these funds. This is the factory's
+   * `launch_fee`, which it forwards to the platform in the same transaction.
+   */
+  launchFee?: { amount: bigint; denom: string };
   factory: string;
 }
 
@@ -355,8 +363,11 @@ export function planLaunch(input: LaunchInput): LaunchPlan {
            * the panel renders the launch before the purchase, which is the order the
            * two things happen in.
            */
-          funds: [
+          funds: mergeFunds([
             { denom, amount: seed.toString() },
+            ...(input.launchFee && input.launchFee.amount > 0n
+              ? [{ denom: input.launchFee.denom, amount: input.launchFee.amount.toString() }]
+              : []),
             ...(input.initialBuy && input.initialBuy > 0n
               ? [
                   {
@@ -368,11 +379,33 @@ export function planLaunch(input: LaunchInput): LaunchPlan {
                   },
                 ]
               : []),
-          ],
+          ]),
         },
       },
     ],
   };
+}
+
+/**
+ * Coins of the same denom summed into one entry.
+ *
+ * THE BANK MODULE DOES THIS ANYWAY, and that is the point: a wallet cannot attach
+ * two separate `inj` entries and have them arrive separate. On an INJ-quoted launch
+ * the launchpad's fee and the creator's opening buy are both `inj`, so sending them
+ * as two entries produces a transaction whose funds do not match what was built,
+ * and the factory's exact-funds check refuses it. Merging here makes what we build
+ * identical to what the chain will see.
+ */
+function mergeFunds(
+  coins: Array<{ denom: string; amount: string }>,
+): Array<{ denom: string; amount: string }> {
+  const totals = new Map<string, bigint>();
+  const order: string[] = [];
+  for (const c of coins) {
+    if (!totals.has(c.denom)) order.push(c.denom);
+    totals.set(c.denom, (totals.get(c.denom) ?? 0n) + BigInt(c.amount));
+  }
+  return order.map((d) => ({ denom: d, amount: (totals.get(d) ?? 0n).toString() }));
 }
 
 /** A quote amount in whole units, at the quote's own decimals, trailing zeros trimmed. */

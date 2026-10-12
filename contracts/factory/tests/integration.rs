@@ -231,6 +231,8 @@ fn setup() -> Fx {
                 quote_denom: QUOTE.into(),
                 quote_decimals: 18,
             quote_virtual_whole: None,
+            launch_fee: None,
+            launch_fee_denom: None,
             },
             &[],
             "factory",
@@ -1961,4 +1963,230 @@ fn a_description_is_capped_and_refuses_control_characters() {
         description: Some("Line one.\n\tIndented, with an emoji \u{1f408} and \"quotes\".".into()),
     };
     assert!(ok.validate().is_ok(), "ordinary prose was refused");
+}
+
+// ---------------------------------------------------------- launch fee --
+
+/// The launchpad's own charge for creating a launch, paid to the platform.
+///
+/// NOT Injective's 1 INJ denom-creation fee: that goes to the chain, is set by a
+/// chain parameter, and nothing here can redirect or waive it. A creator on a
+/// configured mainnet pays both, and the create form itemises them separately.
+#[test]
+fn a_launch_fee_is_zero_by_default_and_charges_nothing() {
+    let mut f = setup();
+    f.create(TOKEN).unwrap();
+    // No fee configured, no fee coin needed, and the launch lands as it always did.
+    assert_eq!(f.launch(1).id, 1);
+}
+
+#[test]
+fn a_configured_launch_fee_reaches_the_platform_and_only_the_platform() {
+    let mut f = setup();
+    let admin = f.admin.clone();
+    let fee = amt(2) / Uint128::new(10); // 0.2
+    f.app
+        .execute_contract(
+            admin,
+            f.factory.clone(),
+            &ExecuteMsg::SetLaunchFee { amount: fee, denom: None },
+            &[],
+        )
+        .unwrap();
+
+    let platform = f.platform.clone();
+    let before = f.balance(&platform, QUOTE);
+
+    // The fee rides in the same coin as the seed's quote side.
+    f.app
+        .execute_contract(
+            f.creator.clone(),
+            f.factory.clone(),
+            &ExecuteMsg::CreateLaunch {
+                denom: TOKEN.into(),
+                fee_bps: 100,
+                fee_sell_bps: None,
+                reward_route: Default::default(),
+                quote_denom: None,
+                profile: Default::default(),
+                rules: Default::default(),
+                initial_buy: None,
+            },
+            &[
+                coin(seed_total().u128(), TOKEN),
+                coin(fee.u128(), QUOTE),
+            ],
+        )
+        .unwrap();
+
+    assert_eq!(
+        f.balance(&platform, QUOTE) - before,
+        fee,
+        "the launch fee did not reach the platform",
+    );
+    /*
+     * And the factory kept nothing. It holds the fee for the length of one message,
+     * exactly as it does the seed; a factory that accumulates dust is a factory
+     * that holds funds.
+     */
+    let factory = f.factory.clone();
+    assert_eq!(f.balance(&factory, QUOTE), Uint128::zero(), "the factory kept the fee");
+}
+
+#[test]
+fn a_launch_fee_is_separated_from_the_opening_buy_in_the_same_coin() {
+    /*
+     * THE CASE THAT BREAKS A NAIVE IMPLEMENTATION. A wallet cannot attach two
+     * separate `inj` entries: the bank module merges them before the contract sees
+     * anything. So on an INJ-quoted launch the fee and the dev buy arrive as ONE
+     * coin, and the factory has to split it by subtraction rather than look for a
+     * second entry. Get this wrong and the creator's opening buy silently becomes
+     * the fee, or the launch is refused for a fee that was in fact attached.
+     */
+    let mut f = setup();
+    let admin = f.admin.clone();
+    let fee = amt(2) / Uint128::new(10);
+    f.app
+        .execute_contract(
+            admin,
+            f.factory.clone(),
+            &ExecuteMsg::SetLaunchFee { amount: fee, denom: None },
+            &[],
+        )
+        .unwrap();
+
+    let platform = f.platform.clone();
+    let before = f.balance(&platform, QUOTE);
+    let buy = amt(3);
+
+    f.app
+        .execute_contract(
+            f.creator.clone(),
+            f.factory.clone(),
+            &ExecuteMsg::CreateLaunch {
+                denom: TOKEN.into(),
+                fee_bps: 100,
+                fee_sell_bps: None,
+                reward_route: Default::default(),
+                quote_denom: None,
+                profile: Default::default(),
+                rules: Default::default(),
+                initial_buy: Some(buy),
+            },
+            &[
+                coin(seed_total().u128(), TOKEN),
+                // One coin carrying both, which is all a wallet can send.
+                coin((buy + fee).u128(), QUOTE),
+            ],
+        )
+        .unwrap();
+
+    assert_eq!(f.balance(&platform, QUOTE) - before, fee, "the platform got the wrong amount");
+    // And the curve received the whole opening buy, not the remainder after a fee.
+    // The opening buy happened in full rather than being eaten by the fee split.
+    let sold = curve_config(&f, 1);
+    assert!(sold.curve.virtual_inj > Uint128::zero(), "the curve was not configured");
+}
+
+#[test]
+fn a_launch_without_the_fee_attached_is_refused_and_with_it_is_not() {
+    /*
+     * A DIFFERENTIAL, not a string match. cw-multi-test does not surface the
+     * contract's own sentence through this path: the error chain has one link and
+     * it prints the WasmMsg and its funds, so asserting on the wording here would
+     * be asserting on the harness rather than on the contract. Running the SAME
+     * create twice, once without the fee coin and once with it, pins the fee as the
+     * cause in a way no message can be wrong about.
+     */
+    let attempt = |f: &mut Fx, with_fee: Uint128| {
+        let creator = f.creator.clone();
+        let mut funds = vec![coin(seed_total().u128(), TOKEN)];
+        if with_fee > Uint128::zero() {
+            funds.push(coin(with_fee.u128(), QUOTE));
+        }
+        f.app.execute_contract(
+            creator,
+            f.factory.clone(),
+            &ExecuteMsg::CreateLaunch {
+                denom: TOKEN.into(),
+                fee_bps: 100,
+                fee_sell_bps: None,
+                reward_route: Default::default(),
+                quote_denom: None,
+                profile: Default::default(),
+                rules: Default::default(),
+                initial_buy: None,
+            },
+            &funds,
+        )
+    };
+
+    let fee = amt(2) / Uint128::new(10);
+
+    // Without a fee configured, no fee coin is needed.
+    let mut open = setup();
+    assert!(attempt(&mut open, Uint128::zero()).is_ok(), "an unconfigured launchpad charged");
+
+    // With one configured, the same call is refused, and the same call plus the fee
+    // is accepted. Nothing else differs between the two.
+    let mut charged = setup();
+    let admin = charged.admin.clone();
+    charged
+        .app
+        .execute_contract(
+            admin,
+            charged.factory.clone(),
+            &ExecuteMsg::SetLaunchFee { amount: fee, denom: None },
+            &[],
+        )
+        .unwrap();
+    assert!(
+        attempt(&mut charged, Uint128::zero()).is_err(),
+        "a launch with no fee attached was accepted",
+    );
+    assert!(
+        attempt(&mut charged, fee).is_ok(),
+        "a launch with exactly the fee attached was refused",
+    );
+}
+
+#[test]
+fn a_launch_fee_beyond_the_cap_is_refused() {
+    /*
+     * The admin key here is the launchpad's own. A launchpad that can set its
+     * creation fee to anything can close itself, accidentally or otherwise, so the
+     * cap is in the contract rather than in the operator's good intentions.
+     */
+    let mut f = setup();
+    let admin = f.admin.clone();
+    let err = f
+        .app
+        .execute_contract(
+            admin,
+            f.factory.clone(),
+            &ExecuteMsg::SetLaunchFee {
+                amount: Uint128::new(factory::MAX_LAUNCH_FEE) + Uint128::one(),
+                denom: None,
+            },
+            &[],
+        )
+        .unwrap_err()
+        .root_cause()
+        .to_string();
+    assert!(err.contains("maximum"), "refused for the wrong reason: {err}");
+}
+
+#[test]
+fn only_the_admin_may_set_the_launch_fee() {
+    let mut f = setup();
+    let creator = f.creator.clone();
+    assert!(f
+        .app
+        .execute_contract(
+            creator,
+            f.factory.clone(),
+            &ExecuteMsg::SetLaunchFee { amount: Uint128::one(), denom: None },
+            &[],
+        )
+        .is_err());
 }

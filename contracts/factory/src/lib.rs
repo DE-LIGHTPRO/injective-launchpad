@@ -335,6 +335,12 @@ pub enum FactoryError {
     #[error("quote `{denom}` opening reserve {got} is not between 1 and {max} whole units")]
     BadQuoteScale { denom: String, got: Uint128, max: Uint128 },
 
+    #[error("the launchpad's launch fee is {got}; the maximum is {max}")]
+    LaunchFeeTooHigh { got: Uint128, max: Uint128 },
+
+    #[error("this launch needs a {expected} {denom} launch fee attached; got {got}")]
+    BadLaunchFee { denom: String, expected: Uint128, got: Uint128 },
+
     #[error("`{denom}` is this factory's default quote and cannot be removed")]
     CannotRemoveDefaultQuote { denom: String },
 
@@ -377,7 +383,35 @@ pub struct Config {
     pub pending_admin: Option<Addr>,
     /// What buyers pay with, normally "inj".
     pub quote_denom: String,
+    /**
+     * The launchpad's own one-off charge for creating a launch, in base units of
+     * `launch_fee_denom`, paid to `platform`.
+     *
+     * CONFIGURATION, DEFAULTING TO ZERO, which is what keeps testnet free and lets
+     * mainnet set a real number without a redeploy. It is NOT Injective's 1 INJ
+     * denom-creation fee: that one goes to the chain, is set by a chain parameter,
+     * and nothing here can redirect or waive it. A creator on a configured mainnet
+     * pays both, and the create form itemises them separately for exactly that
+     * reason.
+     *
+     * Capped at `MAX_LAUNCH_FEE` so an admin cannot price launching out of reach,
+     * accidentally or otherwise.
+     */
+    #[serde(default)]
+    pub launch_fee: Uint128,
+    /// Denom of `launch_fee`. The native gas asset, because a creator paying the
+    /// chain's denom fee necessarily holds it whatever their launch is priced in.
+    #[serde(default)]
+    pub launch_fee_denom: String,
 }
+
+/// The most the launchpad may charge to create a launch, in base units.
+///
+/// 5 INJ. A cap rather than trust, for the same reason the trading fee has one: the
+/// admin key setting this is the launchpad's, and a launchpad that can set its own
+/// creation fee to anything can make launching impossible. It is also a number a
+/// creator can check against this constant.
+pub const MAX_LAUNCH_FEE: u128 = 5_000_000_000_000_000_000;
 
 /// Who a token says it is, stored where it can actually be read back.
 ///
@@ -622,6 +656,12 @@ pub struct InstantiateMsg {
     /// whose default quote is a stablecoin must set it.
     #[serde(default)]
     pub quote_virtual_whole: Option<Uint128>,
+    /// The launchpad's own charge for creating a launch. Absent means none.
+    #[serde(default)]
+    pub launch_fee: Option<Uint128>,
+    /// Denom of `launch_fee`. Absent means the default quote.
+    #[serde(default)]
+    pub launch_fee_denom: Option<String>,
 }
 
 #[cw_serde]
@@ -686,6 +726,12 @@ pub enum ExecuteMsg {
     /// Stop new launches using a quote asset. Existing launches are untouched: their
     /// curve and their reserve are on the curve contract and keep working.
     RemoveQuote { denom: String },
+    /// Set the launchpad's own one-off charge for creating a launch.
+    ///
+    /// Zero disables it, which is the default and what testnet runs. Capped at
+    /// `MAX_LAUNCH_FEE`: an admin that can price launching out of reach is a
+    /// launchpad that can close itself.
+    SetLaunchFee { amount: Uint128, denom: Option<String> },
     /// Point the factory at a new curve code id. Only affects future launches;
     /// existing ones are immutable by construction.
     SetCurveCodeId { code_id: u64 },
@@ -758,6 +804,16 @@ pub fn instantiate(
             platform: deps.api.addr_validate(&msg.platform)?,
             pending_admin: None,
             quote_denom: msg.quote_denom.clone(),
+            /*
+             * Zero unless the deploy says otherwise, so a factory is free to launch
+             * on until somebody deliberately turns the charge on. A default that
+             * charged would be a fee nobody chose.
+             */
+            launch_fee: msg.launch_fee.unwrap_or_default(),
+            launch_fee_denom: msg
+                .launch_fee_denom
+                .clone()
+                .unwrap_or_else(|| msg.quote_denom.clone()),
         },
     )?;
     /*
@@ -782,6 +838,13 @@ pub fn instantiate(
         .quote_virtual_whole
         .unwrap_or_else(|| Uint128::new(CURVE_VIRTUAL_QUOTE_WHOLE));
     validate_virtual_whole(&msg.quote_denom, virtual_whole)?;
+    // Capped here as well as in `SetLaunchFee`: a deploy is the other door in.
+    if msg.launch_fee.unwrap_or_default() > Uint128::new(MAX_LAUNCH_FEE) {
+        return Err(FactoryError::LaunchFeeTooHigh {
+            got: msg.launch_fee.unwrap_or_default(),
+            max: Uint128::new(MAX_LAUNCH_FEE),
+        });
+    }
     QUOTES.save(
         deps.storage,
         &msg.quote_denom,
@@ -857,6 +920,33 @@ pub fn execute(
                 .add_attribute("denom", denom)
                 .add_attribute("decimals", decimals.to_string())
                 .add_attribute("virtual_quote_whole", virtual_quote_whole.to_string()))
+        }
+        ExecuteMsg::SetLaunchFee { amount, denom } => {
+            let mut cfg = CONFIG.load(deps.storage)?;
+            if info.sender != cfg.admin {
+                return Err(FactoryError::Unauthorised);
+            }
+            if amount > Uint128::new(MAX_LAUNCH_FEE) {
+                return Err(FactoryError::LaunchFeeTooHigh {
+                    got: amount,
+                    max: Uint128::new(MAX_LAUNCH_FEE),
+                });
+            }
+            if let Some(d) = &denom {
+                if d.trim().is_empty() {
+                    return Err(FactoryError::BadQuoteDenom);
+                }
+                cfg.launch_fee_denom = d.clone();
+            }
+            if cfg.launch_fee_denom.is_empty() {
+                cfg.launch_fee_denom = cfg.quote_denom.clone();
+            }
+            cfg.launch_fee = amount;
+            CONFIG.save(deps.storage, &cfg)?;
+            Ok(Response::new()
+                .add_attribute("action", "set_launch_fee")
+                .add_attribute("amount", amount.to_string())
+                .add_attribute("denom", cfg.launch_fee_denom))
         }
         ExecuteMsg::RemoveQuote { denom } => {
             let cfg = CONFIG.load(deps.storage)?;
@@ -1060,18 +1150,60 @@ fn create_launch(
      *     how a fund-holding factory starts
      */
     let want_quote = initial_buy.unwrap_or_default();
+    /*
+     * THE LAUNCHPAD'S OWN FEE RIDES IN THE SAME COIN AS THE OPENING BUY when the two
+     * share a denom, which on an INJ-quoted launch they do. A wallet cannot attach
+     * two separate `inj` entries and have them stay separate: the bank module merges
+     * them before the contract sees anything. So the fee is accounted for by
+     * SUBTRACTION rather than by looking for a second coin, and the "nothing else
+     * attached" rule below still holds.
+     *
+     * On a launch priced in something else the fee is its own denom and is counted
+     * on its own, which is why `fee_denom` is compared before `quote`.
+     */
+    let launch_fee = cfg.launch_fee;
+    let fee_denom = if cfg.launch_fee_denom.is_empty() {
+        cfg.quote_denom.clone()
+    } else {
+        cfg.launch_fee_denom.clone()
+    };
+    let fee_shares_quote = launch_fee > Uint128::zero() && fee_denom == quote;
+
     let mut got_seed = Uint128::zero();
     let mut got_quote = Uint128::zero();
+    let mut got_fee = Uint128::zero();
     for coin in &info.funds {
         if coin.denom == denom {
             got_seed = got_seed.checked_add(coin.amount)?;
         } else if coin.denom == quote {
             got_quote = got_quote.checked_add(coin.amount)?;
+        } else if launch_fee > Uint128::zero() && coin.denom == fee_denom {
+            got_fee = got_fee.checked_add(coin.amount)?;
         } else {
             return Err(FactoryError::UnexpectedFunds {
                 denom: coin.denom.clone(),
             });
         }
+    }
+    if fee_shares_quote {
+        // One coin carried both. Split it, and refuse before the subtraction can
+        // wrap: too little attached must read as a missing fee, not as a vast buy.
+        if got_quote < launch_fee {
+            return Err(FactoryError::BadLaunchFee {
+                denom: fee_denom.clone(),
+                expected: launch_fee,
+                got: got_quote,
+            });
+        }
+        got_fee = launch_fee;
+        got_quote = got_quote.checked_sub(launch_fee)?;
+    }
+    if got_fee != launch_fee {
+        return Err(FactoryError::BadLaunchFee {
+            denom: fee_denom.clone(),
+            expected: launch_fee,
+            got: got_fee,
+        });
     }
 
     if got_seed != required {
@@ -1158,8 +1290,25 @@ fn create_launch(
         REPLY_INSTANTIATE_CURVE,
     );
 
-    Ok(Response::new()
-        .add_submessage(sub)
+    /*
+     * The launchpad's fee goes out in the SAME transaction, straight to `platform`.
+     * The factory is never a custodian: it holds the fee for the length of one
+     * message, exactly as it does the seed, and a launch that reverts takes the fee
+     * payment with it. Attached as a plain bank send rather than a submessage
+     * because there is nothing to do on its reply and a failure must fail the launch.
+     */
+    let mut res = Response::new().add_submessage(sub);
+    if launch_fee > Uint128::zero() {
+        res = res
+            .add_message(CosmosMsg::Bank(cosmwasm_std::BankMsg::Send {
+                to_address: cfg.platform.to_string(),
+                amount: vec![Coin { denom: fee_denom.clone(), amount: launch_fee }],
+            }))
+            .add_attribute("launch_fee", launch_fee.to_string())
+            .add_attribute("launch_fee_denom", fee_denom);
+    }
+
+    Ok(res
         .add_attribute("action", "create_launch")
         .add_attribute("id", id.to_string())
         .add_attribute("denom", denom)

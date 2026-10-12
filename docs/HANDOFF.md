@@ -45,6 +45,28 @@ module costs ~3.65M against a 600,000 default and the SDK reports only
 `INJ_CURVE_CODE_ID` / `INJ_FACTORY_CODE_ID` reuse an existing code id after verifying its
 hash, which is the right move when only one contract changed.
 
+### Mainnet launch fee, written and NOT yet deployed
+
+The factory charges `launch_fee` (config, default 0) on `CreateLaunch` and forwards
+it to `platform` in the same transaction. Set it at deploy with
+`INJ_LAUNCH_FEE=0.2`, or afterwards with `SetLaunchFee` as admin. Capped at 5 INJ by
+`MAX_LAUNCH_FEE`, because an admin who can price launching out of reach can close
+the launchpad.
+
+**It is not Injective's denom fee.** The chain charges a flat **1 INJ** on
+`MsgCreateDenom` (`denom_creation_fee`, measured 12 Oct 2026); that goes to the
+chain and nothing here can redirect or waive it. A creator on mainnet pays
+1 INJ + 0.2 INJ + gas, and the create form itemises the two separately.
+
+**The fee rides in the same coin as the opening buy.** A wallet cannot attach two
+separate `inj` entries; the bank module merges them first. The factory splits by
+subtraction and the app merges before building, so what is built is what the chain
+sees. Getting this wrong silently turns a creator's dev buy into the fee.
+
+Still to do: fund the deploy wallet, then
+`INJ_LAUNCH_FEE=0.2 INJ_CURVE_CODE_ID=39974 node scripts/deploy.mjs`, point the app
+at the new factory and REDEPLOY (see the inlining note above).
+
 Verified on chain, not just in tests: `scripts/dry-run-create.mjs` (both message shapes),
 `scripts/e2e-testnet.mjs` (all 8 steps including graduation and a 70/30 payout), and a live
 launch `VETTA` with 10 real trades.

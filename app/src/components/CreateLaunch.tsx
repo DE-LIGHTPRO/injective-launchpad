@@ -40,6 +40,7 @@ import {
 } from '@/lib/launchLimits';
 import { useConnectedAccount } from '@/lib/walletStore';
 import { profileForChain, profileFieldError, imageSrc } from '@/lib/tokenProfile';
+import { launchCost, launchAffordable } from '@/lib/launchCost';
 import {
   rulesForChain,
   earlyFeeForChain,
@@ -99,6 +100,16 @@ const DEFAULTS = {
 export function CreateLaunch() {
   const [f, setF] = useState(DEFAULTS);
   /*
+   * The wallet's gas balance, so the form can refuse a launch it knows cannot land.
+   * `null` means not read, which is NOT "insufficient": see `launchAffordable`.
+   */
+  const [gasBalance, setGasBalance] = useState<bigint | null>(null);
+  /** The launchpad's own charge, read from the factory. Zero until it is known. */
+  const [launchFee, setLaunchFee] = useState<{ amount: bigint; denom: string }>({
+    amount: 0n,
+    denom: NETWORK.quoteDenom,
+  });
+  /*
    * The connected account comes from the shared store, not local state. It used to be
    * a `useState` set only by this page's own ConnectWallet, so connecting in the header
    * (the usual place) left the Sign section still showing "Connect a wallet" even though
@@ -106,6 +117,35 @@ export function CreateLaunch() {
    * the same way the trade panel reads it.
    */
   const account = useConnectedAccount();
+
+  /*
+   * Read once per connected account, not on every keystroke. The figure only has to
+   * be good enough to catch "this wallet plainly cannot pay the 1 INJ denom fee";
+   * the chain is still the authority at signing time.
+   */
+  useEffect(() => {
+    if (!account) {
+      setGasBalance(null);
+      return;
+    }
+    let live = true;
+    void (async () => {
+      const [{ denomBalance }, { factoryLaunchFee }] = await Promise.all([
+        import('@/lib/wallet'),
+        import('@/lib/chain'),
+      ]);
+      const [b, fee] = await Promise.all([
+        denomBalance(account.address, NETWORK.gasDenom).catch(() => null),
+        factoryLaunchFee().catch(() => ({ amount: 0n, denom: NETWORK.quoteDenom })),
+      ]);
+      if (!live) return;
+      setGasBalance(b);
+      setLaunchFee(fee);
+    })();
+    return () => {
+      live = false;
+    };
+  }, [account]);
 
   /*
    * The quote assets this launchpad allows, read from the factory.
@@ -303,6 +343,25 @@ export function CreateLaunch() {
    * initialization"); the try/catch below turned that into a form error, and the create
    * flow could never reach the sign step. Order matters for useMemo bodies.
    */
+  /*
+   * WHAT THIS LAUNCH COSTS IN INJ, and whether the wallet can pay it, worked out
+   * BEFORE anything is signed. Injective charges a flat 1 INJ to create a denom and
+   * the wallet's balance is already known, so a creator being sent to their wallet
+   * to sign a transaction that cannot land is a failure the page chose not to catch.
+   */
+  const cost = useMemo(
+    () =>
+      launchCost({
+        openingBuy: devBuy,
+        launchFee: launchFee.amount,
+        launchFeeDenom: launchFee.denom,
+        quoteDenom: activeQuote,
+        gasDenom: NETWORK.gasDenom,
+      }),
+    [devBuy, activeQuote, launchFee],
+  );
+  const affordable = launchAffordable(gasBalance, cost);
+
   const plan = useMemo((): { plan: LaunchPlan } | { error: string; field?: string } | null => {
     if ('error' in built) return { error: built.error };
     if (!account) return null;
@@ -316,6 +375,9 @@ export function CreateLaunch() {
           description: f.description,
           rules: { ...rulesForChain(builtRules), ...earlyFeeForChain(builtRules.earlyFee) },
           initialBuy: devBuy,
+          // Attached alongside the seed; the factory forwards it to the platform in
+          // the same transaction and never holds it.
+          launchFee: launchFee.amount > 0n ? launchFee : undefined,
           profile: profileForChain({
             image: f.image,
             website: f.website,
@@ -1025,9 +1087,43 @@ export function CreateLaunch() {
               </span>
             </label>
 
+            {/*
+                THE COST, ITEMISED, and a refusal when the wallet plainly cannot pay
+                it. `affordable === false` only when a balance was actually read:
+                `null` is "not known" and must not block a launch, because an
+                unreachable LCD says nothing about whether the wallet is funded.
+              */}
+            <div className="metric-row">
+              <span className="k">
+                Costs to create{' '}
+                <span className="note">
+                  ({fmt(cost.denomFee, NETWORK.quoteDecimals, 2)} Injective denom fee
+                  {cost.launchFee > 0n
+                    ? `, ${fmt(cost.launchFee, NETWORK.quoteDecimals, 2)} launchpad fee`
+                    : ''}
+                  {cost.openingBuy > 0n
+                    ? `, ${fmt(cost.openingBuy, NETWORK.quoteDecimals, 4)} opening buy`
+                    : ''}
+                  , plus gas)
+                </span>
+              </span>
+              <span className="v mono">
+                {fmt(cost.total, NETWORK.quoteDecimals, 4)} {NETWORK.quoteSymbol}
+              </span>
+            </div>
+            {affordable === false && (
+              <p className="note err-text">
+                This wallet holds {fmt(gasBalance ?? 0n, NETWORK.quoteDecimals, 4)}{' '}
+                {NETWORK.quoteSymbol}. Creating a token costs{' '}
+                {fmt(cost.total, NETWORK.quoteDecimals, 4)} {NETWORK.quoteSymbol}, most of
+                it Injective&rsquo;s own one-off charge for a new denom. Top the wallet up
+                and this will unlock.
+              </p>
+            )}
+
             <button
               className="go"
-              disabled={!confirmed || busy}
+              disabled={!confirmed || busy || affordable === false}
               onClick={() => void sign()}
             >
               {busy ? 'Waiting for your wallet…' : `Create ${f.symbol.trim() || 'launch'}`}

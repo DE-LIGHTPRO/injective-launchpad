@@ -510,6 +510,23 @@ console.log(
     (configAdmin === sender ? '  ← the deploy key; fine on testnet only' : ''),
 );
 
+/**
+ * `INJ_LAUNCH_FEE` in whole INJ, as base units. Absent means no charge.
+ *
+ * Refused rather than rounded if it is not a number, because a typo silently
+ * becoming zero is a launchpad that forgot to charge, and one silently becoming
+ * something large is worse.
+ */
+function launchFeeBaseUnits() {
+  const raw = process.env.INJ_LAUNCH_FEE?.trim();
+  if (!raw) return '0';
+  if (!/^[0-9]+(\.[0-9]{1,18})?$/.test(raw)) {
+    die(`INJ_LAUNCH_FEE is not a plain INJ amount: ${raw}`, 'For example: INJ_LAUNCH_FEE=0.2');
+  }
+  const [whole, frac = ''] = raw.split('.');
+  return (BigInt(whole) * 10n ** 18n + BigInt(frac.padEnd(18, '0'))).toString();
+}
+
 const initMsg = {
   admin: configAdmin,
   curve_code_id: curveCodeId,
@@ -529,8 +546,22 @@ const initMsg = {
    * fails to look right by accident.
    */
   quote_virtual_whole: '676',
+  /*
+   * THE LAUNCHPAD'S OWN CHARGE for creating a launch, paid to `platform` in the
+   * same transaction. Set by `INJ_LAUNCH_FEE` in whole quote units, so testnet
+   * deploys free and mainnet deploys with the real number. This is NOT Injective's
+   * 1 INJ denom-creation fee: that goes to the chain, is a chain parameter, and
+   * nothing here can redirect or waive it. A creator pays both.
+   */
+  launch_fee: launchFeeBaseUnits(),
+  launch_fee_denom: 'inj',
 };
 await assertPayable('platform fee recipient', initMsg.platform);
+if (initMsg.launch_fee !== '0') {
+  console.log(
+    `     launch fee: ${(Number(initMsg.launch_fee) / 1e18).toFixed(4)} INJ to ${initMsg.platform}`,
+  );
+}
 if (configAdmin !== sender) await assertPayable('factory admin', configAdmin);
 if (factoryWasmAdmin && factoryWasmAdmin !== sender) {
   await assertPayable('factory upgrade key', factoryWasmAdmin);
