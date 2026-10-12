@@ -60,10 +60,43 @@ export class BroadcastError extends Error {
   }
 }
 
+/** 18-decimal base units as a readable amount, trimmed. */
+function formatInj(raw: string): string {
+  try {
+    const v = BigInt(raw);
+    const whole = v / 10n ** 18n;
+    const frac = (v % 10n ** 18n).toString().padStart(18, '0').slice(0, 4).replace(/0+$/, '');
+    return `${whole}${frac ? `.${frac}` : ''}`;
+  } catch {
+    return raw;
+  }
+}
+
+/** A denom as a reader knows it. Anything unfamiliar keeps its own name. */
+function denomLabelFor(denom: string): string {
+  return denom === 'inj' ? 'INJ' : denom;
+}
+
 /** Translates a node error into something a person can act on. */
 export function describeBroadcastFailure(raw: string): string {
   const s = raw.toLowerCase();
   if (s.includes('insufficient funds') || s.includes('insufficient fee')) {
+    /*
+     * NAME THE TWO NUMBERS when the chain gives them. Injective's refusal reads
+     *
+     *   spendable balance 403213882356322213inj is smaller than 1000000000000000000inj
+     *
+     * and "Not enough INJ to cover the transaction fee" is wrong twice over: the
+     * shortfall was the one-off 1 INJ denom-creation charge, not a gas fee, and a
+     * creator told it is "the fee" goes looking at gas settings. Reported from
+     * production, twice in one evening.
+     */
+    const pair = /spendable balance (\d+)([a-z0-9/._-]+) is smaller than (\d+)/i.exec(raw);
+    if (pair) {
+      const held = formatInj(pair[1]);
+      const need = formatInj(pair[3]);
+      return `This needs ${need} ${denomLabelFor(pair[2])} and the wallet holds ${held}. Creating a token costs a one-off 1 INJ to Injective itself, on top of gas.`;
+    }
     return 'Not enough INJ to cover the transaction fee.';
   }
   /*

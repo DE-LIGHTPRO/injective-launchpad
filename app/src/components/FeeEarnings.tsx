@@ -171,11 +171,23 @@ export function FeeEarnings({
           {/* Sticky header already offers this; a second identical button here is
               the same control twice on one screen. */}
           <p className="note">
-            Connect a wallet, using the button in the header, to pay these out.
+            These are paid out automatically. Connect a wallet to send them now
+            instead of waiting.
           </p>
           <p className="note">
-            Anyone can trigger the payout, and it pays the creator and the launchpad at
-            the addresses set when this launch was created. Connecting only pays the gas.
+            {/*
+                THE SAFETY PROPERTY LEADS, because the old wording did not and read
+                as a warning. "Anyone can trigger the payout" is alarming on its own
+                and reassuring the moment you know it cannot be redirected: the
+                contract pays the two addresses fixed when the launch was created,
+                and whoever sends the message chooses nothing but to pay the gas.
+                That is also what lets payouts be automatic at all, since the keeper
+                is an ordinary wallet with no special standing.
+              */}
+            The payout always goes to the creator and the launchpad at the addresses
+            set when this launch was created. Nobody can change where it goes, which
+            is why anyone is allowed to trigger it and why sending it only costs the
+            sender gas.
           </p>
         </div>
       ) : (

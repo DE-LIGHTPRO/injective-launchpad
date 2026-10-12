@@ -117,3 +117,28 @@ test('the fallback still covers an error nobody anticipated', () => {
   assert.match(msg, /chain refused/i);
   assert.doesNotMatch(msg, /rpc error|desc =/i);
 });
+
+test('an insufficient balance names what is needed and what is held', () => {
+  /*
+   * Reported from production twice in one evening: a creator with 0.403 INJ clicked
+   * Create, signed, and got "The chain refused the transaction." Injective's own
+   * refusal carries both numbers, and the previous message ("Not enough INJ to cover
+   * the transaction fee") was wrong twice: the shortfall was the one-off 1 INJ
+   * denom-creation charge, not gas, and a creator told it is "the fee" goes looking
+   * at gas settings.
+   */
+  const msg = describeBroadcastFailure(
+    'failed to execute message; message index: 0: spendable balance 403213882356322213inj ' +
+      'is smaller than 1000000000000000000inj: insufficient funds',
+  );
+  assert.match(msg, /0\.4032/, `the held amount is missing: ${msg}`);
+  assert.match(msg, /\b1 INJ\b/, `the required amount is missing: ${msg}`);
+  assert.doesNotMatch(msg, /403213882356322213/, 'base units leaked to the reader');
+});
+
+test('an insufficient balance with no figures still says something useful', () => {
+  // Not every node phrases it the same way, and the fallback must not be a crash or
+  // a sentence with holes in it.
+  const msg = describeBroadcastFailure('insufficient funds');
+  assert.match(msg, /INJ/);
+});
