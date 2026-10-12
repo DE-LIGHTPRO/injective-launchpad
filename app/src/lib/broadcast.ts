@@ -66,6 +66,24 @@ export function describeBroadcastFailure(raw: string): string {
   if (s.includes('insufficient funds') || s.includes('insufficient fee')) {
     return 'Not enough INJ to cover the transaction fee.';
   }
+  /*
+   * NOT A FAILURE, and the generic ending made it read as one. A creator clicked
+   * "Pay out fees", the claim landed, the page kept showing the figures it was
+   * server-rendered with, so they clicked again and got "The chain refused the
+   * transaction" over an unchanged balance. The honest reading is that the money has
+   * already moved; the stale panel is fixed separately, and this sentence is what
+   * somebody sees when two tabs or two clicks race.
+   */
+  if (s.includes('nothing to claim')) {
+    return 'There is nothing left to claim: these fees have already been paid out.';
+  }
+  /*
+   * The curve refusing a trade on its own terms, rather than the chain refusing the
+   * transaction. "Refused" over a correct, deliberate contract rule reads as a bug.
+   */
+  if (s.includes('slippage')) {
+    return 'The price moved past your slippage tolerance before this landed. Try again.';
+  }
   if (s.includes('denom') && s.includes('exists')) {
     return 'That ticker is already taken on this chain. Choose another.';
   }

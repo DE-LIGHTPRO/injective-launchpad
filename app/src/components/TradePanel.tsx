@@ -22,6 +22,7 @@ import {
 import { NETWORK } from '@/lib/config';
 import { isDemoMode } from '@/lib/demo';
 import { buyingOpenAt, feeBpsAt, secondsUntilBaseFee, NO_RULES, type LaunchRules } from '@/lib/launchRules';
+import { useRouter } from 'next/navigation';
 import { useConnectedAccount } from '@/lib/walletStore';
 import { denomBalance } from '@/lib/wallet';
 import type { Quote } from '@/lib/chain';
@@ -126,6 +127,7 @@ export function TradePanel({
    * panel could tell.
    */
   const account = useConnectedAccount();
+  const router = useRouter();
   const [quoteBal, setQuoteBal] = useState<bigint | null>(null);
   const [tokenBal, setTokenBal] = useState<bigint | null>(null);
 
@@ -304,6 +306,14 @@ export function TradePanel({
       });
       setTxHash(txHash);
       setInput('');
+      /*
+       * THE SAME DEFECT THE CLAIM PANEL HAD. Market cap, curve reserve, progress,
+       * tokens sold and the chart are all server-rendered props; nothing refetched
+       * them after a trade, so a buy that landed left every figure on the page
+       * reading as it did before. `router.refresh()` re-runs the server component
+       * against the chain, which is the only honest source for them.
+       */
+      router.refresh();
     } catch (e) {
       setTradeError((e as Error).message);
     } finally {

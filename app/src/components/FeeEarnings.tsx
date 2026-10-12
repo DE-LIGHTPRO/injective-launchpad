@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { fmt } from '@/lib/curve';
 import { NETWORK } from '@/lib/config';
 import { CREATOR_FEE_SHARE_BPS, PLATFORM_FEE_SHARE_BPS } from '@/lib/launchLimits';
@@ -54,6 +55,7 @@ export function FeeEarnings({
   // The connected account comes from the shared store, so connecting in the header is
   // recognised here too. Local state used to leave this panel asking to connect again.
   const account = useConnectedAccount();
+  const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [txHash, setTxHash] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -78,6 +80,21 @@ export function FeeEarnings({
         gas: GAS.claim,
       });
       setTxHash(txHash);
+      /*
+       * THE FIGURES ABOVE ARE SERVER-RENDERED PROPS AND NOTHING REFETCHED THEM.
+       *
+       * A creator clicked this, the claim landed, and the panel kept showing the
+       * same unclaimed balance, so it looked like nothing happened. They clicked
+       * again, the contract answered "nothing to claim", and the UI translated that
+       * into "The chain refused the transaction" over figures that still said money
+       * was owed. Three separate things telling them the opposite of the truth.
+       *
+       * `router.refresh()` re-runs the server component against the chain, which is
+       * the only honest source for these: an optimistic zero here would be a number
+       * we invented, and the one thing this panel must not do is show a balance
+       * nothing measured.
+       */
+      router.refresh();
     } catch (e) {
       /*
        * The wallet's own sentence, through the translator the launch path uses. An
