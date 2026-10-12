@@ -5,6 +5,8 @@ import {
   launchAffordable,
   DENOM_CREATION_FEE,
   LAUNCH_GAS_RESERVE,
+  denomCreationFeeFor,
+  fetchDenomCreationFee,
 } from './launchCost.ts';
 import { planLaunch, MSG_EXECUTE } from './createLaunch.ts';
 import { fixedCurveFor, FIXED_LP_RESERVE } from './launchLimits.ts';
@@ -107,4 +109,35 @@ test('a launch with no launchpad fee attaches exactly what it always did', () =>
   const exec = plan.messages.find((m) => m.typeUrl === MSG_EXECUTE);
   const funds = (exec!.value as { funds: Array<{ denom: string }> }).funds;
   assert.equal(funds.length, 1, 'something extra was attached to a free launch');
+});
+
+test('mainnet and testnet charge different denom fees', () => {
+  /*
+   * MEASURED 12 Oct 2026, by asking each chain rather than assuming they agree:
+   * testnet charges 1 INJ, mainnet charges 0.1. The constant was taken from testnet,
+   * so on mainnet the pre-flight would have told a creator they need 1.25 INJ when
+   * they need 0.35 and refused a launch they could comfortably afford, from a check
+   * written to prevent exactly that. Both numbers are plausible and nothing on
+   * screen would have looked wrong.
+   */
+  assert.equal(denomCreationFeeFor('testnet'), 1_000_000_000_000_000_000n);
+  assert.equal(denomCreationFeeFor('mainnet'), 100_000_000_000_000_000n);
+  assert.notEqual(denomCreationFeeFor('mainnet'), denomCreationFeeFor('testnet'));
+
+  // And the cost follows the fee it is given, rather than a constant of its own.
+  const main = launchCost({
+    denomFee: denomCreationFeeFor('mainnet'),
+    quoteDenom: 'inj',
+    gasDenom: 'inj',
+  });
+  assert.equal(main.denomFee, 100_000_000_000_000_000n);
+  assert.ok(main.total < launchCost({ quoteDenom: 'inj', gasDenom: 'inj' }).total);
+});
+
+test('an unreadable chain fee keeps the measured constant, never zero', async () => {
+  /*
+   * Zero would under-report the cost and put the failure back where it started:
+   * after signing. `null` is what the caller falls back on.
+   */
+  assert.equal(await fetchDenomCreationFee('http://127.0.0.1:1'), null);
 });

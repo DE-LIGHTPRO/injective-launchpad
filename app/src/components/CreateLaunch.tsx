@@ -20,7 +20,7 @@ import {
   type CurveConfig,
   type CurveState,
 } from '@/lib/curve';
-import { NETWORK, getFactoryAddress, isDeployed } from '@/lib/config';
+import { NETWORK, getFactoryAddress, getLcdUrl, isDeployed } from '@/lib/config';
 import {
   FIXED_TOTAL_SUPPLY,
   FIXED_TOTAL_SUPPLY_TOKENS,
@@ -40,7 +40,12 @@ import {
 } from '@/lib/launchLimits';
 import { useConnectedAccount } from '@/lib/walletStore';
 import { profileForChain, profileFieldError, imageSrc } from '@/lib/tokenProfile';
-import { launchCost, launchAffordable } from '@/lib/launchCost';
+import {
+  launchCost,
+  launchAffordable,
+  denomCreationFeeFor,
+  fetchDenomCreationFee,
+} from '@/lib/launchCost';
 import {
   rulesForChain,
   earlyFeeForChain,
@@ -110,6 +115,13 @@ export function CreateLaunch() {
     denom: NETWORK.quoteDenom,
   });
   /*
+   * The CHAIN's denom creation fee, which differs per network: testnet charges
+   * 1 INJ and mainnet charges 0.1 (measured 12 Oct 2026). Seeded with the measured
+   * constant for this network so the form is never wrong while the read is in
+   * flight, then replaced by what the chain says.
+   */
+  const [denomFee, setDenomFee] = useState<bigint>(denomCreationFeeFor(NETWORK.name));
+  /*
    * The connected account comes from the shared store, not local state. It used to be
    * a `useState` set only by this page's own ConnectWallet, so connecting in the header
    * (the usual place) left the Sign section still showing "Connect a wallet" even though
@@ -134,13 +146,17 @@ export function CreateLaunch() {
         import('@/lib/wallet'),
         import('@/lib/chain'),
       ]);
-      const [b, fee] = await Promise.all([
+      const [b, fee, chainFee] = await Promise.all([
         denomBalance(account.address, NETWORK.gasDenom).catch(() => null),
         factoryLaunchFee().catch(() => ({ amount: 0n, denom: NETWORK.quoteDenom })),
+        fetchDenomCreationFee(getLcdUrl()).catch(() => null),
       ]);
       if (!live) return;
       setGasBalance(b);
       setLaunchFee(fee);
+      // null is "could not read", which keeps the measured constant rather than
+      // replacing it with a zero that would under-report the cost.
+      if (chainFee !== null) setDenomFee(chainFee);
     })();
     return () => {
       live = false;
@@ -355,10 +371,11 @@ export function CreateLaunch() {
         openingBuy: devBuy,
         launchFee: launchFee.amount,
         launchFeeDenom: launchFee.denom,
+        denomFee,
         quoteDenom: activeQuote,
         gasDenom: NETWORK.gasDenom,
       }),
-    [devBuy, activeQuote, launchFee],
+    [devBuy, activeQuote, launchFee, denomFee],
   );
   const affordable = launchAffordable(gasBalance, cost);
 

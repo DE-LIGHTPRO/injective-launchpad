@@ -38,6 +38,58 @@ export const DENOM_CREATION_FEE = 1_000_000_000_000_000_000n;
 export const DENOM_FEE_SOURCE = 'injective/tokenfactory/v1beta1/params';
 
 /**
+ * Mainnet's fee, which is NOT testnet's.
+ *
+ * Measured 12 Oct 2026: testnet charges 1 INJ and **mainnet charges 0.1 INJ**. The
+ * constant above was taken from testnet and would have told a mainnet creator they
+ * need 1.25 INJ when they need 0.35, refusing launches they can comfortably afford,
+ * from a pre-flight check written to stop exactly that kind of refusal.
+ *
+ * Found by querying mainnet rather than by assuming the chains agree, which is the
+ * only reason it was found at all: both numbers are plausible and nothing on screen
+ * would have looked wrong.
+ */
+export const DENOM_CREATION_FEE_MAINNET = 100_000_000_000_000_000n;
+
+/**
+ * The fee for a network, used when the chain has not been asked.
+ *
+ * A FALLBACK, not the answer. `fetchDenomCreationFee` reads the chain parameter,
+ * which is authoritative and can change without anybody editing this file; this is
+ * what the form uses until that resolves, and what it falls back to if the LCD is
+ * unreachable. Erring high on testnet is harmless; erring high on mainnet would
+ * refuse a fundable launch, which is why mainnet gets its own measured number
+ * rather than inheriting testnet's.
+ */
+export function denomCreationFeeFor(network: string): bigint {
+  return network === 'mainnet' ? DENOM_CREATION_FEE_MAINNET : DENOM_CREATION_FEE;
+}
+
+/**
+ * The chain's own `denom_creation_fee`, which is the authority.
+ *
+ * Returns null rather than a guess when it cannot be read, so the caller falls back
+ * to the measured constant for its network instead of to zero: a zero fee would
+ * under-report the cost and put the failure back where it was, after signing.
+ */
+export async function fetchDenomCreationFee(lcd: string): Promise<bigint | null> {
+  try {
+    const res = await fetch(`${lcd.replace(/\/+$/, '')}/${DENOM_FEE_SOURCE}`, {
+      headers: { accept: 'application/json' },
+    });
+    if (!res.ok) return null;
+    const body = (await res.json()) as {
+      params?: { denom_creation_fee?: Array<{ denom?: string; amount?: string }> };
+    };
+    const inj = body.params?.denom_creation_fee?.find((c) => c.denom === 'inj');
+    if (!inj?.amount || !/^[0-9]+$/.test(inj.amount)) return null;
+    return BigInt(inj.amount);
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Gas to leave behind for the five messages of a launch.
  *
  * Deliberately generous. The cost of overestimating is telling somebody to add a
@@ -71,6 +123,7 @@ export function launchCost({
   openingBuy = 0n,
   launchFee = 0n,
   launchFeeDenom,
+  denomFee = DENOM_CREATION_FEE,
   quoteDenom,
   gasDenom,
 }: {
@@ -78,6 +131,8 @@ export function launchCost({
   /** The launchpad's own charge, from the factory's config. */
   launchFee?: bigint;
   launchFeeDenom?: string;
+  /** The chain's denom creation fee. Differs per network; read it, do not assume. */
+  denomFee?: bigint;
   quoteDenom: string;
   gasDenom: string;
 }): LaunchCost {
@@ -86,11 +141,11 @@ export function launchCost({
   // opening buy is: a fee in another denom has no claim on this balance.
   const fee = !launchFeeDenom || launchFeeDenom === gasDenom ? launchFee : 0n;
   return {
-    denomFee: DENOM_CREATION_FEE,
+    denomFee,
     launchFee: fee,
     gasReserve: LAUNCH_GAS_RESERVE,
     openingBuy: buy,
-    total: DENOM_CREATION_FEE + fee + LAUNCH_GAS_RESERVE + buy,
+    total: denomFee + fee + LAUNCH_GAS_RESERVE + buy,
   };
 }
 
