@@ -155,6 +155,15 @@ const chainId = node.body?.default_node_info?.network;
 if (chainId !== 'injective-888') die(`Expected injective-888, the node says ${chainId}.`);
 ok(`chain ${chainId}`);
 const fcfg = await smart(factory, { config: {} });
+/*
+ * What this factory charges to create a launch, if anything. Read rather than
+ * assumed, so the script works against a free factory and a charging one alike.
+ */
+const launchFee = BigInt(fcfg.launch_fee ?? '0');
+const launchFeeDenom = fcfg.launch_fee_denom || fcfg.quote_denom;
+if (launchFee > 0n) {
+  ok(`launchpad charges ${Number(launchFee) / 1e18} ${launchFeeDenom} to create a launch`);
+}
 if (fcfg.admin !== sender) {
   die(
     `Signer ${sender} is not the factory admin (${fcfg.admin}).`,
@@ -169,7 +178,21 @@ if ((await bal(sender, 'inj')) < 3n * TOKEN_ONE) {
 step(2, `Test quote ${USD}`);
 const supply = await getJson(`/cosmos/bank/v1beta1/supply/by_denom?denom=${encodeURIComponent(USD)}`);
 const exists = BigInt(supply.body?.amount?.amount ?? '0') > 0n;
-const needUsd = 1_000n * USD_ONE;
+/*
+ * ENOUGH TO GRADUATE AT WHATEVER SCALE THIS QUOTE IS SET TO, derived rather than
+ * hardcoded. It was a flat 1,000, which graduated a curve whose target was 170 and
+ * silently became too little the moment the opening reserve was rescaled: the run
+ * got all the way to step 5 and reported that an oversized buy did not graduate,
+ * which reads as a contract bug and is a stale constant in the test.
+ *
+ * Mainnet WILL re-derive the scale (see docs/MAINNET-RUNBOOK.md), so a script that
+ * only works at one scale is a script that stops working on the day it matters.
+ */
+const quoteSpec = (await smart(factory, { quotes: {} })).quotes.find((q) => q.denom === USD);
+const quoteWhole = BigInt(quoteSpec?.virtual_quote_whole ?? '676');
+// graduation is 17/6 of the opening reserve; double it, for the buy plus the
+// earlier steps' spending and a margin.
+const needUsd = ((quoteWhole * 17n) / 6n) * 2n * USD_ONE;
 if ((await bal(sender, USD)) < needUsd) {
   const msgs = [];
   if (!exists) msgs.push(MsgCreateDenom.fromJSON({ sender, subdenom: USD_SUB }));
@@ -178,7 +201,21 @@ if ((await bal(sender, USD)) < needUsd) {
 }
 const { quotes } = await smart(factory, { quotes: {} });
 if (!quotes.some((q) => q.denom === USD && q.decimals === 6)) {
-  await send(exec(factory, { set_quote: { denom: USD, decimals: 6, symbol: 'E2EUSD' } }), 'allowlist test quote');
+  /*
+   * `virtual_quote_whole` is the opening reserve in whole units of THIS asset, and
+   * it is required: one constant cannot be right for both INJ and a dollar. 676
+   * opens an INJ launch at about $5,000; the same number against a dollar
+   * stablecoin opens one at about $630, so a dollar quote is scaled by the INJ
+   * price it was derived at (7.92 on 11 Oct 2026). Running the lifecycle against a
+   * properly scaled second quote is the point: it is the path a mainnet USDC pair
+   * would take, and nothing else exercises it.
+   */
+  await send(
+    exec(factory, {
+      set_quote: { denom: USD, decimals: 6, virtual_quote_whole: '5354', symbol: 'E2EUSD' },
+    }),
+    'allowlist test quote',
+  );
 }
 ok('test quote funded and allowlisted at 6 decimals');
 
@@ -208,7 +245,22 @@ await send(
     exec(
       factory,
       { create_launch: { denom, fee_bps: 100, quote_denom: USD } },
-      [{ denom, amount: SEED.toString() }],
+      /*
+       * THE LAUNCHPAD'S OWN FEE, read from the factory rather than assumed absent.
+       * This script restated the funds and went stale the moment a launch fee could
+       * be configured: it would pass on a free testnet and fail on a configured
+       * mainnet, which is the wrong way round for the script that exists to prove
+       * the lifecycle before mainnet. The same staleness bit
+       * `create-test-launch.mjs` an hour earlier.
+       *
+       * The fee's denom is INJ and the launch is priced in the test dollar, so the
+       * two are separate coins here and do not merge. On an INJ-priced launch they
+       * would arrive as one, which is why the factory splits by subtraction.
+       */
+      [
+        { denom, amount: SEED.toString() },
+        ...(launchFee > 0n ? [{ denom: launchFeeDenom, amount: launchFee.toString() }] : []),
+      ],
     ),
   ],
   'create launch',
@@ -249,9 +301,25 @@ eq((await bal(sender, USD)) - u0, sell.inj_out, 'quote received on sell');
 ok(`sold half for ${sell.inj_out} test-USD units, as quoted`);
 
 step(5, 'An oversized buy graduates and seeds the pool in the same transaction');
-spend = 200n * USD_ONE;
+/*
+ * DERIVED FROM THE CURVE, not a constant. Enough to pass the graduation target from
+ * wherever this curve has got to, plus a margin so the buy is genuinely oversized
+ * and the partial fill and refund are exercised rather than landing exactly on the
+ * line. A hardcoded figure here is a test that passes at one scale and reports a
+ * contract bug at any other.
+ */
+const gradCfg = await smart(curve, { config: {} });
+const gradState = await smart(curve, { state: {} });
+const remaining =
+  BigInt(gradCfg.curve.graduation_target) - BigInt(gradState.inj_collected);
+spend = (remaining * 12n) / 10n + USD_ONE;
 sim = await smart(curve, { simulate_buy: { inj_in: spend.toString() } });
-if (!sim.graduates) die('A 200 test-USD buy did not graduate the curve.', JSON.stringify(sim));
+if (!sim.graduates) {
+  die(
+    `A ${Number(spend) / Number(USD_ONE)} test-USD buy did not graduate the curve.`,
+    JSON.stringify(sim),
+  );
+}
 u0 = await bal(sender, USD);
 t0 = await bal(sender, denom);
 await send(exec(curve, { buy: { min_tokens_out: sim.tokens_out } }, [{ denom: USD, amount: spend.toString() }]), 'graduating buy');
