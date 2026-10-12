@@ -63,6 +63,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <Link href="/portfolio">Portfolio</Link>
               <Link href="/claim">Claim</Link>
               <Link href="/analytics">Analytics</Link>
+              {/* Last in the list and present on every page: somebody looking for
+                  what can go wrong should not have to go looking. */}
+              <Link href="/risks">Risks</Link>
             </nav>
             <span className="spacer" />
             {/*
@@ -110,6 +113,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <Link href="/portfolio">Portfolio</Link>
               <Link href="/claim">Claim</Link>
               <Link href="/analytics">Analytics</Link>
+              {/* Last in the list and present on every page: somebody looking for
+                  what can go wrong should not have to go looking. */}
+              <Link href="/risks">Risks</Link>
               <a href={NETWORK.explorer} target="_blank" rel="noopener noreferrer">
                 Injective {NETWORK.name} explorer
               </a>

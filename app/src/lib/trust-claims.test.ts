@@ -29,6 +29,17 @@ import { join, relative } from 'node:path';
 
 const SRC = join(import.meta.dirname, '..');
 
+/**
+ * The one page allowed to use the word, because it uses it to DENY an audit.
+ *
+ * "The contracts have not been audited by a third party" is the honest sentence
+ * this whole guard exists to protect, and a rule that forbade it would push the
+ * product towards saying nothing rather than saying the true thing. The exemption
+ * cannot become a loophole: the test below asserts the page still contains the
+ * denial, so changing it into a claim fails just as loudly.
+ */
+const DENIES_AN_AUDIT = 'app/risks/page.tsx';
+
 /** Comment ranges blanked, so line numbers survive and prose can discuss the word. */
 function userFacingText(src: string): string {
   return src
@@ -48,6 +59,7 @@ function sourceFiles(dir: string, out: string[] = []): string[] {
 test('nothing a user reads says this code has been audited', () => {
   const offenders: string[] = [];
   for (const file of sourceFiles(SRC)) {
+    if (relative(SRC, file) === DENIES_AN_AUDIT) continue;
     const text = userFacingText(readFileSync(file, 'utf8'));
     const re = /\baudit(ed|s|ing)?\b/gi;
     let m: RegExpExecArray | null;
@@ -88,5 +100,24 @@ test('the verified badge names verification, not an audit', () => {
     badges,
     /Verified code \$\{status\.codeId\}/,
     'the badge for a matching code id must say what it checked',
+  );
+});
+
+test('the risks page denies an audit rather than claiming one', () => {
+  /*
+   * The other half of its exemption. It is the only file allowed to use the word,
+   * so it is the only file that could quietly turn a denial into a claim, on the
+   * page a reader goes to precisely because they want the unvarnished version.
+   */
+  const page = readFileSync(join(SRC, DENIES_AN_AUDIT), 'utf8');
+  assert.match(
+    page,
+    /have not been audited by a third party/,
+    'the risks page no longer states that the contracts are unaudited',
+  );
+  assert.doesNotMatch(
+    page.replace(/have not been audited by a third party/g, ''),
+    /\baudited\b/,
+    'the risks page uses "audited" somewhere other than the denial',
   );
 });
