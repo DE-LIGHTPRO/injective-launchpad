@@ -53,6 +53,28 @@ export function priceText(raw: bigint, decimals: number, significant = 4): strin
   return `${p.lead}${sub}${p.digits}`;
 }
 
+/**
+ * The same price written out in full, with every zero present.
+ *
+ * FOR ANYTHING THAT IS READ RATHER THAN LOOKED AT. The subscript is a visual
+ * shorthand and both of its forms lose the magnitude when they are not seen: the
+ * markup hides the count from the accessibility tree, and `priceText`'s `₆` is a
+ * character most screen readers skip. ORBIT's spot price was announced as "0.063 INJ"
+ * for a price of 0.00000063 INJ - a hundred thousand times over, on a figure somebody
+ * would decide a trade on.
+ *
+ * Measured, not assumed: the rendered markup was `0.0<sub aria-hidden>6</sub>63`, so
+ * the span's accessible name is its text content with the count removed. `title` does
+ * not rescue it, because a `<span>` holding text takes its name from that text.
+ */
+export function priceDecimalText(raw: bigint, decimals: number, significant = 4): string {
+  const p = priceParts(raw, decimals, significant);
+  if (p.zeros === 0) return p.digits;
+  // `zeros` counts every zero after the point, which is why `lead` is dropped here
+  // rather than prefixed: it already contains the first of them.
+  return `0.${'0'.repeat(p.zeros)}${p.digits}`;
+}
+
 /** A stable hue for a ticker, so the same token always gets the same colour. */
 export function tickerHue(symbol: string): number {
   let h = 0;
