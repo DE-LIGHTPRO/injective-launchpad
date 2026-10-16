@@ -35,6 +35,17 @@ const bad = (msg, detail) => {
   console.log(`  ✗ ${msg}`);
   if (detail) console.log(`      ${detail}`);
 };
+/*
+ * A third reporter, because section 3 asks a question whose answer is a real
+ * problem on mainnet and the normal state of affairs on testnet. One laptop key
+ * holding all three roles is how testnet is supposed to look; making that exit 1
+ * would train whoever runs this to ignore the exit code, which is worse than not
+ * checking. Same finding, two severities, decided by the chain id it measured.
+ */
+const warn = (msg, detail) => {
+  console.log(`  ! ${msg}`);
+  if (detail) console.log(`      ${detail}`);
+};
 
 /** `KEY=value` lines, for the expectation this is measured against. */
 function loadEnv(path) {
@@ -115,6 +126,159 @@ if (strays.length > 0) {
   console.log(`      also present (quote denoms, routers, defaults): ${strays.join(', ')}`);
 }
 
+// --------------------------------------------------------- who holds a key --
+
+/**
+ * One address in three roles, which is correct on testnet and a mainnet blocker.
+ *
+ * WHY THIS WAS ADDED AFTER THE SCRIPT ALREADY PASSED. Run against the live
+ * deployment on 16 Oct 2026 it reported every check green while `admin` and
+ * `platform` were the SAME address, which is exactly what §2 of the runbook says
+ * must not be true on mainnet. The script printed both values one line apart and
+ * never compared them: a report that shows a reader the evidence and leaves them
+ * to notice is not a check, and on launch morning nobody notices.
+ *
+ * The three roles and what each one can do:
+ *   platform     receives every launch fee. Loss of this key loses revenue.
+ *   factory admin  sets the fee, the quote list and the pinned curve code id.
+ *   wasm admin   can MIGRATE the factory to arbitrary code. Strictly the largest.
+ *
+ * All three as one key means one compromise takes all three, and the migration
+ * power is the one that can rewrite what a creator's launch does after they have
+ * paid for it.
+ *
+ * MAINNET IS MEASURED, NOT CONFIGURED. Keying the severity off NEXT_PUBLIC_NETWORK
+ * would read an operator's intent from the same file that is being verified; the
+ * LCD's own `node_info` says which chain actually answered.
+ */
+async function reportKeySeparation(lcd, cfg) {
+  const chainId = await fetch(`${lcd}/cosmos/base/tendermint/v1beta1/node_info`, {
+    signal: AbortSignal.timeout(15_000),
+  })
+    .then((r) => (r.ok ? r.json() : null))
+    .then((j) => j?.default_node_info?.network ?? null)
+    .catch(() => null);
+
+  const mainnet = chainId === 'injective-1';
+  console.log(`\n  3. Who holds the keys (${chainId ?? 'chain id could not be read'})`);
+  if (!mainnet) {
+    console.log(
+      chainId
+        ? `      Not injective-1, so these are reported and not failed.`
+        : `      The chain id is unknown, so these are reported and not failed.`,
+    );
+  }
+  const note = mainnet ? bad : warn;
+
+  const info = await fetch(`${lcd}/cosmwasm/wasm/v1/contract/${expected}`, {
+    signal: AbortSignal.timeout(15_000),
+  })
+    .then((r) => (r.ok ? r.json() : null))
+    .catch(() => null);
+  const wasmAdmin = info === null ? undefined : (info.contract_info?.admin || null);
+
+  if (cfg.admin === cfg.platform) {
+    note(
+      'The factory admin and the platform address are one key.',
+      `Both are ${cfg.admin}. One compromise takes the fee revenue and the power to reconfigure the factory.`,
+    );
+  } else {
+    ok('the factory admin and the platform address are different keys');
+  }
+
+  if (wasmAdmin === undefined) {
+    warn('The factory\u2019s wasm admin could not be read, so migration rights are unknown.');
+    return;
+  }
+  if (wasmAdmin === null) {
+    /*
+     * No admin is not a gap: it is the strongest answer available. The code at
+     * the pinned id is what runs forever, which is also what makes the pinned
+     * id worth getting right before launch rather than after.
+     */
+    ok('the factory has no wasm admin, so its code can never be migrated');
+    return;
+  }
+
+  if (wasmAdmin === cfg.admin || wasmAdmin === cfg.platform) {
+    note(
+      'The wasm admin is the same key as another role.',
+      `${wasmAdmin} can migrate the factory to arbitrary code AND ${wasmAdmin === cfg.admin ? 'reconfigure it' : 'collect the fees'}.`,
+    );
+  } else {
+    ok(`the wasm admin ${wasmAdmin} is its own key`);
+  }
+
+  const holder = await holderKind(lcd, wasmAdmin);
+  if (holder === 'contract' || holder === 'multisig') {
+    ok(`the wasm admin is a ${holder}, so migration needs more than one key`);
+  } else if (holder === 'single-key') {
+    note(
+      'The wasm admin is a single-key account.',
+      'Whoever holds that one key can migrate the factory. §2 of the runbook asks for a multisig here.',
+    );
+  } else if (holder === 'absent') {
+    note(
+      `The wasm admin ${wasmAdmin} does not exist on ${chainId ?? 'this chain'}.`,
+      'It holds the power to migrate the factory and has never signed here, so it is either the wrong address or an untested one.',
+    );
+  } else {
+    /*
+     * Rule: never report a status that was not measured. An address that has
+     * never signed has no public key published on chain, so the shape of its
+     * key is genuinely unknown rather than single. Saying "single-key" here
+     * would be a guess, and saying "multisig" would be a dangerous one.
+     */
+    warn(
+      `The wasm admin ${holder === 'never signed' ? 'has never signed a transaction' : 'could not be read'}, so whether it is a multisig is unknown.`,
+      'A key shape is only on chain once the account has signed once. Send one transaction from it and re-run.',
+    );
+  }
+}
+
+/**
+ * Is an address one key, several, or a contract? `contract` | `multisig` |
+ * `single-key` | `never signed` | `unknown`.
+ *
+ * Contracts are checked first because a cw3 multisig IS a contract, and a
+ * contract address also answers the auth endpoint with an ordinary account.
+ * A native threshold account is a legitimate holder too, so "not a contract"
+ * on its own would condemn a perfectly good multisig: the distinguishing fact
+ * is the pubkey type, `LegacyAminoPubKey` for a threshold account. Injective
+ * wraps its accounts in `EthAccount`, hence the `base_account` fallback.
+ *
+ * Shapes confirmed against live endpoints on 16 Oct 2026: a mainnet contract
+ * answers the wasm endpoint 200; a module account returns `pub_key: null`; an
+ * account that has signed returns `/injective.crypto.v1beta1.ethsecp256k1.PubKey`
+ * under `base_account`; an address never seen on the chain returns 404 with
+ * `code: 5, account … not found`.
+ */
+async function holderKind(lcd, addr) {
+  const isContract = await fetch(`${lcd}/cosmwasm/wasm/v1/contract/${addr}`, {
+    signal: AbortSignal.timeout(15_000),
+  })
+    .then((r) => r.ok)
+    .catch(() => null);
+  if (isContract === null) return 'unknown';
+  if (isContract) return 'contract';
+
+  /*
+   * A 404 here is an ANSWER, not a failure to get one: the chain is saying no
+   * such account exists. Collapsing it into `unknown` would turn "this address
+   * has never existed on the chain you are about to launch on" into "the probe
+   * did not work", which is the more comfortable of the two and the wrong one.
+   */
+  const res = await fetch(`${lcd}/cosmos/auth/v1beta1/accounts/${addr}`, {
+    signal: AbortSignal.timeout(15_000),
+  }).catch(() => null);
+  if (res?.status === 404) return 'absent';
+  const acct = res?.ok ? await res.json().catch(() => null) : null;
+  if (!acct?.account) return 'unknown';
+  const pubKey = acct.account.pub_key ?? acct.account.base_account?.pub_key ?? null;
+  if (!pubKey) return 'never signed';
+  return String(pubKey['@type'] ?? '').toLowerCase().includes('multisig') ? 'multisig' : 'single-key';
+}
+
 // ----------------------------------------------------------------- the chain --
 
 console.log('\n  2. What that factory says about itself');
@@ -178,6 +342,7 @@ if (!lcd) {
         );
       }
     }
+    await reportKeySeparation(lcd, cfg);
   } catch (e) {
     bad('The factory could not be read.', e.message);
   }

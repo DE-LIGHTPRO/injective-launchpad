@@ -49,6 +49,17 @@ check refuses until it has history, and `deploy.mjs` refuses separately.
 which changes where future fees go and which curve code new launches run. It cannot
 reach an existing launch. A laptop key is the wrong holder for this on mainnet.
 
+**All three are checked by step 9**, and until 16 Oct 2026 none of them were. Section 3
+of `scripts/verify-deployment.mjs` compares the roles against each other and asks the
+chain what shape the wasm admin's account is: a contract or a threshold account needs
+more than one key, a single `ethsecp256k1` pubkey does not. It **fails** on
+`injective-1` and only reports anywhere else, because one laptop key holding all three
+is how testnet is supposed to look. It decides which chain it is on by asking the
+endpoint, not by reading `NEXT_PUBLIC_NETWORK` out of the configuration it is verifying.
+An address that has never signed publishes no pubkey, so it is reported as unknown
+rather than guessed at: send one transaction from the multisig before the launch and
+re-run, or step 9 can only tell you it does not know.
+
 ### 3. A dedicated RPC, and it must be ARCHIVAL
 
 The app reads `NEXT_PUBLIC_LCD_URL`. Two separate reasons, and the second is the one
@@ -68,11 +79,15 @@ window of **100,000 blocks and prune the rest**. Measured 16 Oct 2026:
 
 **And the hostname is not a node.** Probing mainnet's block 1 ten times in a row
 returned a lowest retained height of ~100,000 blocks on eight requests and **~30,600
-on the other two** — it balances across nodes pruned to different depths, so the
-honest window is the shallowest, about **5.1 hours**, and identical queries succeed
-or fail by luck of routing. Plan against the shallowest; the readiness check reports
-both and tells you when they disagree. Ask a paid provider the same question and take
-more than one sample.
+on the other two**: it balances across nodes pruned to different depths, so identical
+queries succeed or fail by luck of routing, and the honest window is the shallowest.
+
+**That shallowest figure is not a constant either.** A second ten-probe run the same
+afternoon put it at **~43,000 blocks (7.2 hours)** against the earlier **~30,600
+(5.1 hours)**. Which nodes the balancer happens to offer changes, so the window moves
+between runs. Do not carry either number forward; run the readiness check, which
+measures the current one and reports the spread. Ask a paid provider the same
+question and take more than one sample.
 
 Everything on the launch page built from transaction search is inside that window:
 the candle chart, the trade history, the fill prices and the 24h volume. A launch

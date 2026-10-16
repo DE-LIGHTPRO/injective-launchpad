@@ -301,15 +301,16 @@ console.log(`
 
       AN ARCHIVAL RPC, and archival is the half that is easy to miss. The
       public sentry LCD will rate limit under real traffic, and it also PRUNES.
-      Measured on mainnet 16 Oct 2026: ~100,000 blocks (16.6 hours) on eight of
-      ten probes and ~30,600 (5.1 hours) on the other two, because the hostname
-      balances across nodes pruned to different depths. The chart, the trade
-      history and the 24h volume all come from transaction search, so on a
-      pruning endpoint a launch's history empties out overnight, and on this one
-      it does so unpredictably. Ask a provider what height their tx search
-      reaches back to rather than what the quota is, and take more than one
-      sample. The retention check in section 1 above does that for whatever LCD
-      this was pointed at.
+      The chart, the trade history and the 24h volume all come from transaction
+      search, so on a pruning endpoint a launch's history empties out overnight.
+      Section 1 above measured the window live; this section deliberately
+      restates no number, because the hostname balances across nodes pruned to
+      different depths and the figure MOVES BETWEEN RUNS: the shallowest probe
+      answered ~30,600 blocks on one run on 16 Oct 2026 and ~43,000 on another
+      the same day. A snapshot printed here beside a live measurement there is
+      two numbers for one property, and a reader has no way to tell which is
+      current. Ask a provider what height their tx search reaches back to rather
+      than what the quota is, and take more than one sample.
 
       TERMS AND A RISK DISCLOSURE, which need an entity and a jurisdiction
       before they can say anything true. See docs/LEGAL-DRAFTS.md.
