@@ -83,6 +83,33 @@ export const NETWORKS: Record<NetworkName, NetworkConfig> = {
   },
 };
 
+/**
+ * What this app pays per unit of gas, in `inj` base units.
+ *
+ * ONE COPY, because there were two bare literals for one decision. `broadcast.ts`
+ * multiplied the gas limit by `500_000_000n` to build every fee, and `wallet.ts`
+ * separately told Keplr `gasPriceStep: { low: 500000000, ... }` in the chain it
+ * suggests. Nothing connected them, so correcting one would have left a wallet
+ * quoting a price the app does not pay - and a Keplr `low` below what we send is the
+ * quiet direction: the extension shows the user a cheaper fee than the transaction
+ * carries.
+ *
+ * IT IS NOT THE CHAIN'S MINIMUM, which `broadcast.ts` used to call it. Re-measured on
+ * 16 Oct 2026 from `/cosmos/base/node/v1beta1/config`, BOTH chains report
+ * `minimum_gas_price: 160000000.000000000000000000inj`:
+ *
+ *     sentry.lcd.injective.network          160000000inj
+ *     testnet.sentry.lcd.injective.network  160000000inj
+ *
+ * So this is a deliberate 3.1x margin over the floor, not a property of the chain.
+ * Keep the margin: the floor is set per node, a validator may set a higher one, and
+ * the whole fee on a 3,000,000-gas launch is 0.0015 INJ against 0.00048 at the floor.
+ * Fractions of a cent to never be refused for underpaying. The reason to write the
+ * measurement down is that somebody reading "the minimum" would reasonably correct
+ * the number DOWN to it.
+ */
+export const GAS_PRICE_INJ = 500_000_000n;
+
 /** Testnet unless deliberately overridden. Mainnet is never the default. */
 export const NETWORK: NetworkConfig =
   NETWORKS[(process.env.NEXT_PUBLIC_NETWORK as NetworkName) ?? 'testnet'] ?? NETWORKS.testnet;

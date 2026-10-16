@@ -7,7 +7,7 @@ import {
   createTransaction,
   ChainRestAuthApi,
 } from '@injectivelabs/sdk-ts';
-import { NETWORK, getLcdUrl } from './config.ts';
+import { NETWORK, getLcdUrl, GAS_PRICE_INJ } from './config.ts';
 import {
   MSG_CREATE_DENOM,
   MSG_MINT,
@@ -302,17 +302,12 @@ async function signAndBroadcast(opts: {
      * The fee scales with the gas limit. It was a flat 0.002 INJ against a 3000000
      * limit whatever the operation, so a fee claim paid a launch's fee.
      *
-     * 500000000 IS NOT THE MINIMUM, which this comment used to call it. Measured on
-     * 16 Oct 2026 from /cosmos/base/node/v1beta1/config, BOTH chains report
-     * `minimum_gas_price: 160000000inj`, so this is a deliberate 3.1x margin and not a
-     * property of the chain. Keep the margin: the floor is set per node, a validator
-     * may set a higher one, and the whole fee on a 3000000-gas launch is 0.0015 INJ
-     * against 0.00048 at the floor - fractions of a cent to never be refused for
-     * underpaying. The reason to write the measurement down is that somebody reading
-     * "the minimum" would reasonably correct the number DOWN to it.
+     * The price itself, and why it is not the chain's minimum, is documented on
+     * `GAS_PRICE_INJ`. It lives in `config.ts` because `wallet.ts` has to tell Keplr
+     * the same number, and the two were separate literals.
      */
     fee: {
-      amount: [{ denom: 'inj', amount: String(BigInt(opts.gas) * 500_000_000n) }],
+      amount: [{ denom: 'inj', amount: String(BigInt(opts.gas) * GAS_PRICE_INJ) }],
       gas: String(opts.gas),
     },
     pubKey: Buffer.from(key.pubKey).toString('base64'),

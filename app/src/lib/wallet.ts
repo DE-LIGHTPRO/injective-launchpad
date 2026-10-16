@@ -1,4 +1,4 @@
-import { NETWORK, getLcdUrl } from './config.ts';
+import { NETWORK, getLcdUrl, GAS_PRICE_INJ } from './config.ts';
 
 /**
  * Wallet connection, over the extensions' own injected API.
@@ -93,7 +93,29 @@ function chainSuggestion() {
       bech32PrefixConsPub: 'injvalconspub',
     },
     currencies: [inj],
-    feeCurrencies: [{ ...inj, gasPriceStep: { low: 500000000, average: 700000000, high: 900000000 } }],
+    /*
+     * `low` IS WHAT WE ACTUALLY PAY, not a number chosen to look cheap. It was the
+     * bare literal 500000000, a second copy of `broadcast.ts`'s fee multiplier with
+     * nothing connecting them: whichever of the two someone corrected, the other
+     * would have kept the old figure, and a Keplr `low` under what we send shows the
+     * user a cheaper fee than the transaction carries. The margin over the chain's
+     * measured floor is documented on `GAS_PRICE_INJ`.
+     *
+     * `average` and `high` are Keplr's own presets for a user who chooses to pay more
+     * on a congested chain; they only apply to transactions Keplr prices itself, and
+     * this app always sets its own fee. They stay proportional to `low` so a change
+     * to the one number we do pay carries them with it.
+     */
+    feeCurrencies: [
+      {
+        ...inj,
+        gasPriceStep: {
+          low: Number(GAS_PRICE_INJ),
+          average: Number((GAS_PRICE_INJ * 14n) / 10n),
+          high: Number((GAS_PRICE_INJ * 18n) / 10n),
+        },
+      },
+    ],
     stakeCurrency: inj,
     features: ['ibc-transfer', 'ibc-go', 'eth-address-gen', 'eth-key-sign'],
   };
