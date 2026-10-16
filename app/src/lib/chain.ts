@@ -206,21 +206,77 @@ export async function smartQuery<T>(contract: string, query: unknown): Promise<T
   return json.data;
 }
 
-export async function listLaunches(limit = 50): Promise<Launch[]> {
-  if (isDemoMode()) return demoLaunches().slice(0, limit);
+/** The factory clamps `limit` to 100, so asking for more wastes nothing and gains nothing. */
+const LAUNCH_PAGE = 100;
+
+/**
+ * A bound on the loop, not on the launchpad. Hitting it THROWS rather than returning
+ * a short list, because a silently truncated board is the defect this function was
+ * written to fix. 5,000 launches is far past the point this page needs a different
+ * shape anyway, and a loud failure is what makes that visible.
+ */
+const MAX_LAUNCH_PAGES = 50;
+
+/**
+ * Every launch the factory has, paged.
+ *
+ * IT USED TO RETURN THE OLDEST FIFTY. `Launches { start_after, limit }` ranges over
+ * the id map ASCENDING and the contract clamps `limit` to 100, so a single-page read
+ * returns the launches with the lowest ids and drops the newest ones. Measured
+ * against the live testnet factory: `limit=2` over ids 1-4 answers `1,2`.
+ *
+ * Every caller here wants the whole set, and each one broke differently past fifty:
+ *
+ *  - `resolveLaunchSlug` matches against the list it is given, so launch 51's page
+ *    would 404 at the URL the product itself generates for it. The numeric form still
+ *    resolved, which means the token existed and only its own link did not work.
+ *  - `launchSlug` decides whether a ticker needs its id appended by looking for a
+ *    clash in that same list, so a later launch reusing an earlier ticker would be
+ *    invisible to the check and `/launch/INJINU` would quietly serve the older token.
+ *    `launchPath.ts` calls that "the worst available outcome" and the truncation
+ *    defeated the guard written to prevent it.
+ *  - `ClaimFees` lists a creator's launches to claim from: fees owed on launch 51
+ *    would read as nothing to claim.
+ *  - Analytics renders `rows.length` as "Launches" under a heading promising every
+ *    figure is something the chain will answer for directly. It would have said 50
+ *    for ever, and its "what is not here, and why" section would not have mentioned
+ *    the one thing that was.
+ *
+ * None of this is visible below fifty launches, which is to say it arrives exactly
+ * when the launchpad starts working.
+ */
+export async function listLaunches(): Promise<Launch[]> {
+  if (isDemoMode()) return demoLaunches();
   const factory = getFactoryAddress();
   if (!factory) return [];
-  const res = await smartQuery<{ launches: Array<Omit<Launch, 'profile'> & { profile?: unknown }> }>(
-    factory,
-    { launches: { limit } },
-  );
-  /*
-   * Normalised at the boundary, once. A launch created before the contract carried a
-   * profile has no field at all, and a launch from a differently-configured factory may
-   * carry anything; `parseProfile` turns both into nulls rather than letting one
-   * malformed token throw and blank the whole list.
-   */
-  return res.launches.map((l) => ({ ...l, profile: parseProfile(l.profile) }));
+
+  const out: Launch[] = [];
+  let startAfter: number | undefined;
+  for (let page = 0; ; page += 1) {
+    if (page >= MAX_LAUNCH_PAGES) {
+      throw new ChainError(
+        'There are more launches than this page can read at once.',
+        `stopped after ${MAX_LAUNCH_PAGES} pages of ${LAUNCH_PAGE}`,
+      );
+    }
+    const res = await smartQuery<{
+      launches: Array<Omit<Launch, 'profile'> & { profile?: unknown }>;
+    }>(factory, { launches: { start_after: startAfter, limit: LAUNCH_PAGE } });
+    /*
+     * Normalised at the boundary, once. A launch created before the contract carried a
+     * profile has no field at all, and a launch from a differently-configured factory may
+     * carry anything; `parseProfile` turns both into nulls rather than letting one
+     * malformed token throw and blank the whole list.
+     */
+    for (const l of res.launches) out.push({ ...l, profile: parseProfile(l.profile) });
+    /*
+     * A short page is the end. Asking again from the last id and getting nothing would
+     * also work and costs one extra request on every board render; the contract fills a
+     * page whenever it can, so a short one is the signal.
+     */
+    if (res.launches.length < LAUNCH_PAGE) return out;
+    startAfter = res.launches[res.launches.length - 1].id;
+  }
 }
 
 export async function getLaunch(id: number): Promise<Launch> {

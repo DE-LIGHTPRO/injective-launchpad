@@ -16,7 +16,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     { url: `${SITE}/create`, changeFrequency: 'monthly', priority: 0.6 },
   ];
   try {
-    const launches = await listLaunches(100);
+    const launches = await listLaunches();
     return [
       ...base,
       /*
