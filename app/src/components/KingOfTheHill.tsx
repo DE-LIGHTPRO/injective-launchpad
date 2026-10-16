@@ -4,8 +4,7 @@ import { CurveGlyph } from './CurveGlyph';
 import { symbolOf } from '@/lib/chain';
 import { compact, ageLabel } from '@/lib/boardMetrics';
 import { NETWORK } from '@/lib/config';
-import { denomLabel } from '@/lib/chain';
-import type { LaunchRow } from '@/lib/launchList';
+import { rowQuoteLabel, type LaunchRow } from '@/lib/launchList';
 
 /**
  * The three largest launches, with the leader called out.
@@ -74,7 +73,7 @@ export function KingOfTheHill({ rows, nowSeconds }: { rows: LaunchRow[]; nowSeco
           </div>
           <div className="hill-cap">
             <span className="v mono">
-              {compact(BigInt(king.marketCap), king.quoteDecimals)} {king.quoteLabel ?? denomLabel(king.quoteDenom)}
+              {compact(BigInt(king.marketCap), king.quoteDecimals)} {rowQuoteLabel(king)}
             </span>
             <span className="k">market cap</span>
           </div>
@@ -102,7 +101,7 @@ export function KingOfTheHill({ rows, nowSeconds }: { rows: LaunchRow[]; nowSeco
               <TokenLogo profile={r.profile} symbol={symbolOf(r.denom)} size={28} />
               <strong>{symbolOf(r.denom)}</strong>
               <span className="v mono">
-                {compact(BigInt(r.marketCap), r.quoteDecimals)} {r.quoteLabel ?? denomLabel(r.quoteDenom)}
+                {compact(BigInt(r.marketCap), r.quoteDecimals)} {rowQuoteLabel(r)}
               </span>
             </Link>
           ))}

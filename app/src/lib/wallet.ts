@@ -461,31 +461,81 @@ export async function denomBalance(address: string, denom: string): Promise<bigi
   return BigInt(raw);
 }
 
+/** Pages of 1000 denoms this will follow before giving up. See `allBalances`. */
+const BALANCE_PAGE_CAP = 10;
+
 /**
- * Every denom the account holds, in one bank query, as a denom to base-unit map.
+ * Every denom the account holds, as a denom to base-unit map.
  *
  * `null` is not an empty wallet, for the same reason `denomBalance` returns one: an
- * unreachable LCD must not read as "you hold nothing". One request rather than one per
- * launch, because the portfolio cross-references these against the board's launches and
- * a per-denom fan-out would be dozens of requests for a wallet in a handful of them.
+ * unreachable LCD must not read as "you hold nothing". One request per 1000 denoms
+ * rather than one per launch, because the portfolio cross-references these against the
+ * board's launches and a per-denom fan-out would be dozens of requests for a wallet in
+ * a handful of them.
+ *
+ * IT FOLLOWS `next_key`, AND THAT IS THE POINT. This asked for `pagination.limit=1000`,
+ * typed the response as `{balances}` with no `pagination` field at all, and returned
+ * whatever came back. A wallet in more than 1000 denoms would have had the rest
+ * silently dropped: holdings missing from the table, missing from the per-quote totals,
+ * and nothing on the screen saying a word about it - the one failure mode a portfolio
+ * must not have, because a reader cannot tell an omitted position from a sold one.
+ *
+ * The limit and the completeness signal were both MEASURED against
+ * `testnet.sentry.lcd.injective.network` on 16 Oct 2026, using an account holding six
+ * denoms, because neither could be assumed: this chain has endpoints that ignore the
+ * page-size parameter and answer the full set, which looks identical to a honoured
+ * limit until the result exceeds it.
+ *
+ *     limit=1  -> 1 balance, next_key set     limit=6     -> 6 balances, next_key null
+ *     limit=2  -> 2 balances, next_key set    limit=1000  -> 6 balances, next_key null
+ *     limit=3  -> 3 balances, next_key set    (no param)  -> 6 balances, next_key null
+ *
+ * So the limit IS honoured, and `next_key` is populated exactly when the answer is a
+ * prefix and null when it is the whole set. That makes completeness a free read.
+ *
+ * The round trip was measured separately, since a node that EMITS a key need not ACCEPT
+ * one: walked in pages of two, the same account takes three pages and yields the same
+ * six denoms that one request of 1000 returns.
+ *
+ * `null` ON THE PAGE CAP, not a prefix. Ten pages is 10,000 denoms, which is a runaway
+ * guard rather than a real bound - no wallet reaches it - so if it ever trips, something
+ * other than a large wallet is happening and an unknown is the honest answer. Returning
+ * what we had would be the original defect with extra steps.
  */
 export async function allBalances(address: string): Promise<Record<string, bigint> | null> {
-  const url = `${getLcdUrl()}/cosmos/bank/v1beta1/balances/${address}?pagination.limit=1000`;
-  let res: Response;
-  try {
-    res = await fetch(url, { headers: { accept: 'application/json' } });
-  } catch {
-    return null;
-  }
-  if (!res.ok) return null;
-  const json = (await res.json()) as { balances?: Array<{ denom?: string; amount?: string }> };
   const out: Record<string, bigint> = {};
-  for (const b of json.balances ?? []) {
-    if (typeof b.denom === 'string' && typeof b.amount === 'string' && /^[0-9]+$/.test(b.amount)) {
-      out[b.denom] = BigInt(b.amount);
+  let key: string | null = null;
+
+  for (let page = 0; page < BALANCE_PAGE_CAP; page++) {
+    const url =
+      `${getLcdUrl()}/cosmos/bank/v1beta1/balances/${address}?pagination.limit=1000` +
+      // Base64 carries `+`, `/` and `=`, every one of which means something else in a
+      // query string, so the key the node handed back has to be encoded going out.
+      (key === null ? '' : `&pagination.key=${encodeURIComponent(key)}`);
+    let res: Response;
+    try {
+      res = await fetch(url, { headers: { accept: 'application/json' } });
+    } catch {
+      return null;
     }
+    if (!res.ok) return null;
+    const json = (await res.json()) as {
+      balances?: Array<{ denom?: string; amount?: string }>;
+      pagination?: { next_key?: string | null };
+    };
+    for (const b of json.balances ?? []) {
+      if (typeof b.denom === 'string' && typeof b.amount === 'string' && /^[0-9]+$/.test(b.amount)) {
+        out[b.denom] = BigInt(b.amount);
+      }
+    }
+    const next = json.pagination?.next_key;
+    // An empty string is what a complete answer looks like on some builds; null on
+    // others. Either way there is no next page, and neither is a key to ask with.
+    if (typeof next !== 'string' || next === '') return out;
+    key = next;
   }
-  return out;
+
+  return null;
 }
 
 /** Shorten an address for display without hiding which account it is. */

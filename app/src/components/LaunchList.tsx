@@ -9,6 +9,7 @@ import { ageLabel, compact } from '@/lib/boardMetrics';
 import { addressName } from '@/lib/addressName';
 import {
   anyActivityUnread,
+  rowQuoteLabel,
   selectLaunches,
   type ActivityIndex,
   type LaunchRow,
@@ -20,7 +21,6 @@ import { Price } from './Price';
 import { PRICE_WAD } from '@/lib/curve';
 import { SearchIcon } from './Icons';
 import { Trending } from './Trending';
-import { denomLabel } from '@/lib/chain';
 import { FIXED_TOTAL_SUPPLY } from '@/lib/launchLimits';
 
 export type { LaunchRow };
@@ -263,7 +263,7 @@ export function LaunchList({ rows }: { rows: LaunchRow[] }) {
               <option value="">All pairs</option>
               {quotesPresent.map(([denom, n]) => (
                 <option key={denom} value={denom}>
-                  {rows.find((r) => r.quoteDenom === denom)?.quoteLabel ?? denomLabel(denom)} ({n})
+                  {rowQuoteLabel(rows.find((r) => r.quoteDenom === denom) ?? { quoteDenom: denom })} ({n})
                 </option>
               ))}
             </select>
@@ -321,7 +321,7 @@ export function LaunchList({ rows }: { rows: LaunchRow[] }) {
             </thead>
             <tbody>
               {shown.map((r, i) => {
-                const unit = r.quoteLabel ?? denomLabel(r.quoteDenom);
+                const unit = rowQuoteLabel(r);
                 const e = activity[r.curveAddress];
                 const pct = Math.min(100, r.progress * 100);
                 return (

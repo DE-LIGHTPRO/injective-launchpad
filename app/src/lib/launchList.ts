@@ -1,6 +1,6 @@
 import type { TokenProfile } from './tokenProfile.ts';
 import type { LaunchRules } from './launchRules.ts';
-import { symbolOf } from './chain.ts';
+import { denomLabel, symbolOf } from './chain.ts';
 
 /**
  * Search, sort and filter for the launch index.
@@ -135,6 +135,32 @@ export interface LaunchRow {
   openedAt: number | null;
   /** Fees accrued to creator and platform, base units. Feeds the totals bar. */
   feesAccrued: string;
+}
+
+/**
+ * The ticker to print beside a row's money, with the fallback in ONE place.
+ *
+ * `quoteLabel` is optional on a row, so every surface that renders an amount had to
+ * choose what to do without it, and three different answers shipped:
+ *
+ *   denomLabel(quoteDenom)   the board, Trending, King of the Hill, the home page
+ *   quoteDenom               Portfolio's totals bar, printing `factory/inj1…/E2EUSD`
+ *   ''                       Portfolio's Value column, printing a bare number
+ *
+ * The third is the defect. `/portfolio` deliberately interleaves quotes - its sort
+ * comment says that is fine "because each row carries and shows its own ticker" - so
+ * a row with no label put an 18-decimal INJ figure and a 6-decimal USDC figure in one
+ * column with nothing to tell them apart. Twelve orders of magnitude, no unit, on the
+ * screen whose whole purpose is what a wallet is worth.
+ *
+ * And the two halves of that one screen disagreed with each other, which is the tell
+ * from the creator page: a lone odd answer reads as a decision rather than an
+ * omission. So the fallback is not a thing a caller decides. `denomLabel` is the
+ * answer, because it shortens a hex or factory denom to something readable and
+ * invents no ticker it cannot derive.
+ */
+export function rowQuoteLabel(row: Pick<LaunchRow, 'quoteLabel' | 'quoteDenom'>): string {
+  return row.quoteLabel ?? denomLabel(row.quoteDenom);
 }
 
 export interface Selection {

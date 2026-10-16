@@ -4,6 +4,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { fixedCurveFor, graduationWholeFor, openingReserveWholeFor } from './launchLimits.ts';
+import { rowQuoteLabel, type LaunchRow } from './launchList.ts';
 
 /**
  * Is a launch's money labelled with the launch's own quote?
@@ -32,6 +33,7 @@ const SRC = join(import.meta.dirname, '..');
  * is the surfaces showing money that some particular curve holds.
  */
 const PER_LAUNCH = [
+  'components/Portfolio.tsx',
   'components/FeeEarnings.tsx',
   'components/TradePanel.tsx',
   'components/Trades.tsx',
@@ -282,4 +284,108 @@ test('the stated terms are the terms of the curve that gets signed', () => {
     openingReserveWholeFor({ virtualWhole: 5_354 }),
     openingReserveWholeFor({}),
   );
+});
+
+/*
+ * ------------------------------------------------------------------------------------
+ * AND THE FALLBACK, which was five different answers to one question.
+ *
+ * `LaunchRow.quoteLabel` is OPTIONAL, so every surface that prints an amount had to
+ * decide what to do without it, and they decided separately:
+ *
+ *     denomLabel(quoteDenom)   the board, Trending, King of the Hill, by-pair
+ *     quoteDenom               Portfolio's totals bar: `factory/inj1…/E2EUSD`
+ *     ''                       Portfolio's Value column: a bare number
+ *
+ * The third is the defect, and `/portfolio` is the worst screen to have it on because
+ * that table deliberately interleaves quotes - its sort comment says that is fine
+ * "because each row carries and shows its own ticker" - so an unlabelled row put an
+ * 18-decimal INJ figure directly above a 6-decimal USDC one with nothing at all to
+ * tell them apart.
+ *
+ * A FOURTH ANSWER WAS WRITTEN UP HERE AND WAS NOT REAL. `page.tsx` interpolates
+ * `group[0].quoteLabel` into a template, which reads like a `12.5K undefined` waiting
+ * to happen; `heroStats` takes `boardRows.Row`, where the field is REQUIRED, so it
+ * never could be. The optional field is on a different type with a similar name. Both
+ * readings were of real source and only one was of the real type.
+ *
+ * TWO HALVES OF ONE SCREEN DISAGREEING is the tell, the same one the creator page gave:
+ * a lone odd answer reads as a considered decision rather than an omission. So the
+ * fallback stopped being a thing a call site decides.
+ * ------------------------------------------------------------------------------------
+ */
+
+const row = (over: Partial<LaunchRow>): LaunchRow => ({ quoteDenom: 'inj', ...over }) as LaunchRow;
+
+test('a row with no quote label still names its asset', () => {
+  assert.equal(rowQuoteLabel(row({ quoteLabel: 'E2EUSD' })), 'E2EUSD', 'the factory symbol wins');
+
+  for (const [denom, expected] of [
+    ['inj', 'INJ'],
+    ['factory/inj1creator/E2EUSD', 'E2EUSD'],
+    ['peggy0xdAC17F958D2ee523a2206206994597C13D831ec7', '0xdAC1…1ec7'],
+    ['ibc/C4CFF46FD6DE35CA4CF4CE031E643C8FDC9BA4B99AE598E9B0ED98FE3A2319F9', 'IBC/C4CFF4…'],
+  ] as Array<[string, string]>) {
+    const label = rowQuoteLabel(row({ quoteDenom: denom }));
+    assert.equal(label, expected, `an unlabelled ${denom} row`);
+    /*
+     * The three things the old call sites produced, asserted as a class rather than
+     * one by one, because the next wrong answer will be a fourth spelling.
+     */
+    assert.notEqual(label, '', 'a money figure was left with no asset named');
+    assert.notEqual(label, denom, 'the raw denom is not a ticker');
+    assert.ok(!/undefined/.test(label), 'the literal string "undefined" reached a label');
+  }
+});
+
+test('no surface spells the quote-label fallback for itself', () => {
+  /*
+   * The guard that binds, because the unit test above cannot see a call site that
+   * never calls the resolver - and that is precisely how all four answers coexisted
+   * for as long as they did. Found by walking the tree: a new screen rendering a
+   * holding is the case a named list would miss, and `/portfolio` already was that
+   * case once.
+   *
+   * It looks for the SHAPE of a local fallback, `.quoteLabel ??`, rather than for any
+   * particular wrong answer, since `?? ''` and `?? quoteDenom` were two spellings of
+   * one mistake.
+   */
+  const offenders: string[] = [];
+  for (const file of tsxFiles(SRC)) {
+    const src = stripComments(readFileSync(file, 'utf8'));
+    for (const m of src.matchAll(/quoteLabel\s*\?\?/g)) {
+      offenders.push(`${file.slice(SRC.length + 1)}: …${src.slice(m.index!, m.index! + 48).replace(/\s+/g, ' ')}`);
+    }
+  }
+  assert.deepEqual(offenders, [], 'a component is deciding for itself what an unlabelled quote is called');
+
+  /*
+   * The half the pattern above cannot reach: a surface that interpolates the field
+   * BARE has no `??` in it to find. `page.tsx` is the one that did, and it was safe
+   * only because of which type it was handed - so the assertion is that it resolves,
+   * not that the field is absent, since the ticker strip genuinely carries a required
+   * `quoteLabel` through to `TradeTicker` and that is not this defect.
+   */
+  const page = stripComments(readFileSync(join(SRC, 'app/page.tsx'), 'utf8'));
+  assert.match(page, /rowQuoteLabel\(/, 'the home page is no longer resolving the hero\u2019s ticker');
+
+  /*
+   * Reading the field into a LOCAL is the shape to refuse, and it has to be told apart
+   * from passing it along as a prop: `quoteLabel: r.quoteLabel` hands `TradeTicker` a
+   * field its own props declare as required, which is correct and is not this defect.
+   * An assignment is the tell - `= something.quoteLabel` - because a local is where the
+   * value stops being a typed field and becomes a string somebody will interpolate.
+   */
+  const reads: string[] = [];
+  for (const file of tsxFiles(SRC)) {
+    const src = stripComments(readFileSync(file, 'utf8'));
+    for (const m of src.matchAll(/=\s*[\w.[\]]*\.quoteLabel\b/g)) {
+      reads.push(`${file.slice(SRC.length + 1)}: ${m[0].replace(/\s+/g, ' ')}`);
+    }
+  }
+  assert.deepEqual(reads, [], 'a quote label is being read off a row into a local instead of resolved');
+
+  // And the resolver is reached from more than one place, or it is not a resolver.
+  const callers = tsxFiles(SRC).filter((f) => /rowQuoteLabel\(/.test(stripComments(readFileSync(f, 'utf8'))));
+  assert.ok(callers.length >= 4, `expected the resolver to be shared, found ${callers.length} callers`);
 });

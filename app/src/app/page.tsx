@@ -1,7 +1,7 @@
 import { boardTotals, compact } from '@/lib/boardMetrics';
 import { KingOfTheHill } from '@/components/KingOfTheHill';
 import { PairPanels } from '@/components/PairPanels';
-import { denomLabel } from '@/lib/chain';
+import { rowQuoteLabel } from '@/lib/launchList';
 import Link from 'next/link';
 import { currentHeight } from '@/lib/chain';
 import { TradeTicker } from '@/components/TradeTicker';
@@ -48,7 +48,17 @@ function heroStats(rows: Row[]): HeroStats | null {
       creatorPaid: r.creatorPaid,
     })),
   );
-  const label = group[0].quoteLabel;
+  /*
+   * Through the resolver, though this one was never wrong: `heroStats` takes
+   * `boardRows.Row`, where `quoteLabel` is a REQUIRED string, so no `undefined` could
+   * reach the templates below. I first wrote this up as a live defect and it was not
+   * one - the optional field is on `LaunchRow`, a different type.
+   *
+   * It goes through the resolver anyway because it was the last place reading the
+   * field directly, and a lone direct read is what the guard in
+   * `quote-labelling.test.ts` cannot distinguish from the ones that were broken.
+   */
+  const label = rowQuoteLabel(group[0]);
   return {
     launches: rows.length,
     liquidity: `${compact(t.raised, decimals)} ${label}`,
@@ -178,7 +188,7 @@ export default async function Home() {
             // One quote: the hero already shows these figures. Several: one row each.
             if (byQuote.size < 2) return null;
             return [...byQuote.entries()].map(([quote, g]) => {
-              const qLabel = g.rows[0]?.quoteLabel ?? denomLabel(quote);
+              const qLabel = rowQuoteLabel(g.rows[0] ?? { quoteDenom: quote });
               const t = boardTotals(
                 g.rows.map((r) => ({
                   raised: r.raised,

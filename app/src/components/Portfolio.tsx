@@ -8,7 +8,7 @@ import { symbolOf } from '@/lib/chain';
 import { fmt } from '@/lib/curve';
 import { FIXED_TOTAL_SUPPLY } from '@/lib/launchLimits';
 import { TokenLogo } from './TokenLogo';
-import type { LaunchRow } from '@/lib/launchList';
+import { rowQuoteLabel, type LaunchRow } from '@/lib/launchList';
 
 /*
  * The divisor is `FIXED_TOTAL_SUPPLY`, not a local copy of it.
@@ -82,7 +82,7 @@ export function Portfolio({ rows }: { rows: LaunchRow[] }) {
     for (const h of holdings) {
       const key = h.row.quoteDenom;
       const cur = byQuote.get(key) ?? {
-        label: h.row.quoteLabel ?? h.row.quoteDenom,
+        label: rowQuoteLabel(h.row),
         decimals: h.row.quoteDecimals,
         total: 0n,
       };
@@ -166,7 +166,12 @@ export function Portfolio({ rows }: { rows: LaunchRow[] }) {
                 </td>
                 <td className="num mono">{fmt(h.balance, 18, 2)}</td>
                 <td className="num mono">
-                  {fmt(h.value, h.row.quoteDecimals, 4)} {h.row.quoteLabel ?? ''}
+                  {/*
+                    The ticker is not optional here, and the sort above is why:
+                    quotes interleave, so an 18-decimal INJ value sits directly
+                    above a 6-decimal USDC one. This used to print `?? ''`.
+                  */}
+                  {fmt(h.value, h.row.quoteDecimals, 4)} {rowQuoteLabel(h.row)}
                 </td>
               </tr>
             ))}

@@ -1,8 +1,8 @@
 import Link from 'next/link';
 import { TokenLogo } from './TokenLogo';
-import { symbolOf, denomLabel } from '@/lib/chain';
+import { symbolOf } from '@/lib/chain';
 import { compact } from '@/lib/boardMetrics';
-import type { LaunchRow } from '@/lib/launchList';
+import { rowQuoteLabel, type LaunchRow } from '@/lib/launchList';
 
 /**
  * The board's leaders, one panel per pair.
@@ -73,7 +73,7 @@ export function PairPanels({ rows }: { rows: LaunchRow[] }) {
           return (
             <div className="pairs-card" key={denom}>
               <div className="pairs-head">
-                <strong>{list[0]?.quoteLabel ?? denomLabel(denom)}</strong>
+                <strong>{rowQuoteLabel(list[0] ?? { quoteDenom: denom })}</strong>
                 <span className="note">
                   {list.length} live
                 </span>

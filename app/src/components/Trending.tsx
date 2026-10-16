@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { TokenLogo } from './TokenLogo';
-import { symbolOf, denomLabel } from '@/lib/chain';
-import type { LaunchRow } from '@/lib/launchList';
+import { symbolOf } from '@/lib/chain';
+import { rowQuoteLabel, type LaunchRow } from '@/lib/launchList';
 import type { LaunchEnrichment } from '@/lib/launchActivity';
 
 /**
@@ -60,10 +60,10 @@ export function Trending({
                   The pair, because this list deliberately spans them and a reader
                   comparing two rows should see they are different markets.
                 */}
-              {/* `quoteLabel` is optional on a row, so the denom is the fallback
-                  rather than an empty chip. */}
+              {/* `quoteLabel` is optional on a row, and `rowQuoteLabel` owns what
+                  happens without it, so no surface can answer differently. */}
               <span className="chip chip-sm muted">
-                {r.quoteLabel ?? denomLabel(r.quoteDenom)}
+                {rowQuoteLabel(r)}
               </span>
               <span className="v mono">
                 {n} {n === 1 ? 'trade' : 'trades'}
