@@ -255,3 +255,161 @@ test('a cancelled prompt reads as a choice, however it is spelled', async () => 
   }
   clearAll();
 });
+
+// ------------------------------------------------------ restoring a session --
+
+/**
+ * A reload used to drop the connection, and the fix for that has its own hazard.
+ *
+ * THE DEFECT. Nothing was persisted, so every page load showed Connect. A creator
+ * who had just signed a launch landed on their own launch page as a stranger, and
+ * the panels that need an address showed nothing. Reported as "when I reload the
+ * page, it disconnects the wallet itself".
+ *
+ * THE HAZARD IN THE FIX, which is why it was not persisted in the first place.
+ * Remembering the ADDRESS would render a connected header with no live extension
+ * session behind it: the page would look right and every action would fail at the
+ * point of signing, which is strictly worse than showing Connect. So only the
+ * wallet's NAME is stored, and the reload re-establishes the session for real.
+ *
+ * These are a guard over that distinction. Each failure mode here is silent: the
+ * header is simply wrong, nothing logs, and the only symptom is an action failing
+ * much later.
+ */
+
+import { rememberWallet, lastWallet, reconnect } from './wallet.ts';
+
+/** A localStorage that lives in this process, since there is no window here. */
+function installStorage(
+  behaviour: { throws?: boolean; seed?: Record<string, string> } = {},
+): Map<string, string> {
+  const store = new Map<string, string>(Object.entries(behaviour.seed ?? {}));
+  const boom = () => {
+    // What a private window or blocked site data does: it throws on access.
+    throw new Error('The operation is insecure.');
+  };
+  (globalThis as unknown as Record<string, unknown>).window = {
+    localStorage: behaviour.throws
+      ? { getItem: boom, setItem: boom, removeItem: boom }
+      : {
+          getItem: (k: string) => store.get(k) ?? null,
+          setItem: (k: string, v: string) => void store.set(k, v),
+          removeItem: (k: string) => void store.delete(k),
+        },
+  };
+  return store;
+}
+
+function clearStorage() {
+  delete (globalThis as unknown as Record<string, unknown>).window;
+}
+
+test('what is remembered is the wallet, never the account', async () => {
+  /*
+   * The whole safety argument in one assertion. A stored address is what would let
+   * the header claim a connection the extension knows nothing about, so the stored
+   * value is checked against the set of wallet names rather than merely being
+   * non-empty: a change that wrote `account.address` here passes every other test
+   * in this file and fails this one.
+   */
+  clearAll();
+  const store = installStorage();
+  installKeplr({});
+  const account = await connect('keplr');
+  rememberWallet('keplr');
+
+  const stored = [...store.values()];
+  assert.deepEqual(stored, ['keplr']);
+  assert.ok(
+    !stored.some((v) => v.includes(account.address)),
+    'the account address was persisted; a reload would then claim a session that does not exist',
+  );
+  clearStorage();
+  clearAll();
+});
+
+test('a reload reconnects to the remembered wallet without prompting again', async () => {
+  // The reported defect. `enable` resolving without a prompt is how an extension
+  // behaves for a chain the user has already approved, which is what makes this
+  // silent rather than a popup on every page load.
+  clearAll();
+  installStorage({ seed: { 'injpad:wallet': 'keplr' } });
+  installKeplr({});
+
+  const account = await reconnect();
+  assert.ok(account, 'the remembered wallet was not reconnected');
+  assert.match(account.address, /^inj1/);
+  assert.ok(account.provider, 'the restored account carries no provider, so it cannot sign');
+  clearStorage();
+  clearAll();
+});
+
+test('disconnecting is forgotten, so the next load does not undo it', async () => {
+  /*
+   * Without the forget on disconnect the button becomes decorative: the header
+   * clears, and the very next reload silently reconnects the wallet the user had
+   * just deliberately disconnected. On a page that spends money that is the
+   * opposite of what the control says it does.
+   */
+  clearAll();
+  const store = installStorage({ seed: { 'injpad:wallet': 'keplr' } });
+  installKeplr({});
+
+  rememberWallet(null);
+  assert.equal(lastWallet(), null);
+  assert.deepEqual([...store.values()], []);
+  assert.equal(await reconnect(), null, 'a disconnected wallet reconnected itself');
+  clearStorage();
+  clearAll();
+});
+
+test('a remembered wallet that is gone, locked or revoked shows Connect rather than throwing', async () => {
+  /*
+   * Every one of these is the normal state of some page load, and all of them run
+   * inside an effect on mount. A throw here reaches the error boundary and blanks
+   * the page for someone who may have a launch in flight, which is the failure the
+   * boundary copy exists to apologise for.
+   */
+  clearAll();
+  installStorage({ seed: { 'injpad:wallet': 'keplr' } });
+  // Uninstalled: remembered, but nothing at the injection path.
+  assert.equal(await reconnect(), null, 'an absent extension did not resolve to null');
+
+  for (const words of ['Key ring is not unlocked', 'Request rejected', 'something nobody has seen']) {
+    installKeplr({
+      enable: async () => {
+        throw new Error(words);
+      },
+    });
+    assert.equal(await reconnect(), null, `"${words}" did not resolve to null`);
+  }
+  clearStorage();
+  clearAll();
+});
+
+test('a stored value that is not a wallet is ignored', async () => {
+  // Anything can end up in a storage key: an old format, another product on the
+  // same origin, or a user editing it. None of it may reach `connect`.
+  clearAll();
+  installKeplr({});
+  for (const junk of ['', 'metamask', '{"name":"keplr"}', 'inj1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqry8wy684']) {
+    installStorage({ seed: { 'injpad:wallet': junk } });
+    assert.equal(lastWallet(), null, `"${junk}" was accepted as a wallet name`);
+    assert.equal(await reconnect(), null, `"${junk}" reached connect`);
+  }
+  clearStorage();
+  clearAll();
+});
+
+test('storage being unavailable costs a click, not the page', async () => {
+  // A private window throws on every localStorage access. The app has to work
+  // without it; the only consequence may be being asked to connect again.
+  clearAll();
+  installStorage({ throws: true });
+  installKeplr({});
+  assert.doesNotThrow(() => rememberWallet('keplr'));
+  assert.equal(lastWallet(), null);
+  assert.equal(await reconnect(), null);
+  clearStorage();
+  clearAll();
+});

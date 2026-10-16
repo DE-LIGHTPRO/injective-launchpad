@@ -4,6 +4,8 @@ import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import {
   available,
   connect,
+  reconnect,
+  rememberWallet,
   quoteBalance,
   shortAddress,
   SUPPORTED,
@@ -98,6 +100,29 @@ export function ConnectWallet({
     tick();
   }, []);
 
+  /*
+   * RESTORE THE SESSION ON LOAD, which is why only the wallet's NAME is remembered.
+   * A reload used to drop the connection entirely: the header showed Connect, and a
+   * creator who had just signed something had to reconnect to see their own page.
+   *
+   * `enable` does not prompt again for a chain the extension has already approved,
+   * so this is silent; if approval was revoked, the wallet is locked, or it is gone,
+   * `reconnect` returns null and the header shows Connect, which is the truth.
+   *
+   * Deliberately NOT awaited before the first paint. A wallet extension that is slow
+   * or absent must not hold the header, and the connected state arriving a moment
+   * later is the normal shape of this on every dapp.
+   */
+  useEffect(() => {
+    let live = true;
+    void reconnect().then((a) => {
+      if (live && a) setAccount(a);
+    });
+    return () => {
+      live = false;
+    };
+  }, []);
+
   useEffect(() => {
     onAccount?.(account);
     // Published for components that have no ancestor in common with this one, which
@@ -121,6 +146,8 @@ export function ConnectWallet({
     setBusy(name);
     try {
       setAccount(await connect(name));
+      // Which wallet, so a reload can re-establish the session. Never the address.
+      rememberWallet(name);
       setOpen(false);
     } catch (e) {
       // The wallet's own words are for integrators. These are written for the
@@ -164,7 +191,16 @@ export function ConnectWallet({
             */}
           {balance === null ? 'balance not read' : `${fmt(balance, NETWORK.quoteDecimals, 3)} ${NETWORK.quoteSymbol}`}
         </span>
-        <button type="button" className="ghost" onClick={() => setAccount(null)}>
+        <button
+          type="button"
+          className="ghost"
+          onClick={() => {
+            // Forgetting is the point of the button: without this a reload would
+            // silently reconnect the wallet the user just disconnected.
+            rememberWallet(null);
+            setAccount(null);
+          }}
+        >
           Disconnect
         </button>
       </div>

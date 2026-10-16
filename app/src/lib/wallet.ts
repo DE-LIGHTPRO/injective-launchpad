@@ -201,6 +201,60 @@ export function available(): WalletName[] {
   return SUPPORTED.filter((w) => injected(w.name) !== null).map((w) => w.name);
 }
 
+/**
+ * Which wallet was connected last, so a reload can re-establish the session.
+ *
+ * THE NAME, NEVER THE ADDRESS. Remembering an address would let the app render a
+ * connected wallet with no live extension session behind it, where every action then
+ * fails; that was the reason this was not persisted at all, and it is a good reason.
+ * Remembering only which extension to ask avoids it, because reconnecting actually
+ * establishes the session rather than assuming one.
+ *
+ * `localStorage` can throw in a private window or with site data blocked, so every
+ * access is wrapped and the app works without it: the cost is being asked to click
+ * connect again, which is exactly where this started.
+ */
+const LAST_WALLET_KEY = 'injpad:wallet';
+
+export function rememberWallet(name: WalletName | null): void {
+  try {
+    if (name) window.localStorage.setItem(LAST_WALLET_KEY, name);
+    else window.localStorage.removeItem(LAST_WALLET_KEY);
+  } catch {
+    /* a reload will simply ask again */
+  }
+}
+
+export function lastWallet(): WalletName | null {
+  try {
+    const v = window.localStorage.getItem(LAST_WALLET_KEY);
+    return SUPPORTED.some((w) => w.name === v) ? (v as WalletName) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Reconnect to the remembered wallet, silently, or return null.
+ *
+ * SILENT IS THE WHOLE POINT. `enable` does not prompt again for a chain the user has
+ * already approved in that extension, so a reload restores the session without a
+ * popup; if approval has been revoked, the extension is locked, or it is simply not
+ * there any more, this returns null and the header shows Connect. It NEVER throws,
+ * because a failed reconnect is the normal state of a first visit and must not reach
+ * an error boundary.
+ */
+export async function reconnect(): Promise<WalletAccount | null> {
+  const name = lastWallet();
+  if (!name || !injected(name)) return null;
+  try {
+    return await connect(name);
+  } catch {
+    // Including a locked wallet and a revoked approval. Both mean "ask again".
+    return null;
+  }
+}
+
 export async function connect(name: WalletName): Promise<WalletAccount> {
   const ext = injected(name);
   if (!ext) {
