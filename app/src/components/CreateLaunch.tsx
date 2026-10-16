@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { LogoUpload } from './LogoUpload';
 import { LaunchPreview } from './LaunchPreview';
 import { listQuotes, denomLabel, quoteLabel as quoteLabelOf, type QuoteAsset } from '@/lib/chain';
@@ -129,6 +130,7 @@ export function CreateLaunch() {
    * the same way the trade panel reads it.
    */
   const account = useConnectedAccount();
+  const router = useRouter();
 
   /*
    * Read once per connected account, not on every keystroke. The figure only has to
@@ -445,13 +447,25 @@ export function CreateLaunch() {
         wallet: account.provider,
       });
       setResult(txHash);
+      /*
+       * THE BOARD IS SERVER-RENDERED AND NOTHING REFETCHED IT. A creator launched a
+       * token, the transaction landed, and the launch did not appear until they
+       * reloaded the page by hand. The most important write in the product was the
+       * one the refresh guard did not cover, because that guard listed helper names
+       * rather than deriving them.
+       *
+       * `router.refresh()` re-runs the server components against the chain, which is
+       * the only honest source for a board: inserting the new launch optimistically
+       * would be rendering a launch nobody has read back.
+       */
+      router.refresh();
     } catch (e) {
       const err = e as Error & { kind?: string };
       setSignError(err.message || 'The launch could not be signed.');
     } finally {
       setBusy(false);
     }
-  }, [account, busy, plan]);
+  }, [account, busy, plan, router]);
 
   /*
    * What that buy actually gets, quoted from the same maths the contract runs. A

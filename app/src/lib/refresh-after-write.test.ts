@@ -55,6 +55,34 @@ const EXEMPT: Record<string, string> = {
   'components/ClaimFees.tsx': 'client-fetched, and it clears its own rows',
 };
 
+/**
+ * The broadcast helpers, READ FROM THE MODULE THAT DEFINES THEM.
+ *
+ * This guard listed three names it had been told about, and missed
+ * `broadcastLaunch` entirely: the single most important write in the product,
+ * creating a launch, was the one write it did not cover. A creator launched a token
+ * and the board kept showing what it was server-rendered with, so the launch looked
+ * like it had not happened until they reloaded.
+ *
+ * A hardcoded list of the things you already know about is a guard that covers the
+ * cases you did not need it for. Deriving the names means the next helper is covered
+ * the moment it exists.
+ */
+const helpers = [
+  ...readFileSync(join(SRC, 'lib/broadcast.ts'), 'utf8').matchAll(
+    /^export async function (broadcast[A-Za-z]*|signAndBroadcast[A-Za-z]*)\s*\(/gm,
+  ),
+].map((m) => m[1]);
+
+test('the broadcast helpers were actually found', () => {
+  /*
+   * A regex that silently matched nothing would make the guard below pass for every
+   * file, which is the quietest way for a guard to stop guarding.
+   */
+  assert.ok(helpers.length >= 3, `found ${helpers.length} helpers: ${helpers.join(', ')}`);
+  assert.ok(helpers.includes('broadcastLaunch'), 'broadcastLaunch is missing');
+});
+
 test('every component that broadcasts also makes the page read the chain again', () => {
   const offenders: string[] = [];
   /*
@@ -68,7 +96,7 @@ test('every component that broadcasts also makes the page read the chain again',
     if (!rel.startsWith('components/') && !rel.startsWith('app/')) continue;
     const src = stripComments(readFileSync(file, 'utf8'));
     // A write is a broadcast helper call, not merely importing one.
-    const writes = /\b(broadcastExecute|broadcastExecuteMany|signAndBroadcast)\s*\(/.test(src);
+    const writes = helpers.some((h) => new RegExp(`\\b${h}\\s*\\(`).test(src));
     if (!writes) continue;
     if (rel in EXEMPT) continue;
     if (!/router\.refresh\(\)/.test(src)) {
