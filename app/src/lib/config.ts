@@ -16,6 +16,21 @@
  *    `/cosmos/base/tendermint/v1beta1/node_info` and answer with chain ids
  *    `injective-888` and `injective-1` respectively. If you change one,
  *    re-check it rather than trusting the pattern.
+ *
+ * AND CONFIRM THE PATH, not only the host. Both explorers were
+ * `*.explorer.injective.network`, which 301s to injscan - and on TESTNET that redirect
+ * discards the path: `testnet.explorer.injective.network/contract/inj1u35…` answers
+ * `location: https://testnet.injscan.com`, so every explorer link in the product
+ * landed on the explorer's front page. Measured 16 Oct 2026 from the Location header,
+ * and the mainnet host preserves the path, so the two did not fail the same way and
+ * checking one would have cleared both. The routes here are the explorer's own, read
+ * out of its Nuxt route table: `/contract/:contract`, `/account/:account`,
+ * `/transaction/:transaction`, `/code/:code`.
+ *
+ * injscan.com answers those deep links with a soft 404 - byte-identical to the body it
+ * returns for a nonsense route, while a prerendered path like `/transactions` is 200 -
+ * so the status is its static host's and the client router renders the page. Worth
+ * knowing before reading a 404 here as a broken link.
  */
 
 export type NetworkName = 'testnet' | 'mainnet';
@@ -47,7 +62,8 @@ export const NETWORKS: Record<NetworkName, NetworkConfig> = {
     name: 'testnet',
     chainId: 'injective-888', // verified 3 Oct 2026
     lcd: 'https://testnet.sentry.lcd.injective.network',
-    explorer: 'https://testnet.explorer.injective.network',
+    // Not testnet.explorer.injective.network: its redirect drops the path. See above.
+    explorer: 'https://testnet.injscan.com',
     quoteDenom: 'inj',
     gasDenom: 'inj',
     quoteSymbol: 'INJ',
@@ -57,7 +73,9 @@ export const NETWORKS: Record<NetworkName, NetworkConfig> = {
     name: 'mainnet',
     chainId: 'injective-1', // verified 3 Oct 2026
     lcd: 'https://sentry.lcd.injective.network',
-    explorer: 'https://explorer.injective.network',
+    // The redirect target, used directly: one hop fewer, and the hop is what broke
+    // testnet. Confirmed 16 Oct 2026 as this host's own 301 destination, path intact.
+    explorer: 'https://injscan.com',
     quoteDenom: 'inj',
     gasDenom: 'inj',
     quoteSymbol: 'INJ',

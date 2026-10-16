@@ -374,5 +374,5 @@ console.log(`
 
   launch   ${symbol}  (${denom})
   curve    ${curve}
-  explorer https://testnet.explorer.injective.network/contract/${curve}
+  explorer https://testnet.injscan.com/contract/${curve}
 `);

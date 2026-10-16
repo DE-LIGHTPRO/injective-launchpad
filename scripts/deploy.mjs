@@ -626,10 +626,13 @@ console.log(`     factory → ${factoryAddress}  (${instRes.txHash})`);
 
 // ------------------------------------------------------------------ output --
 
-const explorer =
-  netName === 'mainnet'
-    ? 'https://explorer.injective.network'
-    : 'https://testnet.explorer.injective.network';
+/*
+ * injscan, not *.explorer.injective.network: the testnet host's 301 DISCARDS the path,
+ * so the link printed below after a deploy opened the explorer's front page rather than
+ * the factory just created. Measured from the Location header on 16 Oct 2026. Mirrors
+ * `NETWORKS[*].explorer` in app/src/lib/config.ts, which carries the detail.
+ */
+const explorer = netName === 'mainnet' ? 'https://injscan.com' : 'https://testnet.injscan.com';
 
 console.log(`
   Done.

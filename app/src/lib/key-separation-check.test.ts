@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { maskComments } from './testing/maskComments.ts';
 
 /**
  * §2 of the runbook says the three roles must not be one key. Something has to check.
@@ -30,7 +31,9 @@ const ROOT = join(import.meta.dirname, '..', '..', '..');
 const RUNBOOK = readFileSync(join(ROOT, 'docs', 'MAINNET-RUNBOOK.md'), 'utf8');
 
 /**
- * Comment ranges blanked, so the prose explaining a rule cannot break it.
+ * Comment ranges blanked, so the prose explaining a rule cannot break it. Shared,
+ * because the second half of getting this right - not blanking the `//` in `https://`
+ * and quietly erasing the lines being measured - was learned separately and later.
  *
  * The first draft of the test below asserted `NEXT_PUBLIC_NETWORK` is absent from the
  * script and failed on the comment that says severity must not be read from it. A
@@ -38,9 +41,7 @@ const RUNBOOK = readFileSync(join(ROOT, 'docs', 'MAINNET-RUNBOOK.md'), 'utf8');
  * fails on a correct file or, worse, passes on a wrong one because a comment mentioned
  * the right thing. Line numbers are preserved so a failure still points somewhere.
  */
-const SCRIPT = readFileSync(join(ROOT, 'scripts', 'verify-deployment.mjs'), 'utf8')
-  .replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' '))
-  .replace(/\/\/[^\n]*/g, (m) => ' '.repeat(m.length));
+const SCRIPT = maskComments(readFileSync(join(ROOT, 'scripts', 'verify-deployment.mjs'), 'utf8'));
 
 test('the roles are compared, not merely printed', () => {
   assert.match(

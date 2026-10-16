@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { maskComments } from './testing/maskComments.ts';
 
 /**
  * A constant the runbook tells you to derive must be a constant the deploy can receive.
@@ -33,10 +34,7 @@ import { join } from 'node:path';
 const ROOT = join(import.meta.dirname, '..', '..', '..');
 
 /** Comment ranges blanked so prose explaining a rule cannot satisfy or break it. */
-const code = (rel: string) =>
-  readFileSync(join(ROOT, rel), 'utf8')
-    .replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' '))
-    .replace(/\/\/[^\n]*/g, (m) => ' '.repeat(m.length));
+const code = (rel: string) => maskComments(readFileSync(join(ROOT, rel), 'utf8'));
 
 const DEPLOY = code('scripts/deploy.mjs');
 const DERIVE = readFileSync(join(ROOT, 'scripts', 'derive-curve-scale.mjs'), 'utf8');
