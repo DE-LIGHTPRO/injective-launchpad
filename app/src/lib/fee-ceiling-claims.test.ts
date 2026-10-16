@@ -39,16 +39,18 @@ import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { MAX_EARLY_FEE_BPS } from './launchRules.ts';
 import { MAX_FEE_BPS } from './launchLimits.ts';
+import { maskComments } from './testing/maskComments.ts';
 
 const SRC = join(import.meta.dirname, '..');
 const REPO = join(SRC, '..', '..');
 
-/** Comment ranges blanked, so prose below can discuss what the copy must not say. */
-function userFacingText(src: string): string {
-  return src
-    .replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' '))
-    .replace(/\/\/[^\n]*/g, (m) => ' '.repeat(m.length));
-}
+/*
+ * Comment ranges blanked through the shared helper, so prose below can discuss what
+ * the copy must not say. Not a local copy: this guard's first draft masked `//`
+ * naively, which blanks the rest of any line holding an `https://` - the exact way
+ * `explorer-host` was made vacuous while the thing it watched was broken.
+ */
+const userFacingText = maskComments;
 
 function sourceFiles(dir: string, out: string[] = []): string[] {
   for (const entry of readdirSync(dir)) {

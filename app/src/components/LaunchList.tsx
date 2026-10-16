@@ -20,15 +20,21 @@ import { PRICE_WAD } from '@/lib/curve';
 import { SearchIcon } from './Icons';
 import { Trending } from './Trending';
 import { denomLabel } from '@/lib/chain';
+import { FIXED_TOTAL_SUPPLY } from '@/lib/launchLimits';
 
 export type { LaunchRow };
 
 /*
  * Price per token from market cap. Every launch has the factory's fixed supply of
  * 1B tokens at 18 decimals, so this is exact rather than an approximation.
+ *
+ * The supply comes from `FIXED_TOTAL_SUPPLY`, which mirrors the contract. It was a
+ * local `1_000_000_000n * ONE` here and another in `Portfolio`, so three copies of
+ * the number that divides every price on the board and every valuation in the
+ * portfolio. A change to the factory's supply would have left both screens pricing
+ * against the old one with nothing looking unusual.
  */
 const ONE = 10n ** 18n;
-const TOTAL_SUPPLY = 1_000_000_000n * ONE;
 
 /**
  * The launch grid, with search and sort.
@@ -320,7 +326,7 @@ export function LaunchList({ rows }: { rows: LaunchRow[] }) {
                     </td>
                     <td className="num">
                       {/* Wad precision: a 6-decimal quote's price is below one base unit. */}
-                      <Price raw={(BigInt(r.marketCap) * ONE * PRICE_WAD) / TOTAL_SUPPLY} decimals={r.quoteDecimals + 18} />
+                      <Price raw={(BigInt(r.marketCap) * ONE * PRICE_WAD) / FIXED_TOTAL_SUPPLY} decimals={r.quoteDecimals + 18} />
                     </td>
                     <td className="num strong">
                       {compact(BigInt(r.marketCap), r.quoteDecimals)} <span className="unit">{unit}</span>

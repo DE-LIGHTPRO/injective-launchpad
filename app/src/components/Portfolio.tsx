@@ -6,12 +6,20 @@ import { useConnectedAccount } from '@/lib/walletStore';
 import { allBalances } from '@/lib/wallet';
 import { symbolOf } from '@/lib/chain';
 import { fmt } from '@/lib/curve';
+import { FIXED_TOTAL_SUPPLY } from '@/lib/launchLimits';
 import { TokenLogo } from './TokenLogo';
 import type { LaunchRow } from '@/lib/launchList';
 
-const ONE = 10n ** 18n;
-/** The factory's fixed supply: 1B tokens at 18 decimals. Market cap is spot * this. */
-const TOTAL_SUPPLY = 1_000_000_000n * ONE;
+/*
+ * The divisor is `FIXED_TOTAL_SUPPLY`, not a local copy of it.
+ *
+ * This file and `LaunchList` each declared `1_000_000_000n * ONE` while
+ * `launchLimits.ts` held the same figure mirroring the contract. Three copies of a
+ * number that divides every valuation on two screens: if the factory's supply ever
+ * changed, the board would keep pricing against the old one and every holding here
+ * would be wrong by the ratio, with nothing on either screen looking unusual. That
+ * is the same shape as the two fee caps, and the fix is the same - one declaration.
+ */
 
 interface Holding {
   row: LaunchRow;
@@ -61,7 +69,7 @@ export function Portfolio({ rows }: { rows: LaunchRow[] }) {
     for (const row of rows) {
       const balance = balances[row.denom] ?? 0n;
       if (balance <= 0n) continue;
-      const value = (balance * BigInt(row.marketCap)) / TOTAL_SUPPLY;
+      const value = (balance * BigInt(row.marketCap)) / FIXED_TOTAL_SUPPLY;
       out.push({ row, balance, value });
     }
     // Most valuable first, within a quote; different quotes just interleave by value,

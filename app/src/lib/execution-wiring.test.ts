@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, readdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { join, relative } from 'node:path';
+import { maskComments } from './testing/maskComments.ts';
 
 /**
  * Is the thing reachable, or only registered?
@@ -27,9 +28,21 @@ function read(rel: string): string {
   return readFileSync(join(SRC, rel), 'utf8');
 }
 
-/** Comment ranges masked, so a disabled button described in prose is not a finding. */
-function stripComments(src: string): string {
-  return src.replace(/\/\*[\s\S]*?\*\//g, (m) => ' '.repeat(m.length)).replace(/\/\/[^\n]*/g, '');
+/*
+ * Comment ranges masked, so a disabled button described in prose is not a finding, and
+ * so the prose below can name the literal it forbids. The shared helper rather than a
+ * local one: a local copy here blanked the rest of any line holding an `https://`,
+ * which is how a guard goes vacuous while the thing it watches is broken.
+ */
+const stripComments = maskComments;
+
+function sourceFiles(dir: string, out: string[] = []): string[] {
+  for (const entry of readdirSync(dir)) {
+    const full = join(dir, entry);
+    if (statSync(full).isDirectory()) sourceFiles(full, out);
+    else if (/\.tsx?$/.test(entry) && !entry.endsWith('.test.ts')) out.push(full);
+  }
+  return out;
 }
 
 test('a screen with a primary action has one that can be pressed', () => {
@@ -139,4 +152,58 @@ test('the fee split shown to a creator is the one the contract writes', () => {
     rustCap![1].replace(/_/g, ''),
     'the form allows a different opening buy than the contract does',
   );
+});
+
+test('the fixed supply is declared once, and it is the mirrored one', () => {
+  /*
+   * The mirror above is only worth having if it is the number the screens actually
+   * divide by. `LaunchList` and `Portfolio` each declared their own
+   * `1_000_000_000n * ONE` while `launchLimits.ts` held `FIXED_TOTAL_SUPPLY`
+   * mirroring the factory: three copies of the figure that divides every price on the
+   * board and every holding in the portfolio.
+   *
+   * What makes that worse than the usual duplicate is that it fails quietly and
+   * proportionally. Change the supply in the factory, the test above goes red and
+   * gets fixed in one place, and the board keeps pricing against the old number -
+   * every figure on two screens wrong by the ratio, with nothing on either screen
+   * looking unusual, because a price is a price.
+   */
+  const offenders: string[] = [];
+  for (const file of sourceFiles(SRC)) {
+    const rel = relative(SRC, file);
+    if (rel === 'lib/launchLimits.ts') continue;
+    const text = stripComments(readFileSync(file, 'utf8'));
+    const banned: [RegExp, string][] = [
+      // The literal itself, underscored or not.
+      [/1_?000_?000_?000_?000_?000_?000_?000_?000_?000/g, 'the supply as a literal'],
+      // The shape it was actually written in: a billion scaled by a local token unit.
+      [/1_000_000_000n\s*\*\s*\w+/g, 'a billion scaled by a local unit'],
+      // And a second name for it, which is how the first two got there.
+      [/(?:const|let)\s+(\w*TOTAL_SUPPLY\w*)\s*=/g, 'a local supply constant'],
+    ];
+    for (const [re, what] of banned) {
+      for (const m of text.matchAll(re)) {
+        offenders.push(`${rel}:${text.slice(0, m.index).split('\n').length} ${what} (${m[0]})`);
+      }
+    }
+  }
+  assert.deepEqual(
+    offenders,
+    [],
+    'import FIXED_TOTAL_SUPPLY from launchLimits rather than restating it.\n  ' +
+      offenders.join('\n  '),
+  );
+
+  /*
+   * Anti-vacuity, and rule-52 reachability: forbidding the copies proves nothing if
+   * the two screens no longer divide by the shared one either. Both call sites are
+   * asserted, because the defect was one declaration per screen.
+   */
+  for (const rel of ['components/LaunchList.tsx', 'components/Portfolio.tsx']) {
+    assert.match(
+      stripComments(read(rel)),
+      /\/ FIXED_TOTAL_SUPPLY/,
+      `${rel} no longer values anything against the mirrored supply`,
+    );
+  }
 });
