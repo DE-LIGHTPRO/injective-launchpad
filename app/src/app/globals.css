@@ -811,11 +811,52 @@ button:disabled { color: var(--text-faint); cursor: not-allowed; }
 }
 
 /* Wallet, create form and trade feed. */
-.wallet { position: relative; display: inline-flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; }
-.wallet-acct { display: inline-flex; flex-direction: column; line-height: 1.25; min-width: 0; }
-.wallet-name { font-size: var(--text-sm); }
-.wallet-addr { font-size: var(--text-micro); color: var(--text-faint); }
-.wallet-bal { font-size: var(--text-sm); color: var(--text-dim); }
+/*
+ * The connected wallet, as ONE compact unit that never wraps.
+ *
+ * It was `flex-wrap: wrap`, so when the header ran out of room the Disconnect
+ * button dropped onto a second line and overflowed the header's own height: the
+ * address and balance sat over the top edge with the button underneath them.
+ * Reported from production on a wide window, because the nav, the chips, Create and
+ * a two-line account block together are wider than they look.
+ *
+ * It sheds in priority order instead, which is what the nav already does: the
+ * balance goes first because the wallet shows it too, then the wallet's name,
+ * leaving the address and the way out. Nothing wraps at any width.
+ */
+.wallet {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+.wallet-acct {
+  display: inline-flex;
+  flex-direction: column;
+  line-height: 1.25;
+  min-width: 0;
+  /* So a long label cannot push the button out of the header. */
+  max-width: 15ch;
+}
+.wallet-name {
+  font-size: var(--text-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wallet-addr { font-size: var(--text-micro); color: var(--text-faint); white-space: nowrap; }
+.wallet-bal { font-size: var(--text-sm); color: var(--text-dim); white-space: nowrap; }
+
+@media (max-width: 1100px) {
+  /* The balance is the first thing to go: the wallet itself shows it. */
+  .wallet-bal { display: none; }
+}
+@media (max-width: 860px) {
+  /* Then the name. The address is what identifies which account will sign. */
+  .wallet-name { display: none; }
+}
 .wallet-menu {
   position: absolute; top: calc(100% + var(--space-2)); right: 0; z-index: 20;
   min-width: 15rem; max-width: min(22rem, calc(100vw - 2rem));
@@ -1810,6 +1851,41 @@ header.top .chip { font-size: 11px; letter-spacing: 0.04em; padding: 3px 8px; bo
 .go.ghost { background: var(--surface-1); border: 1px solid var(--line-strong); color: var(--text); }
 .go.ghost:hover:not(:disabled) { background: var(--surface-2); border-color: #3a3f48; }
 .wallet > button:not(.ghost) { height: 36px; padding: 0 14px; border-radius: 8px; font-size: var(--text-sm); }
+
+/*
+ * THE CONNECTED CLUSTER, WHICH WAS THE ONE THING IN THE HEADER OFF THE GRID.
+ *
+ * Measured at 1280px with a wallet connected: brand 27px, nav 33px, the testnet
+ * chip 26px, Create 36px, and the wallet 42px. Every one of those is centred on
+ * the same line, so the only thing that reads as wrong is the 42 - Disconnect
+ * inherited the page's default button padding because the restyle above only
+ * reached `.wallet > button:not(.ghost)`, which is the Connect trigger and
+ * therefore the one state where it did not matter. Six pixels taller than the
+ * button beside it is exactly the kind of drift that makes a bar look unmade.
+ *
+ * The account, the balance and the button are then one group with a rule
+ * between them, rather than three things at the same gap as the nav items. A
+ * two-line name-over-address stack sitting at the same 8px from a one-line
+ * balance is what made the address and the figure read as a single run of text.
+ */
+.wallet > button.ghost {
+  height: 36px;
+  padding: 0 12px;
+  border-radius: 8px;
+  font-size: var(--text-sm);
+  font-weight: 540;
+  background: var(--surface-1);
+  border: 1px solid var(--line-strong);
+  color: var(--text-dim);
+}
+.wallet > button.ghost:hover { background: var(--surface-2); border-color: #3a3f48; color: var(--text); }
+.wallet { gap: 10px; }
+.wallet-acct { line-height: 1.2; gap: 1px; }
+.wallet-bal {
+  padding-left: 10px;
+  border-left: 1px solid var(--line);
+  color: var(--text-dim);
+}
 
 @media (max-width: 720px) { .top-nav { display: none; } }
 @media (max-width: 640px) {
