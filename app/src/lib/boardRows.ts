@@ -23,6 +23,15 @@ export interface Row {
   marketCap: bigint;
   feesAccrued: bigint;
   creatorPaid: bigint;
+  /**
+   * Lifetime, actually paid to the launchpad.
+   *
+   * Carried even though no board column shows it, because the creator page groups
+   * these rows through `totalsByQuote`, which takes both sides. Passing a `0n` in
+   * its place would have put an unmeasured zero into a shared aggregator for the
+   * sake of a figure that screen does not render.
+   */
+  platformPaid: bigint;
   quoteDenom: string;
   quoteDecimals: number;
   quoteLabel: string;
@@ -76,6 +85,7 @@ export async function loadRows(): Promise<{ rows: Row[]; error?: string; errorDe
            * decides on, and nearly.trade puts it on their homepage for that reason.
            */
           creatorPaid: d.creatorPaid,
+          platformPaid: d.platformPaid,
           quoteDenom: d.quoteDenom,
           /*
            * Decimals of THIS launch's quote. `getLaunchDetail` does not report them,

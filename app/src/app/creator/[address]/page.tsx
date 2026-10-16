@@ -6,8 +6,8 @@ import { ArrowLeftIcon } from '@/components/Icons';
 import { CopyButton } from '@/components/CopyButton';
 import { LaunchList } from '@/components/LaunchList';
 import { loadRows, toRow } from '@/lib/boardRows';
-import { boardTotals, compact } from '@/lib/boardMetrics';
-import { denomLabel } from '@/lib/chain';
+import { compact } from '@/lib/boardMetrics';
+import { totalsByQuote } from '@/lib/analytics';
 import { addressName as nameFor } from '@/lib/addressName';
 import { NETWORK, isDevBuild } from '@/lib/config';
 
@@ -40,17 +40,39 @@ export default async function CreatorPage({ params }: { params: Promise<{ addres
 
   const { rows, error, errorDetail } = await loadRows();
   const mine = rows.filter((r) => r.launch.creator === address);
-  const t = boardTotals(
+
+  /*
+   * Fees GROUPED PER QUOTE, not summed and not withheld.
+   *
+   * This read `boardTotals(mine)` and showed one figure each for fees paid and fees
+   * unclaimed, falling back to a bare "." whenever a creator's launches did not all
+   * share a quote. The reasoning was right - 18-decimal INJ added to 6-decimal
+   * E2EUSD is wrong by twelve orders of magnitude, and there is no oracle here to
+   * convert with - but refusing to say anything is not the remedy, and the page said
+   * nothing about why. The only creator on testnet has four launches across two
+   * quotes, so this screen's two money figures were both a dot, and the one note
+   * under them talks about generated names.
+   *
+   * `totalsByQuote` is the shape this codebase already chose twice, on `/analytics`
+   * ("Grouped, never summed") and in `Portfolio` ("Totals are per quote, never
+   * summed across them"). Reusing it rather than re-deriving keeps a creator's own
+   * page and the launchpad's analytics from disagreeing about what they were paid.
+   */
+  const byQuote = totalsByQuote(
     mine.map((r) => ({
+      quoteDenom: r.quoteDenom,
+      quote: { denom: r.quoteDenom, decimals: r.quoteDecimals, label: r.quoteLabel },
+      graduated: r.graduated,
       raised: r.raised,
       feesAccrued: r.feesAccrued,
-      graduated: r.graduated,
       creatorPaid: r.creatorPaid,
+      platformPaid: r.platformPaid,
+      openedAt: r.rules.openedAt,
+      creator: r.launch.creator,
     })),
   );
-  // Summed only when every launch shares one quote; otherwise the units differ.
-  const quotes = new Set(mine.map((r) => r.quoteDenom));
-  const one = quotes.size === 1 ? mine[0] : null;
+  const launches = mine.length;
+  const graduated = mine.filter((r) => r.graduated).length;
 
   return (
     <>
@@ -78,25 +100,62 @@ export default async function CreatorPage({ params }: { params: Promise<{ addres
           <dl className="stats" style={{ marginTop: 'var(--space-5)' }}>
             <div className="stat">
               <dt className="k">Launches</dt>
-              <dd className="v">{t.launches}</dd>
+              <dd className="v">{launches}</dd>
             </div>
             <div className="stat">
               <dt className="k">Graduated</dt>
-              <dd className="v">{t.graduated}</dd>
+              <dd className="v">{graduated}</dd>
             </div>
             <div className="stat">
-              <dt className="k">Fees paid out</dt>
-              <dd className="v">
-                {one ? `${compact(t.paidToCreators, one.quoteDecimals)} ${one.quoteLabel}` : '·'}
-              </dd>
-            </div>
-            <div className="stat">
-              <dt className="k">Fees unclaimed</dt>
-              <dd className="v">
-                {one ? `${compact(t.feesAccrued, one.quoteDecimals, 4)} ${one.quoteLabel}` : '·'}
-              </dd>
+              <dt className="k">{byQuote.length === 1 ? 'Pair' : 'Pairs'}</dt>
+              <dd className="v">{byQuote.length}</dd>
             </div>
           </dl>
+
+          {byQuote.length > 0 && (
+            <section className="card" style={{ marginTop: 'var(--space-4)' }}>
+              <h2>What this creator has been paid</h2>
+              <p className="note">
+                One row per pair, never added together. These are amounts of different
+                assets in their own decimals, and there is no price oracle here to
+                convert them with.
+              </p>
+              {byQuote.map((q) => (
+                <div key={q.quote.denom} style={{ marginTop: 'var(--space-4)' }}>
+                  <div className="metric-row">
+                    <span className="k">
+                      <strong>{q.quote.label}</strong> · {q.launches}{' '}
+                      {q.launches === 1 ? 'launch' : 'launches'}
+                    </span>
+                    <span className="v mono">{q.graduated} graduated</span>
+                  </div>
+                  <div className="metric-row">
+                    {/*
+                        PAID, which only ever rises, kept separate from accrued, which
+                        drops to zero the moment it is claimed. One figure covering both
+                        would fall when a creator was paid.
+                      */}
+                    <span className="k">Claimed by this creator, lifetime</span>
+                    <span className="v mono">
+                      {compact(q.paidToCreators, q.quote.decimals, 4)} {q.quote.label}
+                    </span>
+                  </div>
+                  <div className="metric-row">
+                    <span className="k">Accrued, not yet claimed</span>
+                    <span className="v mono">
+                      {compact(q.unclaimed, q.quote.decimals, 4)} {q.quote.label}
+                    </span>
+                  </div>
+                </div>
+              ))}
+              <p className="note" style={{ marginTop: 'var(--space-4)' }}>
+                Accrued is both sides of the fee, the creator&rsquo;s share and the
+                launchpad&rsquo;s, because the contract holds them in one balance until
+                a claim splits them.
+              </p>
+            </section>
+          )}
+
           <p className="note" style={{ marginTop: 'var(--space-3)' }}>
             Names are generated from the address and are not chosen or verified.
           </p>

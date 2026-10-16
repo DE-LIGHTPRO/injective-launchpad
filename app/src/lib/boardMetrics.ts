@@ -5,15 +5,21 @@ import { marketCapExact, type CurveConfig, type CurveState, type PoolReserves } 
  *
  * Modelled on what nearly.trade shows per card, which is the mature version of this
  * surface: market cap as the headline, age, fee, progress, and activity counts. Two of
- * their columns are deliberately absent here rather than approximated:
+ * one of their columns is deliberately absent here rather than approximated:
  *
  *   HOLDERS   Measured and not available. `denom_owners` returns 501 for a factory
  *             denom on Injective and the explorer serves an HTML page rather than an
  *             API. It needs a self-hosted indexer. A guess in that column would be the
  *             single most misleading number on the page, because distribution is
  *             exactly what a buyer is trying to judge.
- *   PAIRED    Every launch here quotes in INJ. A filter offering one option is a
- *             control that does nothing.
+ *
+ * PAIRED USED TO BE THE SECOND, on the grounds that every launch here quotes in INJ and
+ * a filter offering one option is a control that does nothing. That stopped being true:
+ * the factory's quote allowlist carries two assets on testnet (INJ at 18 decimals and
+ * a 6-decimal E2EUSD), launches are split across both, and the board has rendered a
+ * "Paired with" filter for a while. A documented limitation that has since been lifted
+ * reads as a live constraint and steers the next person away from what already shipped,
+ * which is why it is recorded as lifted rather than quietly deleted.
  */
 
 const ONE = 10n ** 18n;
