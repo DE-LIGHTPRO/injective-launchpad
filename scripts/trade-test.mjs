@@ -90,10 +90,18 @@ const smart = async (addr, q) => {
   if (!r.ok) die(`query failed: ${r.status}`, await r.text());
   return (await r.json()).data;
 };
+/*
+ * `by_denom`, asked for by name. The plural query pages at 100 denoms, so a `find()`
+ * over it returns 0 for a denom that is merely on page two - and the denom here is a
+ * tokenfactory one, on an account that collects them. Encoded, because
+ * `factory/inj1…/SYM` contains slashes.
+ */
 const bank = async (addr, denom) => {
-  const r = await fetch(`${rest}/cosmos/bank/v1beta1/balances/${addr}`);
+  const r = await fetch(
+    `${rest}/cosmos/bank/v1beta1/balances/${addr}/by_denom?denom=${encodeURIComponent(denom)}`,
+  );
   const d = await r.json();
-  return BigInt(d.balances?.find((b) => b.denom === denom)?.amount ?? '0');
+  return BigInt(d.balance?.amount ?? '0');
 };
 const fmt = (v) => (Number(v) / 1e18).toFixed(6);
 

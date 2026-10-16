@@ -74,10 +74,13 @@ export function LaunchList({ rows }: { rows: LaunchRow[] }) {
   /*
    * Trade counts, fetched AFTER the board renders and never blocking it.
    *
-   * Two count-only tx searches per launch: `pagination.limit=1` returns the `total`
-   * and no transaction bodies, so this is cheap, but it is still N requests and the
-   * board is the page's reason to exist. It arrives late and the cards reflow by one
-   * row rather than the page waiting on it.
+   * Two count-only tx searches per launch: `limit=1` returns the `total` and one
+   * transaction body rather than the default hundred, so this is cheap, but it is
+   * still N requests and the board is the page's reason to exist. It arrives late and
+   * the cards reflow by one row rather than the page waiting on it.
+   *
+   * `pagination.limit` is the wrong parameter for that endpoint and was what this did
+   * for every count the board has ever taken. See `launchActivity.ts`.
    *
    * `null` for a launch whose count failed, which renders as "trades unavailable"
    * rather than "0 trades": zero is a real and common answer on a new board, so a

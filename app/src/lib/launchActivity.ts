@@ -6,13 +6,33 @@ import { buildSeries } from './priceSeries.ts';
 /**
  * How busy a launch is, from what this chain will actually answer.
  *
- * MEASURED BEFORE BUILT, because the last time I reasoned about this I was wrong.
  * Injective's tx search returns a `total` at the top level of the response, and it
  * accepts both `wasm.action='buy'` and `tx.height>N`, so a trade count is one request
- * that fetches no transactions:
+ * that need fetch no transactions.
  *
- *     ?query=wasm._contract_address='…' AND wasm.action='buy'&pagination.limit=1
+ * THE PARAMETER IS `limit`, NOT `pagination.limit`, AND THE TWO ENDPOINTS DISAGREE.
+ * `/cosmos/tx/v1beta1/txs` honours a top-level `limit` and silently IGNORES
+ * `pagination.limit`; `/cosmos/bank/v1beta1/balances` is the exact opposite, honouring
+ * `pagination.limit` and ignoring `limit`. Both measured against live mainnet and
+ * testnet on 16 Oct 2026. Neither rejects the wrong one, so the request succeeds, the
+ * `total` is correct, and the only symptom is the page size falling back to the default
+ * of 100 full transaction bodies.
+ *
+ * On one live mainnet window that was 1,986,123 bytes against 6,752 - 294 times the
+ * payload - for a request whose entire purpose is to read one integer. It was wrong
+ * here for every count this board has ever taken, twice per launch per render, and it
+ * grows with each launch's trade count: a new launch with three trades costs nothing,
+ * so the defect arrives exactly when the product starts working.
+ *
+ * This comment used to claim the opposite, with evidence:
+ *
+ *     ?query=… AND wasm.action='buy'&pagination.limit=1
  *     -> { "txs": [], "tx_responses": [], "total": "1" }
+ *
+ * `total: "1"` is the tell. An ignored limit and an honoured one are indistinguishable
+ * when there is only one result, and every testnet query this was checked against had
+ * one or none. A measurement that cannot fail is not a measurement - re-check a limit
+ * against a query whose total EXCEEDS it.
  *
  * HOLDERS ARE STILL ABSENT and that is not a gap this file can close.
  * `/cosmos/bank/v1beta1/denom_owners/<denom>` answers `code 12, Not Implemented` with
@@ -36,11 +56,16 @@ export interface LaunchActivity {
   trades: number;
 }
 
-/** A count-only tx search: `limit=1` fetches no transactions, just the total. */
+/**
+ * A count-only tx search: one transaction body instead of a hundred, just for `total`.
+ *
+ * `limit`, never `pagination.limit` - see the header. The wrong one is not an error,
+ * it is a 294x payload with the right answer in it.
+ */
 async function countTxs(query: string): Promise<number> {
   const url = `${getLcdUrl()}/cosmos/tx/v1beta1/txs?query=${encodeURIComponent(
     query,
-  )}&pagination.limit=1`;
+  )}&limit=1`;
   const res = await fetch(url, { headers: { accept: 'application/json' } });
   if (!res.ok) throw new Error(`tx search ${res.status}`);
   const body = (await res.json()) as { total?: unknown };

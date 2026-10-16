@@ -203,14 +203,37 @@ try {
 
 section(2, 'The addresses that will hold and receive money');
 
+/**
+ * Two questions, two requests, because one query cannot answer both honestly.
+ *
+ * "Does this account hold anything at all" is the plural query, bounded to one denom -
+ * that is the whole question. "How much INJ" is `by_denom`, asked for by name.
+ *
+ * It used to be one unbounded plural query with a `find(denom === 'inj')` over the
+ * result. That endpoint pages at 100 denoms, and an account that has been used on
+ * Injective accumulates tokenfactory denoms, IBC assets and airdrops, so `inj` falling
+ * off the first page is ordinary rather than exotic. The find then yields undefined
+ * and this reported `0n` - this tool, about the mainnet fee recipient, on the morning
+ * it is being trusted. A paged-out balance and an empty account are indistinguishable
+ * in the answer, which is what makes it worth two requests.
+ *
+ * Note the endpoints disagree about the parameter: bank wants `pagination.limit` and
+ * ignores a bare `limit`, while `/cosmos/tx/v1beta1/txs` is the exact opposite. Both
+ * measured live on 16 Oct 2026; see `app/src/lib/tx-search-limit.test.ts`.
+ */
 async function accountExists(addr) {
-  const r = await fetch(`${MAINNET_LCD}/cosmos/bank/v1beta1/balances/${addr}`, {
-    signal: AbortSignal.timeout(20_000),
-  });
-  if (!r.ok) return null;
-  const b = (await r.json())?.balances ?? [];
-  const inj = b.find((c) => c.denom === 'inj');
-  return { funded: b.length > 0, inj: inj ? BigInt(inj.amount) : 0n };
+  const get = (path) => fetch(`${MAINNET_LCD}${path}`, { signal: AbortSignal.timeout(20_000) });
+  const [any, injRes] = await Promise.all([
+    get(`/cosmos/bank/v1beta1/balances/${addr}?pagination.limit=1`),
+    get(`/cosmos/bank/v1beta1/balances/${addr}/by_denom?denom=inj`),
+  ]);
+  if (!any.ok || !injRes.ok) return null;
+  const held = (await any.json())?.balances ?? [];
+  const amount = (await injRes.json())?.balance?.amount;
+  return {
+    funded: held.length > 0,
+    inj: typeof amount === 'string' && /^[0-9]+$/.test(amount) ? BigInt(amount) : 0n,
+  };
 }
 
 if (!platform) {

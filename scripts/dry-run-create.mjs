@@ -105,8 +105,21 @@ console.log(`  factory  ${factory}`);
 console.log(`  signer   ${sender}`);
 
 const rest = getNetworkEndpoints(network).rest;
-const bal = await fetch(`${rest}/cosmos/bank/v1beta1/balances/${sender}`).then((r) => r.json());
-const inj = BigInt(bal.balances?.find((b) => b.denom === 'inj')?.amount ?? '0');
+/*
+ * `by_denom`, not the whole-account query with a find().
+ *
+ * The plural endpoint pages at 100 denoms and IGNORES a bare `limit` (it wants
+ * `pagination.limit` - the tx endpoint is the other way round, measured 16 Oct 2026).
+ * A real Injective account collects tokenfactory denoms, IBC assets and airdrops, so
+ * `inj` falling off the first page is ordinary, and `find()` then yields undefined and
+ * the `?? '0'` prints `balance 0.000000 INJ`. That is the worst direction for this
+ * number to be wrong in: a dry run before a mainnet launch telling the operator their
+ * funded signer is empty. One denom asked for by name cannot be paged out.
+ */
+const bal = await fetch(`${rest}/cosmos/bank/v1beta1/balances/${sender}/by_denom?denom=inj`).then(
+  (r) => r.json(),
+);
+const inj = BigInt(bal.balance?.amount ?? '0');
 console.log(`  balance  ${(Number(inj) / 1e18).toFixed(6)} INJ`);
 
 /**

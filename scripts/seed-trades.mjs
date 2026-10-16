@@ -84,9 +84,17 @@ const smart = async (addr, q) => {
   if (!r.ok) die(`query failed: ${r.status}`, await r.text());
   return (await r.json()).data;
 };
+/*
+ * `by_denom`, asked for by name. The plural query pages at 100 denoms and a `find()`
+ * over it reports 0 for anything on page two - which a seeding account, holding one
+ * tokenfactory denom per launch it has ever created, reaches quickly. Encoded, since
+ * `factory/inj1…/SYM` contains slashes.
+ */
 const bal = async (denom) => {
-  const d = await fetch(`${rest}/cosmos/bank/v1beta1/balances/${sender}`).then((r) => r.json());
-  return BigInt(d.balances?.find((b) => b.denom === denom)?.amount ?? '0');
+  const d = await fetch(
+    `${rest}/cosmos/bank/v1beta1/balances/${sender}/by_denom?denom=${encodeURIComponent(denom)}`,
+  ).then((r) => r.json());
+  return BigInt(d.balance?.amount ?? '0');
 };
 
 const cfg = await smart(curve, { config: {} });
