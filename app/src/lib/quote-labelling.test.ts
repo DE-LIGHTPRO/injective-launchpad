@@ -157,6 +157,17 @@ test('the curve axis derives its scale from the quote, not a constant', () => {
     !/const ONE = \d/.test(src),
     'a hardcoded unit is back in CurveChart',
   );
+  /*
+   * And the quote is not optional. A default here is what let `CreateLaunch` call the
+   * chart bare for a year's worth of commits, so restoring one to make a new call site
+   * compile would reopen the defect without changing a single line of the chart's maths.
+   */
+  for (const prop of ['quoteLabel', 'quoteDecimals']) {
+    assert.ok(
+      !new RegExp(`${prop}\\s*[=?]`).test(src),
+      `${prop} is optional or defaulted again, so a call site can omit the launch\u2019s quote`,
+    );
+  }
 });
 
 /** Every `.tsx` under `src/`, so a guard over call sites cannot go stale by omission. */
@@ -185,6 +196,11 @@ test('every curve chart is handed the quote it is drawing', () => {
    * USES a prop is not checking that anyone PASSES it. So this reads the call sites,
    * found by walking the tree rather than listed, since a new chart added later is the
    * case a named list would miss.
+   *
+   * Both props are now REQUIRED, so `tsc` refuses a bare call and this test is the
+   * second line rather than the first. It is still the one that binds, because what
+   * `tsc` cannot see is somebody restoring the default to make a new call site compile,
+   * which is exactly how the defect got in. The test below pins that too.
    */
   const sites: string[] = [];
   const offenders: string[] = [];

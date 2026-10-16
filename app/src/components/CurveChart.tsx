@@ -35,16 +35,30 @@ export function CurveChart({
   config,
   state,
   height = 180,
-  quoteLabel = 'INJ',
-  quoteDecimals = 18,
+  quoteLabel,
+  quoteDecimals,
 }: {
   config: CurveConfig;
   state: CurveState;
   height?: number;
-  /** Ticker for the axis. Defaults to INJ, which is right for the default quote. */
-  quoteLabel?: string;
+  /**
+   * Ticker for the axis. REQUIRED, and it used to default to 'INJ' at 18 decimals.
+   *
+   * That default was right for the default pair and silently wrong for every other,
+   * which made it the trap rather than the convenience: `CreateLaunch` called this
+   * component bare, so with the 6-decimal E2EUSD pair selected the axis read
+   * `0 INJ raised` and `0.0 INJ` for a curve the row beneath it said tops out at
+   * 15,689.37 E2EUSD - the ceiling collapsing to one decimal because a 6-decimal
+   * reserve was divided by 1e18. The `unitFor` note below records that same defect as
+   * already fixed; the default reinstated it one call site over.
+   *
+   * Required rather than guarded, because then the compiler refuses the omission and
+   * the hazard is gone instead of watched. Every sibling that renders a launch's money
+   * (`PriceChart`, `TradeTicker`, `LaunchPreview`) already declared these required.
+   */
+  quoteLabel: string;
   /** Decimals of that quote, which set the axis scale. */
-  quoteDecimals?: number;
+  quoteDecimals: number;
 }) {
   const ONE = unitFor(quoteDecimals);
   let points;
