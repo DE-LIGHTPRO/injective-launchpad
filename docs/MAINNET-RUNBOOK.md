@@ -158,12 +158,21 @@ price multiple, and the price impact of several buy sizes. Choose on those, not 
 the constant. It refuses rather than guessing if the venues disagree or cannot be
 reached, and takes `--price=` when you have one you trust.
 
+**Carry the number into step 7 as `INJ_QUOTE_VIRTUAL_WHOLE`.** Until 16 Oct 2026 this
+step produced a figure nothing could receive: `quote_virtual_whole` was the literal
+`'676'` inside `deploy.mjs`, and the script's own closing line printed the derived
+constant as a shell *comment*. Doing exactly what this runbook said derived one number
+and deployed another, silently, and the only evidence would have been the market cap
+every launch opened at. The deploy now **refuses on mainnet** when it is unset, and the
+derive script prints a command with it already in place.
+
 ### 7. Deploy
 
 ```bash
 cd /path/to/injective-launchpad
 ./scripts/build-wasm.sh
 
+INJ_QUOTE_VIRTUAL_WHOLE=from-step-6 \
 INJ_LAUNCH_FEE=0.2 \
 INJ_PLATFORM_ADDRESS=inj1... \
 INJ_FACTORY_ADMIN=inj1... \

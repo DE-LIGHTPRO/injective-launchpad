@@ -511,6 +511,45 @@ console.log(
 );
 
 /**
+ * The opening virtual reserve, in whole quote units.
+ *
+ * WHY THIS IS A VARIABLE NOW. It was the literal `'676'` in the instantiate message
+ * below, with a comment citing the INJ price on 11 Oct 2026. Step 6 of the mainnet
+ * runbook tells the operator to re-derive it on the morning, and
+ * `derive-curve-scale.mjs` prints the number it arrives at - and then there was no way
+ * to pass that number to this script. An operator would derive 590, run the deploy
+ * exactly as written, and instantiate 676, with nothing on screen mentioning either
+ * figure. The number decays fast enough to matter: INJ was $7.92 when 676 was chosen
+ * and $9.09 five days later, which is a launch opening at $5,727 instead of $5,000.
+ *
+ * Mainnet refuses an absent value rather than defaulting, for the same reason
+ * `INJ_PLATFORM_ADDRESS` does: this constant sets the market cap every launch on the
+ * platform opens at, and a default is not a decision. Testnet keeps 676 so the e2e
+ * script needs no new configuration.
+ */
+function quoteVirtualWhole() {
+  const raw = process.env.INJ_QUOTE_VIRTUAL_WHOLE?.trim();
+  if (!raw) {
+    if (netName === 'mainnet') {
+      die(
+        'INJ_QUOTE_VIRTUAL_WHOLE is not set.',
+        'It sets the market cap every launch opens at, and 676 is a premise about the',
+        'INJ price on 11 Oct 2026. Derive it now and pass it:',
+        '  node scripts/derive-curve-scale.mjs 5000',
+      );
+    }
+    return '676';
+  }
+  if (!/^[1-9][0-9]*$/.test(raw)) {
+    die(
+      `INJ_QUOTE_VIRTUAL_WHOLE is not a whole number of quote units: ${raw}`,
+      'It is WHOLE units, not base units: 590, not 590000000000000000000.',
+    );
+  }
+  return raw;
+}
+
+/**
  * `INJ_LAUNCH_FEE` in whole INJ, as base units. Absent means no charge.
  *
  * Refused rather than rounded if it is not a number, because a typo silently
@@ -540,12 +579,12 @@ const initMsg = {
   quote_decimals: 18,
   /*
    * The opening virtual reserve for INJ, in whole INJ, which is what sets the market
-   * cap a launch opens at: 676 gives 630 INJ, about $4,990 at the INJ price measured
-   * on 11 Oct 2026. Stated here rather than left to the contract's default so the
-   * deploy records the number, and so a deploy whose default quote is a stablecoin
-   * fails to look right by accident.
+   * cap a launch opens at. Stated here rather than left to the contract's default so
+   * the deploy records the number, and so a deploy whose default quote is a stablecoin
+   * fails to look right by accident. See `quoteVirtualWhole` for why it is no longer
+   * the literal 676.
    */
-  quote_virtual_whole: '676',
+  quote_virtual_whole: quoteVirtualWhole(),
   /*
    * THE LAUNCHPAD'S OWN CHARGE for creating a launch, paid to `platform` in the
    * same transaction. Set by `INJ_LAUNCH_FEE` in whole quote units, so testnet

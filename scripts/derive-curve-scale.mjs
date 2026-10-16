@@ -162,8 +162,18 @@ for (const spend of [1, 5, 10, 50, 100].map((n) => n / price).filter((v) => v > 
   console.log(`    ${money(spend * price).padStart(6)}  ${impact.toFixed(2)}%`);
 }
 
+/*
+ * THE COMMAND HAS TO CARRY THE NUMBER. This line used to read
+ *
+ *     INJ_LAUNCH_FEE=0.2 node scripts/deploy.mjs   # with quote_virtual_whole 676
+ *
+ * and `quote_virtual_whole` was a hardcoded literal in deploy.mjs, so the comment was
+ * the only place the derived figure appeared. Following this script with that command
+ * derives one constant and deploys another, silently. A copyable command that omits
+ * the thing the script exists to produce is worse than no command.
+ */
 console.log(`\n  Set it at deploy:`);
-console.log(`    INJ_LAUNCH_FEE=0.2 node scripts/deploy.mjs   # with quote_virtual_whole ${whole}`);
+console.log(`    INJ_QUOTE_VIRTUAL_WHOLE=${whole} INJ_LAUNCH_FEE=0.2 node scripts/deploy.mjs`);
 console.log(`  or afterwards, as admin: SetQuote { denom, decimals, virtual_quote_whole: "${whole}" }`);
 console.log(
   `\n  The dollar figure is a premise about today's ${QUOTE} price, not a property of` +
