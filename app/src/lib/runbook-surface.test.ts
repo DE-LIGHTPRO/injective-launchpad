@@ -97,6 +97,49 @@ test('every variable the deployed app reads is named in the runbook', () => {
   );
 });
 
+test('every variable the deploy refuses without is in the command you paste', () => {
+  /*
+   * Named somewhere in the runbook is not the same as present in the command, and the
+   * difference is a deploy that stops halfway. `INJ_FACTORY_WASM_ADMIN` was discussed at
+   * length in section 2 and missing from the step 7 block, so the test above was
+   * satisfied by the prose: an operator reads the argument for a multisig, scrolls to
+   * the command, pastes it, and `deploy.mjs` dies on a variable they had just read about
+   * - with a signing key loaded, on the one morning nobody wants to be reading source.
+   *
+   * DERIVED FROM THE REFUSALS, not listed here. Every mainnet refusal in `deploy.mjs`
+   * names its own variable in its first line, so a new one is covered by writing it.
+   */
+  const deploy = readFileSync(join(ROOT, 'scripts', 'deploy.mjs'), 'utf8');
+  const refused = [...new Set([...deploy.matchAll(/'(INJ_[A-Z_]+) is not set/g)].map((m) => m[1]))];
+  assert.ok(
+    refused.length >= 4,
+    `only ${refused.length} refusals found in deploy.mjs; a reworded message makes this guard vacuous rather than failing`,
+  );
+
+  const block = RUNBOOK.slice(RUNBOOK.indexOf('### 7. Deploy'));
+  const command = block.slice(0, block.indexOf('node scripts/deploy.mjs'));
+  assert.ok(command.length > 50, 'the step 7 command block could not be found');
+
+  assert.deepEqual(
+    refused.filter((v) => !command.includes(`${v}=`)).sort(),
+    [],
+    'refused by deploy.mjs on mainnet and absent from the step 7 command block',
+  );
+
+  /*
+   * And the credentials must stay OUT of it. An interactive shell writes its command
+   * line to ~/.zsh_history in plaintext, where a seed phrase stays indefinitely and
+   * cannot be rotated. The script reads them from scripts/.env.local at mode 0600; a
+   * runbook that puts one on the line undoes that entirely.
+   */
+  for (const secret of ['INJ_MNEMONIC', 'INJ_PRIVATE_KEY']) {
+    assert.ok(
+      !command.includes(`${secret}=`),
+      `${secret} is on the step 7 command line, which writes it to shell history in plaintext`,
+    );
+  }
+});
+
 test('the runbook names no variable that nothing reads', () => {
   /*
    * The mirror of the rule above, and the reason `.env.example` has it too: a
