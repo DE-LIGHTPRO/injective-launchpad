@@ -170,9 +170,25 @@ export function FeeEarnings({
         <div style={{ marginTop: 'var(--space-4)' }}>
           {/* Sticky header already offers this; a second identical button here is
               the same control twice on one screen. */}
+          {/*
+              THE APP CANNOT SEE THE KEEPER, so it must not promise it. This read
+              "These are paid out automatically. Connect a wallet to send them now
+              instead of waiting", on every launch page, to everybody. Meanwhile the
+              scheduled sweep had failed on all 20 of its runs since 12 Oct 2026
+              because KEEPER_MNEMONIC was never set, so nothing had ever been paid
+              automatically and the word "waiting" named a wait with no end.
+              Automatic payouts are an operator's cron and a funded wallet, neither
+              of which this component can check, so stating it is the same defect as
+              a health endpoint reporting a status it never probed.
+              And the measured cadence is not a schedule to lean on either: a
+              fifteen-minute cron produced 19 runs in 84 hours, a median of 4.6
+              hours apart.
+              What is always true is the contract property, which is also the part
+              that reassures, so that is what it says.
+            */}
           <p className="note">
-            These are paid out automatically. Connect a wallet to send them now
-            instead of waiting.
+            Anyone can send these to the creator and the launchpad, and sending only
+            costs the sender gas. Connect a wallet to do it now.
           </p>
           <p className="note">
             {/*

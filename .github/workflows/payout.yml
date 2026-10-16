@@ -22,9 +22,17 @@ name: payout
 
 on:
   schedule:
-    # Every fifteen minutes. GitHub runs scheduled jobs on a best-effort basis and
-    # can be several minutes late under load, which is fine: the keeper is
+    # ASKS FOR EVERY FIFTEEN MINUTES AND DOES NOT GET IT. Measured on this workflow
+    # on 16 Oct 2026: 19 scheduled runs across 84.1 hours where the cron asks for
+    # 336, gaps of 133 to 454 minutes, median 278. GitHub runs `schedule` on a
+    # best-effort basis and drops high-frequency crons under load; "several minutes
+    # late", which this comment used to claim, is off by two orders of magnitude.
+    #
+    # It stays at */15 because asking for more does no harm and the keeper is
     # idempotent, so a late run or a double run pays what is owed and nothing more.
+    # What changes is what may be promised: fees can sit unpaid for hours, nothing a
+    # creator reads should name an interval, and a real fifteen minutes needs a
+    # scheduler we control. See docs/PAYOUT-KEEPER.md.
     - cron: '*/15 * * * *'
   # So it can be run by hand without waiting for the schedule, which is also how you
   # check it works after changing a secret.

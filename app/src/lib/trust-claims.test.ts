@@ -77,6 +77,65 @@ test('nothing a user reads says this code has been audited', () => {
   );
 });
 
+test('nothing a user reads promises that fees are paid automatically', () => {
+  /*
+   * FeeEarnings read "These are paid out automatically. Connect a wallet to send them
+   * now instead of waiting", on every launch page, to everybody. Automatic payouts are
+   * an operator's cron plus a funded wallet, and this component can check neither, so
+   * the sentence was a status reported without a probe.
+   *
+   * It was also false. `payout.yml` had failed on all 20 of its scheduled runs since
+   * 12 Oct 2026 because KEEPER_MNEMONIC was never set, so nothing had ever been paid
+   * automatically and "instead of waiting" named a wait with no end. A scheduled job
+   * that has never once succeeded looks exactly like one with nothing to do.
+   *
+   * And an interval must not be promised even once the keeper runs: measured on this
+   * repository, a fifteen-minute cron produced 19 runs in 84.1 hours, median 278
+   * minutes apart, because GitHub drops high-frequency schedules under load.
+   *
+   * What may be said is the contract property, which is true in every configuration
+   * and is the reassuring part anyway: anyone can trigger the payout, it always pays
+   * the addresses fixed at launch, and the sender only pays gas.
+   */
+  const banned = [
+    /paid out automatically/i,
+    /\bautomatic(ally)?\b[^.]{0,40}\bpaid\b/i,
+    /every fifteen minutes/i,
+    /every 15 minutes/i,
+  ];
+  const offenders: string[] = [];
+  for (const file of sourceFiles(SRC)) {
+    const text = userFacingText(readFileSync(file, 'utf8'));
+    for (const re of banned) {
+      const m = re.exec(text);
+      if (m) {
+        offenders.push(`${relative(SRC, file)}:${text.slice(0, m.index).split('\n').length} "${m[0]}"`);
+      }
+    }
+  }
+  assert.deepEqual(
+    offenders,
+    [],
+    'the app cannot see whether the keeper runs, so it must not promise it or name an ' +
+      `interval. Say what the contract guarantees instead.\n  ${offenders.join('\n  ')}`,
+  );
+});
+
+test('the honest replacement is still there', () => {
+  /*
+   * The other half, and the one that matters: a guard that only forbids a sentence is
+   * satisfied by saying nothing, which would drop the fact that a creator does not
+   * have to wait for anybody.
+   */
+  const fees = userFacingText(readFileSync(join(SRC, 'components/FeeEarnings.tsx'), 'utf8'));
+  assert.match(
+    fees,
+    /Anyone can send these to the creator and the launchpad/,
+    'the contract property is no longer stated, so the panel now says less than it can prove',
+  );
+  assert.match(fees, /costs the sender gas/, 'the cost of triggering a payout is no longer named');
+});
+
 test('the internal review still says it is not an audit', () => {
   /*
    * The other half. The guard above is only honest while the document it rests on

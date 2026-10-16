@@ -66,6 +66,24 @@ fires on a real problem rather than on a quiet run with nothing to do. A run wit
 nothing owed does nothing and exits 0, so running it more often than necessary is
 harmless.
 
+**On GitHub Actions, `*/15` does not mean every fifteen minutes.** Measured on this
+repository's own `payout.yml` on 16 Oct 2026, across 84.1 hours: **19 scheduled runs
+where the cron asks for 336**, gaps of 133 to 454 minutes, **median 278 minutes**.
+GitHub runs `schedule` on a best-effort basis and drops high-frequency crons under
+load, and a workflow declaring a quarter-hour is not a workflow that gets one.
+
+So the schedule is a floor on latency, not a promise of it. Plan for fees sitting
+unpaid for **hours**, which is why the launch page offers the button rather than
+telling anyone to wait, and do not write "every fifteen minutes" anywhere a creator
+reads. A real fifteen minutes needs a scheduler you control: cron on a host that
+stays awake, a systemd timer, or a Vercel cron hitting a function.
+
+All 20 of those runs also **failed**, in 21 seconds each, because `KEEPER_MNEMONIC`
+was never set. The guard reported the right reason to a log nobody reads: a
+scheduled job that has never once succeeded looks exactly like one that has nothing
+to do. Run `gh run list --workflow=payout.yml` after setting the secret, and treat a
+green run as the only evidence payouts are happening.
+
 ## What it does, and what it deliberately does not
 
 - Reads every launch's state first and **skips the ones owing nothing**. A
