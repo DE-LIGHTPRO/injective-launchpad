@@ -130,10 +130,19 @@ export function translateQueryError(status: number, body: string): ChainError {
      * fifteen hours at this chain's block time. That is the real retention horizon
      * for everything built on transaction search here: trade history, fill prices,
      * candles and 24h volume.
+     *
+     * BUT ONE REFUSAL DOES NOT PROVE THE DATA IS GONE, and this used to say it did
+     * ("the history is gone, not late"). The hostname is a load balancer, not a node:
+     * probed ten times on 16 Oct 2026, sentry.lcd.injective.network answered a lowest
+     * height of ~100,000 blocks back eight times and ~30,600 twice, so a query the
+     * shallow node refuses the deep one serves. "Gone" is a claim about the chain made
+     * from one node's answer, which is the same overstatement as reporting an
+     * unreachable endpoint as an empty one. Say what was observed, and that a reload
+     * may land elsewhere, without promising it will.
      */
     if (/is not available, lowest height/i.test(detail ?? '')) {
       return new ChainError(
-        'These trades are older than the public node keeps. The history is gone, not late.',
+        'These trades are older than the node that answered keeps. Reloading may reach one with more history.',
         detail,
       );
     }

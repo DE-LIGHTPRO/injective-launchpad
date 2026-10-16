@@ -74,6 +74,131 @@ try {
   no('The mainnet denom creation fee could not be read.', e.message);
 }
 
+/*
+ * HOW FAR BACK THIS ENDPOINT CAN SEE, which decides whether there is a chart.
+ *
+ * The public sentry nodes keep a rolling window and prune the rest, so a launch's
+ * trade history, candles, fill prices and 24h volume all expire. Asking for block 1
+ * is the cheap probe: a pruning node refuses with the lowest height it still holds,
+ * and an archival node answers. Measured rather than assumed, because the number is a
+ * property of whichever endpoint the operator actually bought, not of the chain.
+ *
+ * `BLOCKS_PER_DAY` in the app decides how far back "24h volume" asks, so anything the
+ * endpoint retains below that cannot serve a full day even in principle.
+ *
+ * READ FROM THE APP rather than restated here. Two copies of one number is the defect
+ * this project keeps finding: the app would change its window and this script would go
+ * on reporting against the old one, which is worse than not checking. If the expression
+ * is not where this expects it, the check below says so instead of assuming a figure.
+ */
+const BLOCKS_PER_DAY = (() => {
+  try {
+    const src = readFileSync(join(ROOT, 'app', 'src', 'lib', 'launchActivity.ts'), 'utf8');
+    const m = /export const BLOCKS_PER_DAY = Math\.round\(\(24 \* 60 \* 60\) \/ ([\d.]+)\)/.exec(src);
+    return m ? Math.round((24 * 60 * 60) / Number(m[1])) : null;
+  } catch {
+    return null;
+  }
+})();
+if (BLOCKS_PER_DAY === null) {
+  hm(
+    "The app's 24h window could not be read, so it cannot be compared with retention.",
+    'BLOCKS_PER_DAY in app/src/lib/launchActivity.ts is no longer where this script looks for it.',
+  );
+}
+/*
+ * TEN PROBES, NOT ONE, because a hostname is not a node. Measured 16 Oct 2026:
+ * sentry.lcd.injective.network answered 100,000-100,013 blocks on eight of ten requests
+ * and 30,577 on the other two, so it balances across nodes pruned to different depths.
+ * One sample calls a 5-hour endpoint a 16-hour one, or the reverse, and the operator
+ * plans against whichever it happened to hit. The SHALLOWEST answer is the one that
+ * decides what a user sees, since any request may land there.
+ */
+const PROBES = 10;
+try {
+  const head = await fetch(`${MAINNET_LCD}/cosmos/base/tendermint/v1beta1/blocks/latest`, {
+    signal: AbortSignal.timeout(20_000),
+  }).then((r) => r.json());
+  const latest = Number(head?.block?.header?.height);
+
+  const samples = [];
+  for (let i = 0; i < PROBES; i += 1) {
+    const r = await fetch(`${MAINNET_LCD}/cosmos/base/tendermint/v1beta1/blocks/1`, {
+      signal: AbortSignal.timeout(20_000),
+    }).then((res) => res.json());
+    const m = /lowest height is (\d+)/.exec(r?.message ?? '');
+    if (r?.block?.header?.height === '1') samples.push(null); // archival node answered
+    else if (m) samples.push(Number(m[1]));
+  }
+  const lowest = samples.filter((s) => s !== null);
+  const pruned = lowest.length ? [null, String(Math.max(...lowest))] : null;
+  /*
+   * ARCHIVAL IS ASSERTED FROM THE BLOCK, not from the absence of a complaint. A proxy
+   * error page, a rate-limit body or any other shape carries no `message` either, and
+   * reading that as "archival" would green-light the exact endpoint this check exists
+   * to refuse. Block 1 is present or the answer is "could not be measured".
+   */
+  const servedBlockOne = samples.filter((s) => s === null).length;
+  if (!Number.isFinite(latest)) {
+    no('The chain head could not be read, so retention could not be measured.');
+  } else if (servedBlockOne === PROBES) {
+    ok(`${MAINNET_LCD} served block 1 on ${PROBES}/${PROBES} probes: archival, so no history expires`);
+  } else if (servedBlockOne > 0 && lowest.length > 0) {
+    /*
+     * A MIX IS NOT ARCHIVAL. One archival node behind the same hostname as a pruning one
+     * means a chart loads or empties depending on which answered, which is worse to
+     * debug than an endpoint that consistently cannot see back that far.
+     */
+    no(
+      `${MAINNET_LCD} is inconsistent: ${servedBlockOne}/${PROBES} probes served block 1, ${lowest.length} refused it.`,
+      'The same hostname fronts an archival node and a pruning one, so identical queries succeed or fail by luck of routing.',
+    );
+  } else if (!pruned) {
+    no(
+      'Retention could not be measured: the endpoint neither served block 1 nor named a lowest height.',
+      `Asking ${MAINNET_LCD} for block 1 returned a shape this does not recognise, so whether history expires is unknown.`,
+    );
+  } else {
+    /*
+     * Two block timestamps rather than a target block time. The published 0.65s and
+     * the measured 0.598s differ by enough to move the answer by an hour, and the
+     * whole point of this check is to report a window somebody can plan against.
+     */
+    const span = 20_000;
+    const t = await Promise.all(
+      [latest - span, latest].map((h) =>
+        fetch(`${MAINNET_LCD}/cosmos/base/tendermint/v1beta1/blocks/${h}`, {
+          signal: AbortSignal.timeout(20_000),
+        })
+          .then((r) => r.json())
+          .then((b) => Date.parse(b?.block?.header?.time)),
+      ),
+    );
+    const retained = latest - Number(pruned[1]);
+    const deepest = latest - Math.min(...lowest);
+    const perBlock = Number.isFinite(t[0]) && Number.isFinite(t[1]) ? (t[1] - t[0]) / span / 1000 : null;
+    const hours = perBlock ? ((retained * perBlock) / 3600).toFixed(1) : '?';
+    const spread =
+      deepest - retained > 1_000
+        ? `\n      It is not one node: across ${PROBES} probes the deepest answered ${deepest.toLocaleString('en-US')} blocks and the shallowest ${retained.toLocaleString(
+            'en-US',
+          )}, so the same query succeeds or fails by luck of routing. The shallowest is what to plan against.`
+        : '';
+    const day =
+      BLOCKS_PER_DAY === null
+        ? ''
+        : `\n      A day needs ${BLOCKS_PER_DAY.toLocaleString('en-US')} blocks, so 24h volume is ${
+            retained >= BLOCKS_PER_DAY ? 'obtainable but nothing older is' : 'unobtainable here'
+          }.`;
+    no(
+      `${MAINNET_LCD} prunes: it keeps ${retained.toLocaleString('en-US')} blocks (~${hours} hours).`,
+      `The chart, trade history and 24h volume all come from transaction search, so they expire with it.${spread}${day}\n      Get an ARCHIVAL endpoint and set INJ_MAINNET_LCD to it.`,
+    );
+  }
+} catch (e) {
+  no('The endpoint\'s history retention could not be measured.', e.message);
+}
+
 // ---------------------------------------------------------- the addresses --
 
 section(2, 'The addresses that will hold and receive money');
@@ -174,8 +299,17 @@ console.log(`
       list is hours of work; this is weeks, and costs money, and is the one
       item I would least want to skip.
 
-      A DEDICATED RPC. The public sentry LCD is fine for testnet and will rate
-      limit under real traffic. The board already makes one request per launch.
+      AN ARCHIVAL RPC, and archival is the half that is easy to miss. The
+      public sentry LCD will rate limit under real traffic, and it also PRUNES.
+      Measured on mainnet 16 Oct 2026: ~100,000 blocks (16.6 hours) on eight of
+      ten probes and ~30,600 (5.1 hours) on the other two, because the hostname
+      balances across nodes pruned to different depths. The chart, the trade
+      history and the 24h volume all come from transaction search, so on a
+      pruning endpoint a launch's history empties out overnight, and on this one
+      it does so unpredictably. Ask a provider what height their tx search
+      reaches back to rather than what the quota is, and take more than one
+      sample. The retention check in section 1 above does that for whatever LCD
+      this was pointed at.
 
       TERMS AND A RISK DISCLOSURE, which need an entity and a jurisdiction
       before they can say anything true. See docs/LEGAL-DRAFTS.md.
