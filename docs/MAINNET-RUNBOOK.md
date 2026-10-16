@@ -143,6 +143,14 @@ and **the dollar figure is a premise about one day's INJ price, not a property o
 constant**. 676 was derived at INJ $7.92 on 11 Oct 2026. Re-measure and re-derive;
 do not carry the number forward.
 
+**How fast it goes stale, measured.** INJ was **$9.09 on 16 Oct 2026**, five days
+later, so 676 now opens a launch at **$5,727** rather than the $5,000 it was chosen
+for, and the constant for $5,000 is **590**. Fourteen per cent in five days, in the
+calm direction. Nothing in the product can notice this and nothing should: the curve
+has no oracle on purpose, because a curve that scales with a live price gives two
+launches created an hour apart different shapes. The constant is only ever as current
+as the morning somebody derived it, which is why this is step 6 and not an appendix.
+
 The script prints what the constant produces: where it opens, where it graduates, the
 price multiple, and the price impact of several buy sizes. Choose on those, not on
 the constant. It refuses rather than guessing if the venues disagree or cannot be

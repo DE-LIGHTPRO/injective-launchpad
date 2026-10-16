@@ -272,9 +272,19 @@ if (existsSync(envExample)) {
   no('scripts/.env.example is missing, so the configuration surface is undocumented.');
 }
 
+/*
+ * MEASURED DRIFT, because "re-derive it" read as housekeeping. 676 was chosen at
+ * INJ $7.92 on 11 Oct 2026. INJ was $9.09 five days later (CoinGecko, 16 Oct 2026,
+ * one venue - the script's own two were unreachable from here), so the same
+ * constant now opens a launch at $5,727 against the $5,000 it was picked for, and
+ * the constant for $5,000 today is 590. Fourteen per cent in five days is the rate
+ * this premise goes stale at, and nothing in the product can notice: the curve has
+ * no oracle, deliberately, so the number is only ever as current as the morning
+ * somebody derived it.
+ */
 hm(
   'The opening reserve must be re-derived for mainnet.',
-  'node scripts/derive-curve-scale.mjs 5000. 676 was chosen at INJ $7.92 on 11 Oct 2026 and is a premise about that day, not a property.',
+  'node scripts/derive-curve-scale.mjs 5000. 676 was chosen at INJ $7.92 on 11 Oct 2026; at $9.09 on 16 Oct it opens at $5,727 and the right constant is 590.',
 );
 
 const keeper = join(ROOT, 'scripts', '.env.keeper.local');
