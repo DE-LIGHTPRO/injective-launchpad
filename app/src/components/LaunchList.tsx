@@ -8,6 +8,7 @@ import { StatusChip } from './StatusChip';
 import { ageLabel, compact } from '@/lib/boardMetrics';
 import { addressName } from '@/lib/addressName';
 import {
+  anyActivityUnread,
   selectLaunches,
   type ActivityIndex,
   type LaunchRow,
@@ -167,6 +168,26 @@ export function LaunchList({ rows }: { rows: LaunchRow[] }) {
     // traded" would rank by data that arrived a second later and never be applied.
     [rows, q, sort, status, quote, activityIndex],
   );
+
+  /*
+   * Whether any shown launch's activity could not be read, so the board can say why.
+   *
+   * THE FIGURES WERE ALREADY HONEST AND THE SCREEN STILL WAS NOT. `Vol 24h` renders a
+   * null as a dim dot, which is correct, and on the live testnet board that was every
+   * row at once: the LCD answers the trade search with HTTP 500 `height N is not
+   * available, lowest height is M` for any curve older than the answering node's
+   * retention, measured on all four curves on 16 Oct 2026. A whole column of dots with
+   * nothing explaining it is the board's version of the defect `/analytics` names on
+   * itself, where the fix is the same sentence: stated rather than omitted, so a quiet
+   * launchpad and a page that could not measure are distinguishable.
+   *
+   * Gated on enrichment having LANDED for the row, because `undefined` is also a dot
+   * and every first paint is full of them. Without that the note would flash on a
+   * board whose numbers are about to arrive, which would be a worse claim than the
+   * silence it replaces. That gate lives in `anyActivityUnread`, in `lib/launchList.ts`
+   * with the selector, where a test can drive it.
+   */
+  const anyUnread = useMemo(() => anyActivityUnread(shown, activityIndex), [shown, activityIndex]);
 
   /*
    * Stage tabs, like pump.fun's "newly created / about to graduate / graduated". Counts
@@ -358,6 +379,14 @@ export function LaunchList({ rows }: { rows: LaunchRow[] }) {
             </tbody>
           </table>
         </div>
+      )}
+
+      {anyUnread && (
+        <p className="note">
+          Volume and trades are read from transaction history, which a public node keeps
+          only for a recent window. A dot in those columns means the figure could not be
+          read, never that it is zero.
+        </p>
       )}
     </>
   );

@@ -29,8 +29,12 @@
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 import { enrichLaunch } from './launchActivity.ts';
+import { anyActivityUnread, type ActivityIndex, type LaunchRow } from './launchList.ts';
+import { maskComments } from './testing/maskComments.ts';
 
 const CURVE = 'inj1sfsycn5pak9t7ap0h97c25vumz6w0ewag2xc4x';
 const HEIGHT = 144_034_181;
@@ -104,4 +108,112 @@ test('an unknown height leaves the volume unknown even with trades in hand', asy
   );
 
   assert.equal(e.volume24h, null, 'without a current block there is no 24h window to sum over');
+});
+
+/*
+ * ------------------------------------------------------------------------------------
+ * AND THE SECOND HALF: the board must say why a dot is there.
+ *
+ * The three tests above establish that an unmeasured volume stays unmeasured, which is
+ * the honest value. It is not yet an honest screen. Measured on the live testnet board
+ * on 16 Oct 2026, every one of the four launches answered the trade search with
+ *
+ *     500  height 143397562 is not available, lowest height is 143949156
+ *
+ * so `Vol 24h` was a dot on every row, with no note anywhere on the page. Two of those
+ * rows showed `Trades 0` beside it - true, and corroborated against the chain, where
+ * `tokens_sold` and every fee counter on both curves read 0 - which makes the pairing
+ * read as "nothing has traded and we are declining to say the volume was zero" rather
+ * than "that launch's history is older than the node keeps".
+ *
+ * `/analytics` writes the standard this is held to on its own missing columns: stated
+ * rather than omitted, so a quiet launchpad and a page that is guessing stay
+ * distinguishable. The board was the straggler, the same way the creator page was.
+ * ------------------------------------------------------------------------------------
+ */
+
+const SRC = join(import.meta.dirname, '..');
+const LIST = join(SRC, 'components', 'LaunchList.tsx');
+
+const boardRow = (curve: string): LaunchRow =>
+  ({ curveAddress: curve } as LaunchRow);
+
+test('a landed activity read that came back unknown is disclosed', () => {
+  const rows = [boardRow('inj1a'), boardRow('inj1b')];
+
+  const unreadVolume: ActivityIndex = {
+    inj1a: { trades: 3, volume24h: 100n },
+    // The live shape: the lifetime count answered, the trade page did not.
+    inj1b: { trades: 0, volume24h: null },
+  };
+  assert.equal(
+    anyActivityUnread(rows, unreadVolume),
+    true,
+    'a null volume on a row whose counts have landed is an unread figure and the board must say so',
+  );
+
+  const unreadCount: ActivityIndex = {
+    inj1a: { trades: null, volume24h: 100n },
+    inj1b: { trades: 1, volume24h: 1n },
+  };
+  assert.equal(
+    anyActivityUnread(rows, unreadCount),
+    true,
+    'the trade count has the same two failure modes as the volume and the same dot',
+  );
+});
+
+test('a board that measured everything says nothing, and nor does one still loading', () => {
+  /*
+   * ANTI-VACUITY, both directions, because the two cheap mutations here are opposite.
+   * Returning true always puts a permanent "could not be read" under a board where
+   * every figure is present; returning true for an absent entry puts it under every
+   * first paint, before the requests have even settled. The second is the subtler one
+   * and is why the helper exists rather than being three lines in the component.
+   */
+  const rows = [boardRow('inj1a'), boardRow('inj1b')];
+
+  assert.equal(
+    anyActivityUnread(rows, {
+      inj1a: { trades: 0, volume24h: 0n },
+      inj1b: { trades: 12, volume24h: 5n },
+    }),
+    false,
+    'a measured zero is a figure; a board of them has nothing to explain',
+  );
+
+  assert.equal(
+    anyActivityUnread(rows, {}),
+    false,
+    'activity that has not arrived yet is not activity that failed, and the board must not claim it is',
+  );
+
+  assert.equal(anyActivityUnread([], {}), false, 'an empty board has no figures to qualify');
+});
+
+test('the board renders that disclosure, and says a dot is not a zero', () => {
+  /*
+   * Rule-52 reachability: the helper above is only worth having if the board calls it
+   * and prints something. Source-read because this is JSX, and narrow for that reason -
+   * it asserts the call, the gate and the one clause that carries the meaning.
+   */
+  const list = maskComments(readFileSync(LIST, 'utf8'));
+
+  assert.match(
+    list,
+    /anyActivityUnread\(/,
+    'the board no longer asks whether any figure on it failed to read',
+  );
+  assert.match(
+    list,
+    /\{anyUnread && \(/,
+    'the note is no longer gated on a figure actually being unread, so it either never ' +
+      'shows or always does',
+  );
+  assert.match(
+    list,
+    /could not be\s+read, never that it is zero/,
+    'the note no longer says what the dot means. "Volume unavailable" alone leaves the ' +
+      'reader with the same two readings they had before',
+  );
 });

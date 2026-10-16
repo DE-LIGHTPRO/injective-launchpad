@@ -47,6 +47,30 @@ export interface ActivityIndex {
   [curveAddress: string]: { trades: number | null; volume24h: bigint | null } | undefined;
 }
 
+/**
+ * Whether any of these launches had its activity read and come back unknown.
+ *
+ * What it is for: the board renders an unknown volume or trade count as a dim dot,
+ * which is right, and says nothing about why. On the live testnet board that was the
+ * whole `Vol 24h` column, because the LCD answers the trade search with HTTP 500
+ * `height N is not available, lowest height is M` for any curve older than the
+ * answering node's retention. A column of dots with no explanation makes a quiet
+ * launchpad and a page that could not measure look identical, which is the one thing
+ * `/analytics` refuses to do to itself.
+ *
+ * THE `undefined` CHECK IS THE WHOLE DIFFICULTY. A launch whose numbers have not
+ * arrived yet is also a dot, and that is every launch for the first moment of every
+ * visit. Treating it as unread would flash "could not be read" across a board whose
+ * figures are about to land, which is a false claim where the silence was merely an
+ * incomplete one.
+ */
+export function anyActivityUnread(rows: LaunchRow[], index: ActivityIndex): boolean {
+  return rows.some((r) => {
+    const a = index[r.curveAddress];
+    return a !== undefined && (a.volume24h === null || a.trades === null);
+  });
+}
+
 export interface LaunchRow {
   id: number;
   denom: string;
