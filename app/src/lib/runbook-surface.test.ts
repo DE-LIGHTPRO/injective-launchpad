@@ -1,0 +1,133 @@
+/**
+ * The mainnet runbook names every variable the mainnet path reads.
+ *
+ * `env-surface.test.ts` already asserts that `.env.example` documents what the code
+ * reads. This is the other half, and it is the half that costs money: the runbook is
+ * what somebody actually works through on launch morning, and a variable missing from
+ * it is a step missing from the procedure. Sealed shipped exactly this defect twice,
+ * once with seven `VITE_MAINNET_*` variables absent from its runbook and once with a
+ * hostname that resolved nowhere, and both times every unit test was green because
+ * every side was individually correct.
+ *
+ * THE SCRIPT LIST IS DERIVED FROM THE RUNBOOK, not written here. A hardcoded list
+ * inside a guard only ever covers the cases already known about - that is how
+ * `broadcastLaunch` escaped the refresh-after-write rule. So the rule is instead:
+ * any script the runbook tells you to RUN must have all of its variables NAMED
+ * somewhere in the runbook. Add a step, and the guard covers it by default.
+ *
+ * What this found when it was written (16 Oct 2026):
+ *
+ *   INJ_FACTORY_WASM_ADMIN   the deploy block omitted it while section 2 argued at
+ *                            length that it should be a multisig. `deploy.mjs` dies
+ *                            on mainnet without it, so following the runbook exactly
+ *                            stops the deploy with a signing key already loaded.
+ *   INJ_MAINNET_LCD          the readiness check's own archival override, documented
+ *                            nowhere at all.
+ *   BLOB_READ_WRITE_TOKEN    without it the logo drop zone silently disappears.
+ *   UPSTASH_REDIS_REST_*     without them the upload limit is per instance.
+ *   NEXT_PUBLIC_SITE_URL     the step about buying a domain did not mention the
+ *                            variable that makes the domain take effect.
+ *   NEXT_PUBLIC_DEMO         must be absent, which is a thing to check, not assume.
+ */
+
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { join, sep } from 'node:path';
+import { isRead, mergeReads, scanEnvReads, type EnvReads } from './testing/envScan.ts';
+
+const APP_SRC = join(import.meta.dirname, '..');
+const ROOT = join(APP_SRC, '..', '..');
+const RUNBOOK = readFileSync(join(ROOT, 'docs', 'MAINNET-RUNBOOK.md'), 'utf8');
+
+function readsOf(files: string[]): EnvReads {
+  return mergeReads(files.map((f) => scanEnvReads(readFileSync(f, 'utf8'))));
+}
+
+/** Shipped app code only; `lib/testing/` is this guard's own scaffolding. */
+function appSource(f: string): boolean {
+  return !f.endsWith('.test.ts') && !f.includes(`${sep}testing${sep}`);
+}
+
+function walk(dir: string, out: string[] = []): string[] {
+  for (const e of readdirSync(dir)) {
+    const p = join(dir, e);
+    if (statSync(p).isDirectory()) walk(p, out);
+    else if (/\.(ts|tsx)$/.test(e)) out.push(p);
+  }
+  return out;
+}
+
+test('every script the runbook runs has its variables named in the runbook', () => {
+  const scripts = [...new Set([...RUNBOOK.matchAll(/scripts\/([a-z0-9-]+\.mjs)/g)].map((m) => m[1]))];
+  assert.ok(
+    scripts.length >= 3,
+    `the runbook scan found ${scripts.length} scripts; a pattern that matches nothing makes this guard vacuous`,
+  );
+
+  const missing: string[] = [];
+  for (const s of scripts) {
+    for (const v of readsOf([join(ROOT, 'scripts', s)]).names) {
+      if (!RUNBOOK.includes(v)) missing.push(`${v} (read by scripts/${s})`);
+    }
+  }
+  assert.deepEqual(
+    [...new Set(missing)].sort(),
+    [],
+    'read on the mainnet path and absent from docs/MAINNET-RUNBOOK.md',
+  );
+});
+
+test('every variable the deployed app reads is named in the runbook', () => {
+  /*
+   * Section 8 is "point the app at it", and it is only as complete as this list. A
+   * server-only credential is the easy one to miss, because its absence degrades
+   * silently: the upload route reports itself unconfigured and the create form simply
+   * drops the drop zone, which looks like a design decision rather than a missing
+   * variable.
+   */
+  const files = walk(APP_SRC).filter(appSource);
+  const read = readsOf(files).names;
+  assert.ok(read.size > 0, 'no variables found; the scan is looking in the wrong place');
+
+  assert.deepEqual(
+    [...read].filter((v) => !RUNBOOK.includes(v)).sort(),
+    [],
+    'read by the app and absent from docs/MAINNET-RUNBOOK.md',
+  );
+});
+
+test('the runbook names no variable that nothing reads', () => {
+  /*
+   * The mirror of the rule above, and the reason `.env.example` has it too: a
+   * variable in a procedure that nothing reads is an instruction to set something
+   * with no effect, and it will be followed.
+   */
+  const everything = [
+    ...walk(APP_SRC).filter(appSource),
+    ...readdirSync(join(ROOT, 'scripts'))
+      .filter((f) => f.endsWith('.mjs'))
+      .map((f) => join(ROOT, 'scripts', f)),
+  ];
+  const scanned = readsOf(everything);
+  const read = new Set(scanned.names);
+  /*
+   * GitHub Actions names, which are configuration too but live in the workflow rather
+   * than in `process.env`: the secret is mapped onto INJ_MNEMONIC there. Derived from
+   * the workflow so this cannot drift either.
+   */
+  for (const m of readFileSync(join(ROOT, '.github', 'workflows', 'payout.yml'), 'utf8').matchAll(
+    /secrets\.([A-Z0-9_]+)|vars\.([A-Z0-9_]+)/g,
+  )) {
+    read.add(m[1] ?? m[2]);
+  }
+
+  const named = [...new Set([...RUNBOOK.matchAll(/\b((?:INJ|NEXT_PUBLIC|UPSTASH|BLOB|KEEPER)_[A-Z0-9_]+)/g)].map((m) => m[1]))];
+  assert.ok(named.length > 5, `only ${named.length} variables found in the runbook; the pattern is wrong`);
+
+  assert.deepEqual(
+    named.filter((v) => !read.has(v) && !isRead(v, scanned)).sort(),
+    [],
+    'named in docs/MAINNET-RUNBOOK.md and read by nothing',
+  );
+});

@@ -90,6 +90,16 @@ So the question to ask a provider is not "what is the rate limit" but **"do you 
 archival transaction search, and from what height"**. An endpoint bought on quota
 alone solves the problem that was visible and leaves this one.
 
+Measure the one you buy before pointing the app at it:
+
+```bash
+INJ_MAINNET_LCD=https://your-endpoint node scripts/mainnet-readiness.mjs
+```
+
+`INJ_MAINNET_LCD` is read only by that check, and only to decide which host to
+measure. The app's own endpoint is `NEXT_PUBLIC_LCD_URL` in step 8; setting one is not
+setting the other.
+
 ### 4. A domain
 
 The product is called Vetta and the site is `injpad.vercel.app`. The storage keys
@@ -132,9 +142,22 @@ cd /path/to/injective-launchpad
 INJ_LAUNCH_FEE=0.2 \
 INJ_PLATFORM_ADDRESS=inj1... \
 INJ_FACTORY_ADMIN=inj1... \
+INJ_FACTORY_WASM_ADMIN=inj1... \
 NEXT_PUBLIC_NETWORK=mainnet \
 node scripts/deploy.mjs
 ```
+
+The signing key is **not** on that command line. `INJ_MNEMONIC` (or
+`INJ_PRIVATE_KEY`, one or the other) lives in `scripts/.env.local` at mode 0600,
+which the script enforces, because an interactive shell writes its command line to
+`~/.zsh_history` in plaintext and a seed phrase is not a password you can rotate.
+
+`INJ_FACTORY_WASM_ADMIN` was missing from this block until 16 Oct 2026, while section
+2 above argued at length that it should be a multisig. It takes a multisig address or
+`none` to make the factory immutable, and `deploy.mjs` **refuses on mainnet** when it
+is empty rather than quietly handing the upgrade key to the deploy key. So the cost
+of the omission was a hard stop partway through a deploy, with a signing key already
+loaded, on the one morning nobody wants to be reading source.
 
 Notes that cost time if they are learned on the day:
 
@@ -158,6 +181,24 @@ vercel redeploy <the current production url>
 does nothing until something rebuilds, and a push-triggered build that starts seconds
 before the edit finishes green, reports Ready, and serves the previous factory. This
 happened twice in one evening on testnet. The redeploy is not optional.
+
+The full list the deployed app reads, so none of it is discovered later:
+
+| Variable | Set to | What its absence does |
+|---|---|---|
+| `NEXT_PUBLIC_FACTORY_ADDRESS` | the printed factory | nothing can be read from chain |
+| `NEXT_PUBLIC_CURVE_CODE_IDS` | the printed curve code id | curves are unpinned, so the launch page cannot vouch for the code a launch runs |
+| `NEXT_PUBLIC_NETWORK` | `mainnet` | **falls back to testnet**, silently, which is the right default and the wrong answer here |
+| `NEXT_PUBLIC_LCD_URL` | the archival endpoint from step 3 | falls back to the public sentry, and `isLcdConfigured()` reports false |
+| `NEXT_PUBLIC_SITE_URL` | the domain from step 4 | canonical links, the sitemap and every social preview keep saying `injpad.vercel.app` |
+| `BLOB_READ_WRITE_TOKEN` | injected by attaching a Vercel Blob store | the logo drop zone **silently disappears** from the create form, leaving the paste-a-link field, which looks like a design decision |
+| `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` | an Upstash store | the upload rate limit is per serverless instance, which the platform multiplies |
+| `NEXT_PUBLIC_DEMO` | **absent** | set, every page generates fake launches from the curve maths and says so in a banner. Already removed from this project; confirm rather than assume |
+
+Those last three are server-only and carry no `NEXT_PUBLIC_` prefix deliberately: that
+prefix publishes a value into the browser bundle, where a write-capable token cannot be
+rotated without a rebuild. `runbook-surface.test.ts` fails if this table and the code
+disagree in either direction.
 
 ### 9. Verify what is actually live
 

@@ -19,13 +19,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
+import { isRead, mergeReads, scanEnvReads, type EnvReads } from './testing/envScan.ts';
 
 const APP_SRC = join(import.meta.dirname, '..');
 const ROOT = join(APP_SRC, '..', '..');
-
-/** Set by the toolchain, not by an operator, so it is not part of the surface. */
-const NOT_CONFIGURATION = new Set(['NODE_ENV']);
 
 function walk(dir: string, out: string[] = []): string[] {
   for (const e of readdirSync(dir)) {
@@ -36,15 +34,28 @@ function walk(dir: string, out: string[] = []): string[] {
   return out;
 }
 
+/*
+ * THIS SCANNER USED TO MATCH DOT ACCESS ONLY, and `deploy.mjs` reads two variables as
+ * `process.env[`INJ_${label.toUpperCase()}_CODE_ID`]`. So INJ_CURVE_CODE_ID and
+ * INJ_FACTORY_CODE_ID were read by the code, absent from scripts/.env.example, and
+ * this test - the one written to catch precisely that - passed. See testing/envScan.ts.
+ */
+/*
+ * Shipped app code only. `lib/testing/` is scaffolding for these guards and names
+ * variables in its own prose as examples, which the scanner then reports as read by
+ * the app. A scan that measures its own instrument reports a defect in neither the
+ * code nor the documentation.
+ */
+function appSource(f: string): boolean {
+  return !f.endsWith('.test.ts') && !f.includes(`${sep}testing${sep}`);
+}
+
+function reads(files: string[]): EnvReads {
+  return mergeReads(files.map((f) => scanEnvReads(readFileSync(f, 'utf8'))));
+}
+
 function varsRead(files: string[]): Set<string> {
-  const found = new Set<string>();
-  for (const f of files) {
-    const src = readFileSync(f, 'utf8');
-    for (const m of src.matchAll(/process\.env\.([A-Z0-9_]+)/g)) {
-      if (!NOT_CONFIGURATION.has(m[1])) found.add(m[1]);
-    }
-  }
-  return found;
+  return reads(files).names;
 }
 
 function varsDocumented(file: string): Set<string> {
@@ -59,7 +70,7 @@ function varsDocumented(file: string): Set<string> {
 test('the app documents exactly the variables it reads', () => {
   // This test file reads process.env nowhere, but it does contain the names in
   // prose above, so only the app's own sources are scanned.
-  const files = walk(APP_SRC).filter((f) => !f.endsWith('.test.ts'));
+  const files = walk(APP_SRC).filter(appSource);
   const read = varsRead(files);
   const documented = varsDocumented(join(APP_SRC, '..', '.env.example'));
 
@@ -79,12 +90,25 @@ test('the app documents exactly the variables it reads', () => {
 test('the deploy script documents exactly the variables it reads', () => {
   // A separate surface on purpose: these carry a signing key and must never be
   // NEXT_PUBLIC_*, which would inline them into the browser bundle.
-  const read = varsRead([join(ROOT, 'scripts', 'deploy.mjs')]);
+  const r = reads([join(ROOT, 'scripts', 'deploy.mjs')]);
   const documented = varsDocumented(join(ROOT, 'scripts', '.env.example'));
 
-  assert.ok(read.size > 0, 'no variables found in deploy.mjs');
-  assert.deepEqual([...read].filter((v) => !documented.has(v)).sort(), [], 'undocumented');
-  assert.deepEqual([...documented].filter((v) => !read.has(v)).sort(), [], 'documented but unread');
+  assert.ok(r.names.size > 0, 'no variables found in deploy.mjs');
+  assert.deepEqual([...r.names].filter((v) => !documented.has(v)).sort(), [], 'undocumented');
+  assert.deepEqual(
+    [...documented].filter((v) => !isRead(v, r)).sort(),
+    [],
+    'documented but unread',
+  );
+  /*
+   * And the interpolated pair is documented by name, which `isRead` above cannot
+   * assert on its own: it only answers whether a documented name is read, so a
+   * variable that is read and written down nowhere would leave both lists empty.
+   */
+  for (const v of ['INJ_CURVE_CODE_ID', 'INJ_FACTORY_CODE_ID']) {
+    assert.ok(isRead(v, r), `${v} is no longer read; drop it from scripts/.env.example`);
+    assert.ok(documented.has(v), `${v} is read by deploy.mjs and absent from scripts/.env.example`);
+  }
 });
 
 test('no secret-shaped variable is exposed to the browser', () => {
@@ -108,7 +132,7 @@ test('no secret-shaped variable is exposed to the browser', () => {
    *      undefined at best and a sign someone expected a secret in the browser at worst.
    */
   const secretish = /(MNEMONIC|PRIVATE_KEY|SECRET|SEED|PASSWORD|TOKEN|API_KEY|JWT)/;
-  const files = walk(APP_SRC).filter((f) => !f.endsWith('.test.ts'));
+  const files = walk(APP_SRC).filter(appSource);
   const documented = varsDocumented(join(APP_SRC, '..', '.env.example'));
   for (const v of [...varsRead(files), ...documented]) {
     if (v.startsWith('NEXT_PUBLIC_')) {
