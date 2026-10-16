@@ -46,7 +46,20 @@ export const NO_RULES: LaunchRules = {
   openedAt: null,
 };
 
-/** Mirrors `MAX_EARLY_FEE_BPS` in the curve contract. */
+/**
+ * Mirrors `MAX_EARLY_FEE_BPS` in `contracts/curve/src/state.rs`.
+ *
+ * DELIBERATELY DOUBLE the curve's own `MAX_FEE_BPS` of 1000, because the point of an
+ * opening fee is to be steep enough that being first is not free. So the most a buy
+ * can ever pay here is 20%, not the 10% that caps the base rate, and any copy stating
+ * a ceiling has to say which of the two it means. The premium above the base rate goes
+ * to `state.lp_bonus` and into the locked pool at graduation, so it is not part of the
+ * creator/platform split either.
+ *
+ * Every outward-facing figure comes from here. It was written twice before, once here
+ * and once as `MAX_EARLY_FEE_PCT` in `boardMetrics.ts`, which is how a page ends up
+ * quoting a ceiling the contract does not have.
+ */
 export const MAX_EARLY_FEE_BPS = 2_000;
 
 /**

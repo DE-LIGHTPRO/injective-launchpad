@@ -1,5 +1,5 @@
 import { NETWORK } from '@/lib/config';
-import { MAX_EARLY_FEE_PCT } from '@/lib/boardMetrics';
+import { MAX_EARLY_FEE_BPS } from '@/lib/launchRules';
 
 /**
  * What this is, for someone who arrives before there is anything to look at.
@@ -78,7 +78,7 @@ export function HowItWorks() {
           <div>
             <strong>Anti-sniping</strong>
             <p className="note">
-              Optional opening fee up to {MAX_EARLY_FEE_PCT}%, wallet caps and start times. No
+              Optional opening fee up to {MAX_EARLY_FEE_BPS / 100}%, wallet caps and start times. No
               exemptions, including the creator.
             </p>
           </div>

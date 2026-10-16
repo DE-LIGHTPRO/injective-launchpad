@@ -10,6 +10,7 @@ import {
   CURVE_SUPPLY_TOKENS,
   LP_RESERVE_TOKENS,
 } from '@/lib/launchLimits';
+import { MAX_EARLY_FEE_BPS } from '@/lib/launchRules';
 
 export const metadata: Metadata = {
   title: 'Risks',
@@ -81,11 +82,24 @@ export default function RisksPage() {
             withdrawal path, for anyone.
           </li>
           <li>
-            <strong>The fee split is fixed at creation.</strong>{' '}
-            {CREATOR_FEE_SHARE_BPS / 100}% of each trading fee is the creator&rsquo;s
-            and {PLATFORM_FEE_SHARE_BPS / 100}% runs this launchpad, and neither can be
-            changed afterwards. A creator sets the fee rate itself, capped at{' '}
-            {MAX_FEE_BPS / 100}% per side.
+            <strong>The fee split is fixed at creation.</strong> A creator sets the
+            launch&rsquo;s own fee rate, capped at {MAX_FEE_BPS / 100}% per side, and{' '}
+            {CREATOR_FEE_SHARE_BPS / 100}% of it is the creator&rsquo;s while{' '}
+            {PLATFORM_FEE_SHARE_BPS / 100}% runs this launchpad. Neither share can be
+            changed afterwards.
+          </li>
+          <li>
+            <strong>
+              An opening fee can reach {MAX_EARLY_FEE_BPS / 100}%, and it is the highest
+              a buy can ever pay.
+            </strong>{' '}
+            A launch may start with a fee above its own rate, falling to that rate over a
+            window it fixes at creation. That ceiling is deliberately double the{' '}
+            {MAX_FEE_BPS / 100}% cap on the base rate, so being first is not free. Every
+            wallet pays it, including the creator&rsquo;s, sells are not affected, and the
+            amount above the base rate goes into the pool at graduation rather than to the
+            creator or to us. The launch page quotes the fee in force at the moment you
+            buy.
           </li>
           <li>
             <strong>The launchpad never holds your funds.</strong> Trades settle
