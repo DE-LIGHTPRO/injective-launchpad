@@ -224,6 +224,15 @@ gh variable set NEXT_PUBLIC_LCD_URL --body https://...
 gh workflow run payout.yml      # prove it before the schedule picks it up
 ```
 
+**All three variables, and `NEXT_PUBLIC_NETWORK` is the one that bites.** It chooses
+the LCD the keeper reads *and* the chain it signs for, and the keeper's default is
+testnet. Set only the factory and the LCD and the sweep reads mainnet, signs for
+`injective-888`, and fails every fifteen minutes with nobody watching. Nothing is
+mispaid - a testnet signature cannot reach a mainnet contract - but nothing is paid.
+The keeper asks the LCD which chain it is and refuses a mismatch by name, and the
+workflow refuses to start with the variable unset, so both halves say so now rather
+than reporting a problem with the factory.
+
 Fund the keeper wallet with gas. **It must not be the deploy key**, which is also the
 admin and the fee recipient: a leak of the keeper costs its gas and nothing else,
 because `claim_fees` pays the addresses stored at launch and the sender chooses

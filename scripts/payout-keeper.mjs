@@ -31,7 +31,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { PrivateKey, MsgExecuteContract, MsgBroadcasterWithPk } from '@injectivelabs/sdk-ts';
-import { Network, getNetworkEndpoints } from '@injectivelabs/networks';
+import { Network, getNetworkEndpoints, getNetworkChainInfo } from '@injectivelabs/networks';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const APP = join(HERE, '..', 'app');
@@ -71,8 +71,20 @@ if (!mnemonic && !DRY) die('No INJ_MNEMONIC.', 'Put it in scripts/.env.local, ch
 const factory = process.env.NEXT_PUBLIC_FACTORY_ADDRESS?.trim();
 if (!factory) die('No NEXT_PUBLIC_FACTORY_ADDRESS.');
 
+/*
+ * TESTNET IS THE DEFAULT AND IT IS THE RIGHT DEFAULT, which is exactly what makes
+ * this worth checking rather than trusting. `network` is not only which LCD to read:
+ * it is the chain the broadcaster signs for (see MsgBroadcasterWithPk below). The
+ * runbook's step 10 sets NEXT_PUBLIC_NETWORK, NEXT_PUBLIC_FACTORY_ADDRESS and
+ * NEXT_PUBLIC_LCD_URL as three separate `gh variable set` commands, so missing the
+ * first one leaves a mainnet factory and a mainnet LCD pointed at a testnet
+ * broadcaster. Nothing would be mispaid - a testnet signature cannot reach a mainnet
+ * contract - but the sweep would fail every fifteen minutes, unattended, reporting
+ * "the factory could not be read", which sends the reader to look at the factory.
+ */
 const network = process.env.NEXT_PUBLIC_NETWORK === 'mainnet' ? Network.Mainnet : Network.Testnet;
 const rest = process.env.NEXT_PUBLIC_LCD_URL?.trim() || getNetworkEndpoints(network).rest;
+const expectedChainId = getNetworkChainInfo(network).chainId;
 
 const smart = async (addr, q) => {
   const b64 = Buffer.from(JSON.stringify(q)).toString('base64');
@@ -84,6 +96,33 @@ const smart = async (addr, q) => {
 const stamp = () => new Date().toISOString().replace('T', ' ').slice(0, 19);
 console.log(`\n  [${stamp()}] payout keeper${DRY ? ' (dry run)' : ''}`);
 console.log(`  factory ${factory}`);
+console.log(`  ${expectedChainId} via ${rest}`);
+
+/*
+ * ASK THE ENDPOINT WHICH CHAIN IT IS, rather than inferring it from the variable that
+ * chose it. One request, before anything is read and well before anything is signed,
+ * and it is the only thing here that can tell a mainnet LCD from a testnet one. A
+ * disagreement means the reads and the broadcast are aimed at different chains, and
+ * the honest answer is to refuse: continuing reports a factory problem for a
+ * configuration one.
+ *
+ * It must not fail closed on an unreachable endpoint, because that is the same thing
+ * the read below already reports, with a better message. An unanswered probe yields
+ * no opinion.
+ */
+const served = await fetch(`${rest}/cosmos/base/tendermint/v1beta1/node_info`, {
+  signal: AbortSignal.timeout(15_000),
+})
+  .then((r) => (r.ok ? r.json() : null))
+  .then((j) => j?.default_node_info?.network ?? null)
+  .catch(() => null);
+
+if (served && served !== expectedChainId) {
+  die(
+    `${rest} is ${served}, but this keeper signs for ${expectedChainId}.`,
+    `NEXT_PUBLIC_NETWORK is ${process.env.NEXT_PUBLIC_NETWORK ? `"${process.env.NEXT_PUBLIC_NETWORK}"` : 'unset, so it defaults to testnet'}. It and NEXT_PUBLIC_LCD_URL are set separately and must name the same chain.`,
+  );
+}
 
 // ------------------------------------------------------------ what is owed --
 

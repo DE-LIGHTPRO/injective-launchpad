@@ -72,4 +72,17 @@ jobs:
             echo "NEXT_PUBLIC_FACTORY_ADDRESS is not set as a repository variable."
             exit 1
           fi
+          # The keeper defaults to testnet when this is unset, which is the right
+          # default for a laptop and the wrong one here: unset plus a mainnet factory
+          # is a sweep that fails every fifteen minutes, unattended, for a reason that
+          # reads as a problem with the factory. Nothing is mispaid either way - a
+          # testnet signature cannot reach a mainnet contract - but nothing is paid.
+          # The keeper also asks the LCD which chain it is and refuses a mismatch;
+          # this catches the case where both variables are missing, which no probe can.
+          if [ -z "$NEXT_PUBLIC_NETWORK" ]; then
+            echo "NEXT_PUBLIC_NETWORK is not set as a repository variable. Set it"
+            echo "explicitly to testnet or mainnet: the default is testnet, and a"
+            echo "default is not a decision when real fees are owed."
+            exit 1
+          fi
           node scripts/payout-keeper.mjs
