@@ -1,10 +1,11 @@
 /**
  * Simulate a real launch against the deployed factory, without broadcasting.
  *
- * WHY. Injective charges a 1 INJ tokenfactory fee on `MsgCreateDenom`, and a
- * message-shape mistake fails AFTER that fee is taken. With a 24-hour faucet
- * cooldown, one bad create costs a day. A simulate runs the same messages through
- * the same deployed contract and reports what would happen, for free.
+ * WHY. Injective charges a tokenfactory fee on `MsgCreateDenom` (1 INJ on testnet,
+ * 0.1 INJ on mainnet - see `DENOM_FEE_LABEL` below), and a message-shape mistake
+ * fails AFTER that fee is taken. With a 24-hour faucet cooldown, one bad create
+ * costs a day. A simulate runs the same messages through the same deployed contract
+ * and reports what would happen, for free.
  *
  * IT BUILDS THE MESSAGES FROM THE APP'S OWN CODE, and that is the whole point.
  * This script used to restate them: five hand-written SDK messages and a
@@ -94,6 +95,17 @@ const { fixedCurveFor, FIXED_LP_RESERVE, MAX_FEE_BPS } = await import(
   join(APP, 'src/lib/launchLimits.ts')
 );
 const { NETWORK } = await import(join(APP, 'src/lib/config.ts'));
+const { denomCreationFeeFor } = await import(join(APP, 'src/lib/launchCost.ts'));
+
+/*
+ * THE FEE THIS SCRIPT EXISTS TO PROTECT, named at the right amount for the chain it
+ * is pointed at. Every line below used to say "1 INJ", which is testnet's figure:
+ * measured 16 Oct 2026 on `/injective/tokenfactory/v1beta1/params`, mainnet charges
+ * `100000000000000000` (0.1 INJ) and testnet `1000000000000000000` (1 INJ). A script
+ * whose whole argument is "a bad create costs you this" should not overstate it
+ * tenfold on the chain where the money is real, and the app already had the number.
+ */
+const DENOM_FEE_LABEL = `${Number(denomCreationFeeFor(NETWORK.name)) / 1e18} INJ`;
 
 const privateKey = PrivateKey.fromMnemonic(mnemonic);
 const sender = privateKey.toBech32();
@@ -187,12 +199,12 @@ async function simulate(title, plan) {
       const at = plan.messages[Number(idx)]?.typeUrl ?? 'unknown';
       console.log(`    failed at message ${idx} of ${plan.messages.length}: ${at}`);
       if (Number(idx) === 0) {
-        console.log(`    Message 0 is the 1 INJ denom fee, so the factory was never`);
+        console.log(`    Message 0 is the ${DENOM_FEE_LABEL} denom fee, so the factory was never`);
         console.log(`    reached. This run does NOT clear the message shape.`);
       }
     }
     if (/unknown field|missing field|unknown variant|invalid type|parse/i.test(m)) {
-      console.log(`    MESSAGE SHAPE MISMATCH. This is the failure that costs 1 INJ.`);
+      console.log(`    MESSAGE SHAPE MISMATCH. This is the failure that costs ${DENOM_FEE_LABEL}.`);
     }
     return false;
   }
@@ -227,8 +239,8 @@ const results = [
 
 if (results.every(Boolean)) {
   console.log(`\n  ✓ The deployed factory accepts what the app builds, in both shapes.`);
-  console.log(`    The only thing between this and a real launch is the 1 INJ denom fee.\n`);
+  console.log(`    The only thing between this and a real launch is the ${DENOM_FEE_LABEL} denom fee.\n`);
 } else {
-  console.log(`\n  ✗ At least one shape would fail AFTER the 1 INJ fee was charged.\n`);
+  console.log(`\n  ✗ At least one shape would fail AFTER the ${DENOM_FEE_LABEL} fee was charged.\n`);
   process.exit(1);
 }

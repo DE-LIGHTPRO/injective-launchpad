@@ -18,8 +18,9 @@
  *   node scripts/create-test-launch.mjs KAIJU 2   # ticker, and 2 INJ opening buy
  *
  * Needs INJ_MNEMONIC in scripts/.env.local, the same as deploy.mjs, and roughly
- * 2 INJ: Injective charges a 1 INJ tokenfactory denom creation fee, plus gas, plus
- * whatever opening buy is asked for.
+ * 2 INJ on testnet: Injective charges a tokenfactory denom creation fee of 1 INJ
+ * there and 0.1 INJ on mainnet (measured 16 Oct 2026), plus gas, plus whatever
+ * opening buy is asked for.
  */
 import { readFileSync, existsSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';

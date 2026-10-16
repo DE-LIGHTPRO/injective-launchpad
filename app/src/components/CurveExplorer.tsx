@@ -263,7 +263,16 @@ export function CurveExplorer() {
           <div>
             <span className="k">Raised</span>
             <span className="v mono">
-              {fmt(at.raised, 18, 2)} {NETWORK.quoteSymbol}
+              {/*
+                  `raised` is a QUOTE amount, so it scales by the quote's decimals -
+                  the same `NETWORK.quoteDecimals` that `SHAPE` above is built from.
+                  It was a literal 18, which agrees with both networks today and is a
+                  second copy of the fact the shape already reads. The docblock on
+                  `SHAPE` is about exactly this going wrong once already, so a quoted
+                  constant here is not a style point. The token figure below stays 18:
+                  that one the factory pins.
+                */}
+              {fmt(at.raised, NETWORK.quoteDecimals, 2)} {NETWORK.quoteSymbol}
             </span>
           </div>
           <div>

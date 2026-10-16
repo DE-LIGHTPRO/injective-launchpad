@@ -53,10 +53,25 @@ it to `platform` in the same transaction. Set it at deploy with
 `MAX_LAUNCH_FEE`, because an admin who can price launching out of reach can close
 the launchpad.
 
-**It is not Injective's denom fee.** The chain charges a flat **1 INJ** on
-`MsgCreateDenom` (`denom_creation_fee`, measured 12 Oct 2026); that goes to the
-chain and nothing here can redirect or waive it. A creator on mainnet pays
-1 INJ + 0.2 INJ + gas, and the create form itemises the two separately.
+**It is not Injective's denom fee.** The chain charges `denom_creation_fee` on
+`MsgCreateDenom`; that goes to the chain and nothing here can redirect or waive it.
+
+**The two chains do not charge the same amount**, which this paragraph previously got
+wrong in the expensive direction: it said a flat 1 INJ and then said "a creator on
+mainnet pays 1 INJ", which is the testnet figure. Re-measured on
+`/injective/tokenfactory/v1beta1/params` on 16 Oct 2026:
+
+| chain | `denom_creation_fee` |
+|---|---|
+| mainnet (`sentry.lcd.injective.network`) | `100000000000000000` = **0.1 INJ** |
+| testnet (`testnet.sentry.lcd.injective.network`) | `1000000000000000000` = **1 INJ** |
+
+So a creator on mainnet pays **0.1 INJ + 0.2 INJ + gas**. The app has always had this
+right and does not read the figure from here: `CreateLaunch` seeds from
+`denomCreationFeeFor(NETWORK.name)` and then replaces it with `fetchDenomCreationFee`,
+the chain parameter itself. `scripts/mainnet-readiness.mjs` re-measures it and warns if
+Injective has changed it, so the number below is documentation and the chain is the
+authority. The create form itemises the chain fee and the launch fee separately.
 
 **The fee rides in the same coin as the opening buy.** A wallet cannot attach two
 separate `inj` entries; the bank module merges them first. The factory splits by

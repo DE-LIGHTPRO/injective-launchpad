@@ -589,8 +589,10 @@ const initMsg = {
    * THE LAUNCHPAD'S OWN CHARGE for creating a launch, paid to `platform` in the
    * same transaction. Set by `INJ_LAUNCH_FEE` in whole quote units, so testnet
    * deploys free and mainnet deploys with the real number. This is NOT Injective's
-   * 1 INJ denom-creation fee: that goes to the chain, is a chain parameter, and
-   * nothing here can redirect or waive it. A creator pays both.
+   * denom-creation fee: that goes to the chain, is a chain parameter, and nothing
+   * here can redirect or waive it. A creator pays both. It is also NOT the same
+   * amount on both chains - 1 INJ on testnet, 0.1 INJ on mainnet, measured
+   * 16 Oct 2026 - which this comment used to state as a flat 1 INJ.
    */
   launch_fee: launchFeeBaseUnits(),
   launch_fee_denom: 'inj',
