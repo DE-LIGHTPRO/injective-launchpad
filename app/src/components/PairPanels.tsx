@@ -23,6 +23,22 @@ import type { LaunchRow } from '@/lib/launchList';
 export function PairPanels({ rows }: { rows: LaunchRow[] }) {
   const byPair = new Map<string, LaunchRow[]>();
   for (const r of rows) {
+    /*
+     * Graduated launches are out, because this ranks curve market caps and a graduated
+     * one has left the curve. The COUNT must therefore say "live" rather than
+     * "launches": measured on the testnet board, this panel read "E2EUSD / 1 launch"
+     * beside a filter chip reading "E2EUSD (2)" and a totals panel reading "2 launches
+     * in E2EUSD" - three numbers for one quantity on one screen, with nothing on the
+     * odd one out to say it was counting something narrower.
+     *
+     * "Live" is the word the filter above already uses for exactly this set, so the
+     * two now agree by vocabulary rather than by coincidence.
+     *
+     * Note when this became visible: while nothing had graduated, every pair's live
+     * count equalled its total and the label was indistinguishable from a correct one.
+     * It went wrong on the first graduation, which is the first sign of the product
+     * working.
+     */
     if (r.graduated) continue;
     const list = byPair.get(r.quoteDenom) ?? [];
     list.push(r);
@@ -59,7 +75,7 @@ export function PairPanels({ rows }: { rows: LaunchRow[] }) {
               <div className="pairs-head">
                 <strong>{list[0]?.quoteLabel ?? denomLabel(denom)}</strong>
                 <span className="note">
-                  {list.length} {list.length === 1 ? 'launch' : 'launches'}
+                  {list.length} live
                 </span>
               </div>
               {top.map((r) => (
