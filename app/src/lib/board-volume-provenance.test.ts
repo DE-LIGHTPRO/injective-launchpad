@@ -39,10 +39,18 @@ import { maskComments } from './testing/maskComments.ts';
 const CURVE = 'inj1sfsycn5pak9t7ap0h97c25vumz6w0ewag2xc4x';
 const HEIGHT = 144_034_181;
 
-/** Stand in for the LCD for one call, then put the real `fetch` back. */
-async function withLcd<T>(reply: () => Response, fn: () => Promise<T>): Promise<T> {
+/**
+ * Stand in for the LCD for one call, then put the real `fetch` back.
+ *
+ * The reply sees the URL, because the shape that caused the defect below answers the
+ * two requests DIFFERENTLY: the count-only searches carry an action filter that matches
+ * nothing and answer 200, while the unfiltered trade page has to reach the launch block
+ * and answers 500. A stub that returns one body for every request cannot express it.
+ */
+async function withLcd<T>(reply: (url: string) => Response, fn: () => Promise<T>): Promise<T> {
   const real = globalThis.fetch;
-  globalThis.fetch = (() => Promise.resolve(reply())) as typeof fetch;
+  globalThis.fetch = ((input: string | URL | Request) =>
+    Promise.resolve(reply(String(typeof input === 'object' && 'url' in input ? input.url : input)))) as typeof fetch;
   try {
     return await fn();
   } finally {
@@ -96,18 +104,76 @@ test('a launch that genuinely has no trades reports zero volume, not unknown', a
   assert.deepEqual(e.series, []);
 });
 
-test('an unknown height leaves the volume unknown even with trades in hand', async () => {
+test('an unknown height leaves a traded launch\u2019s volume unknown', async () => {
   /*
    * The pre-existing guarantee, pinned here because the fix added a second path to
    * the same field. `null` must survive both reasons, and a later simplification that
    * collapsed them into one would otherwise only be caught in production.
+   *
+   * THE COUNT IS NON-ZERO ON PURPOSE. This fixture used to answer `total: '0'` with an
+   * empty page, under the name "even with trades in hand" - which it never had. That
+   * made it a launch whose lifetime count PROVES the volume is zero, so once the
+   * derivation below existed the test was asserting unknown for a figure that is known,
+   * and the height it was written to pin had stopped being the deciding input. A guard
+   * whose fixture does not match its own name tests whichever path happens to answer
+   * first.
    */
   const e = await withLcd(
-    () => json({ txs: [], tx_responses: [], total: '0' }),
+    () => json({ txs: [], tx_responses: [], total: '5', pagination: { total: '5' } }),
     () => enrichLaunch(CURVE, null),
   );
 
+  assert.notEqual(e.activity, null, 'the fixture must be a launch that HAS traded, or it proves nothing');
   assert.equal(e.volume24h, null, 'without a current block there is no 24h window to sum over');
+});
+
+test('a pruned page beside a measured zero count reports zero, not a dot', async () => {
+  /*
+   * THE LIVE SHAPE, measured against `testnet.sentry.lcd.injective.network` on
+   * 16 Oct 2026 at height 144064392, lowest retained height 143964505:
+   *
+   *     inj1k2m8aa…  buys  AND wasm.action='buy'  ->  200  total 0
+   *     inj1k2m8aa…  page  (no action filter)     ->  500  height 143426568 is not
+   *                                                        available
+   *
+   * One curve, two answers, because only the page has to fetch a block that is gone.
+   * The board rendered `Trades 0` beside `Vol 24h ·` for that launch, and the note
+   * under the table says a dot means the figure could not be read. It had been read.
+   *
+   * The inference is sound because the tx INDEX outlives block retention: the same
+   * probe against `inj19y7…` answered `height 143412910 is not available` to a COUNT
+   * query, meaning the index found a matching tx 550k blocks below retention. So a
+   * count of zero is zero over the curve's whole life, not zero over the retained
+   * window - which matters here, because that window is about 14 hours and the volume
+   * column claims 24.
+   *
+   * This is also the common case on a real board: most launches never trade, and the
+   * page read is the half that ages out.
+   */
+  const e = await withLcd(
+    (url) =>
+      /wasm.action/.test(decodeURIComponent(url))
+        ? json({ txs: [], tx_responses: [], total: '0', pagination: { total: '0' } })
+        : json(
+            { code: 13, message: `height ${HEIGHT - 600_000} is not available, lowest height is ${HEIGHT - 100_000}` },
+            500,
+          ),
+    () => enrichLaunch(CURVE, HEIGHT),
+  );
+
+  assert.deepEqual(e.activity, { buys: 0, sells: 0, trades: 0 }, 'the counts answered, so they must be reported');
+  assert.equal(
+    e.volume24h,
+    0n,
+    'a launch with a measured zero lifetime trades moved zero quote in every window, so the board must not call it unread',
+  );
+  assert.equal(e.volumePartial, false, 'there is nothing a derived zero could understate');
+  /*
+   * The disclosure half of this file already asserts that `{trades: 0, volume24h: 0n}`
+   * leaves the board with nothing to explain, so the two measured figures together
+   * silence the note. Not repeated here, and deliberately not reaching for `boardRow`,
+   * which is declared further down the file.
+   */
 });
 
 /*

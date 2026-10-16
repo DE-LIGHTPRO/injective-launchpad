@@ -151,7 +151,9 @@ export function uniqueTraders(trades: Trade[]): number {
  * right label.
  *
  * Bounded by whatever `trades` was fetched with, so it UNDERSTATES a busy launch. The
- * caller must say so; `volumeLabel` below is how.
+ * caller must say so; `volumeIsPartial` below is how, and `LaunchEnrichment` carries the
+ * answer as `volumePartial`. (This line named `volumeLabel`, which does not exist. A
+ * pointer at nothing reads as a pointer at something until somebody greps.)
  */
 export function volumeWithin(
   trades: Trade[],
@@ -218,6 +220,50 @@ export function volumeIsPartial(
 }
 
 /**
+ * Quote traded in the window, derived from the lifetime count when the page is gone.
+ *
+ * A LAUNCH WITH A MEASURED ZERO TRADES HAS A KNOWN VOLUME, AND THE BOARD CALLED IT
+ * UNKNOWN. `volume24h` was `trades === null ? null : volumeWithin(...)`, so a curve
+ * whose trade page the answering node had pruned showed a dim dot under "Vol 24h"
+ * beside a confident `0` under "Trades" - and the note below the table says a dot means
+ * the figure could not be read. It had been read. Measured on the live testnet board,
+ * on both INJ launches at once.
+ *
+ * THE INFERENCE IS SOUND BECAUSE THE TX INDEX OUTLIVES BLOCK RETENTION, which is the
+ * one thing that had to be established before deriving anything. Measured against
+ * `testnet.sentry.lcd.injective.network` on 16 Oct 2026, at height 144064392 with the
+ * node's lowest retained height 143964505 - a window of 99,887 blocks, about 14 hours,
+ * so the 24h window reaches past it and a count that stopped at the retention edge
+ * would not be enough:
+ *
+ *   - `inj19y7…`, counting buys, answered `height 143412910 is not available`. The
+ *     index FOUND a matching tx 550k blocks below retention and failed only on the
+ *     block fetch, so index entries are not pruned with their blocks.
+ *   - `inj1k2m8aa…` answered `total 0` for buys while its unfiltered page 500'd at
+ *     height 143426568. The index holds that curve's entries from launch; no buy entry
+ *     exists anywhere in its life.
+ *
+ * So `trades === 0` from the counts means never traded, not never read, and a launch
+ * that has never traded moved zero quote in any window. That makes this a DERIVATION,
+ * not an estimate - rule: a figure is measured or unknown, and a zero implied by a
+ * measured zero is measured.
+ *
+ * It is also the more stable of the two reads. Retention is per answering node, so the
+ * same page request succeeds and 500s from one minute to the next behind one hostname;
+ * the count does not depend on a block being there.
+ */
+export function volumeIn(
+  activity: LaunchActivity | null,
+  trades: Trade[] | null,
+  currentHeight: number | null,
+  blocks: number,
+): bigint | null {
+  if (activity !== null && activity.trades === 0) return 0n;
+  if (trades === null) return null;
+  return volumeWithin(trades, currentHeight, blocks);
+}
+
+/**
  * Trades inside a block window.
  *
  * Returns 0 rather than null for an unknown height, and that is a deliberate
@@ -233,22 +279,39 @@ export function countWithin(trades: Trade[], currentHeight: number | null, block
   ).length;
 }
 
-/** Compact trade count: 1,871 reads better than 1871 on a dense card. */
-export function tradesLabel(a: LaunchActivity | null | undefined): string {
-  /*
-   * `undefined` is accepted even though the type said it could not happen, and it did:
-   * changing this record's value shape while the dev server was running left the old
-   * shape in React state, so `.activity` read undefined and this threw straight into
-   * the error boundary, blanking the board.
-   *
-   * That particular cause was a hot-reload artifact and cannot occur in production.
-   * The reason to handle it anyway is the blast radius: the whole launch grid is
-   * inside one boundary, so a label helper throwing takes the page down. A function
-   * whose entire job is to turn a value into a short string should never be the thing
-   * that does that.
-   */
-  if (a === null || a === undefined) return 'trades unavailable';
-  return `${a.trades.toLocaleString('en-US')} ${a.trades === 1 ? 'trade' : 'trades'}`;
+/**
+ * Compact trade count: 1,871 reads better than 1871 in a dense column.
+ *
+ * NULL FOR AN UNKNOWN COUNT, never a string, and that return type is the whole point.
+ * This used to answer `'trades unavailable'`, which is a sentence, and its one caller
+ * is a numeric cell in the board - so the cell wrote
+ * `tradesLabel(e.activity).replace(' trades', '')` to get the number back out. Three
+ * things were wrong with that at once:
+ *
+ *   - The board renders an unmeasured VOLUME as a dim `·`, so the same unknown state
+ *     appeared two ways in adjacent columns, and the note under the table saying "a dot
+ *     in those columns means the figure could not be read" was untrue of half the rows.
+ *   - `' trades'` carries a leading space, so the SINGULAR escaped the strip and a
+ *     launch with one trade rendered `1 trade` among bare numbers.
+ *   - A caller that has to string-strip its own helper is reading a label built for a
+ *     different surface. There is no other surface: this is the only consumer.
+ *
+ * So the unknown is returned as a value the caller renders, rather than as prose the
+ * caller edits. `null` is what the board already branches on for volume.
+ *
+ * `undefined` is accepted even though the type said it could not happen, and it did:
+ * changing this record's value shape while the dev server was running left the old
+ * shape in React state, so `.activity` read undefined and this threw straight into
+ * the error boundary, blanking the board.
+ *
+ * That particular cause was a hot-reload artifact and cannot occur in production. The
+ * reason to handle it anyway is the blast radius: the whole launch grid is inside one
+ * boundary, so a label helper throwing takes the page down. A function whose entire job
+ * is to turn a value into a short string should never be the thing that does that.
+ */
+export function tradesLabel(a: LaunchActivity | null | undefined): string | null {
+  if (a === null || a === undefined) return null;
+  return a.trades.toLocaleString('en-US');
 }
 
 export const QUOTE_SYMBOL = NETWORK.quoteSymbol;
@@ -318,10 +381,11 @@ export async function enrichLaunch(
   ]);
   return {
     activity: act,
-    volume24h: trades === null ? null : volumeWithin(trades, height, BLOCKS_PER_DAY),
+    volume24h: volumeIn(act, trades, height, BLOCKS_PER_DAY),
     /*
      * Not partial, because "at least N" is a claim about a figure we have. With no
-     * figure there is nothing to qualify, and the volume is null anyway.
+     * figure there is nothing to qualify, and the volume is null anyway. A zero derived
+     * from a measured zero is not partial either: there is nothing it could understate.
      */
     volumePartial: trades === null ? false : volumeIsPartial(trades, ENRICH_TRADE_LIMIT, height, BLOCKS_PER_DAY),
     /*

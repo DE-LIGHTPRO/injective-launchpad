@@ -362,7 +362,14 @@ export function LaunchList({ rows }: { rows: LaunchRow[] }) {
                       )}
                     </td>
                     <td className="num hide-md">
-                      {e === undefined ? <span className="dim">·</span> : tradesLabel(e.activity).replace(' trades', '')}
+                      {/*
+                        The dot is the same unknown the volume cell beside it renders, and
+                        the note under the table promises exactly that. Before this, an
+                        unread count rendered the sentence "trades unavailable" inside a
+                        numeric column while its neighbour rendered `·` for the same
+                        state, so the note was untrue for every pruned launch.
+                      */}
+                      {tradesLabel(e?.activity) ?? <span className="dim">·</span>}
                     </td>
                     <td className="c-progress hide-sm">
                       <div className="prog" aria-label={`${pct.toFixed(1)}% bonded`}>
