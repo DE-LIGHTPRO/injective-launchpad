@@ -253,7 +253,15 @@ export function LaunchList({ rows }: { rows: LaunchRow[] }) {
           </select>
         </label>
         <span className="board-count" id="launch-count" aria-live="polite">
-          {shown.length === rows.length ? `${rows.length} launches` : `${shown.length} of ${rows.length}`}
+          {/*
+            * Pluralised, because this is the one count in the app that was not. Every
+            * other one already is (analytics, ClaimFees, Trending, PriceChart), so
+            * "1 launches" read as a bug in the board rather than as a style choice,
+            * and it is exactly what a one-entry watchlist shows.
+            */}
+          {shown.length === rows.length
+            ? `${rows.length} ${rows.length === 1 ? 'launch' : 'launches'}`
+            : `${shown.length} of ${rows.length}`}
         </span>
       </div>
 
