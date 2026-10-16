@@ -121,14 +121,41 @@ export function fixedCurveFor(quote: number | { decimals: number; virtualWhole?:
    * caller holding a real quote passes the quote.
    */
   const decimals = typeof quote === 'number' ? quote : quote.decimals;
-  const whole =
-    typeof quote === 'number' ? OPENING_RESERVE_QUOTE : quote.virtualWhole ?? OPENING_RESERVE_QUOTE;
+  const whole = typeof quote === 'number' ? OPENING_RESERVE_QUOTE : openingReserveWholeFor(quote);
   const unit = 10n ** BigInt(decimals);
   return {
     ...FIXED_CURVE,
     virtualInj: BigInt(whole) * unit,
     graduationTarget: graduationWholeFor(whole) * unit,
   };
+}
+
+/**
+ * The opening reserve a launch in THIS quote actually gets, in whole units.
+ *
+ * ONE RESOLVER, because two places decide this number and they disagreed. The create
+ * form states the opening reserve and the graduation target as the fixed terms of the
+ * launch, and `fixedCurveFor` builds the curve that gets signed. The form printed the
+ * INJ-only `OPENING_RESERVE_QUOTE` beside the SELECTED pair's ticker, so with the
+ * 6-decimal E2EUSD pair chosen it read
+ *
+ *     Graduates at E2EUSD raised   1915 E2EUSD   fixed
+ *     Opening reserve              676 E2EUSD    fixed
+ *     Curve ceiling                15,689.37 E2EUSD
+ *
+ * while the factory's allowlist entry for that asset carries 5354, giving a target of
+ * 15169. Measured on both deployed E2EUSD curves on 16 Oct 2026: `virtual_inj`
+ * 5354000000, `graduation_target` 15169000000. The third row is built through
+ * `fixedCurveFor` and agreed with the chain, so the card contradicted itself and the
+ * two rows badged "fixed" were the wrong ones - on the screen where a creator reads
+ * the terms of something that can never be changed afterwards.
+ *
+ * The fallback is here rather than at the call site for the same reason: a factory
+ * predating the field reports no reserve, and the form and the curve must fall back to
+ * the same default or the card starts lying again in the other direction.
+ */
+export function openingReserveWholeFor(quote: { virtualWhole?: number }): number {
+  return quote.virtualWhole ?? OPENING_RESERVE_QUOTE;
 }
 
 /**

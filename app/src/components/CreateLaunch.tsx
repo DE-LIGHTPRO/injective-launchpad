@@ -36,8 +36,8 @@ import {
   FIXED_LP_RESERVE,
   CURVE_SUPPLY_TOKENS,
   LP_RESERVE_TOKENS,
-  OPENING_RESERVE_QUOTE,
-  GRADUATION_TARGET_QUOTE,
+  openingReserveWholeFor,
+  graduationWholeFor,
 } from '@/lib/launchLimits';
 import { useConnectedAccount } from '@/lib/walletStore';
 import { profileForChain, profileFieldError, imageSrc } from '@/lib/tokenProfile';
@@ -192,6 +192,14 @@ export function CreateLaunch() {
   const quoteDecimals = quoteSpec?.decimals ?? NETWORK.quoteDecimals;
   const quoteVirtualWhole = quoteSpec?.virtualWhole;
   const quoteLabel = quoteLabelOf(activeQuote, quotes?.quotes);
+  /*
+   * The two figures the card states as this launch's fixed terms, in the chosen pair's
+   * whole units. Resolved through the same helpers `fixedCurveFor` builds the curve
+   * from, because these rows previously printed the INJ constants under whatever ticker
+   * was selected: 676 and 1915 beside E2EUSD for a pair the factory opens at 5354.
+   */
+  const openingReserve = openingReserveWholeFor({ virtualWhole: quoteVirtualWhole });
+  const graduationTarget = graduationWholeFor(openingReserve);
   useEffect(() => {
     let live = true;
     void listQuotes().then((q) => {
@@ -700,7 +708,7 @@ export function CreateLaunch() {
             </span>
             <div className="fixed-value">
               <span className="mono">
-                {GRADUATION_TARGET_QUOTE} {quoteLabel}
+                {graduationTarget.toLocaleString('en-US')} {quoteLabel}
               </span>
               <span className="chip chip-sm muted">fixed</span>
             </div>
@@ -711,7 +719,7 @@ export function CreateLaunch() {
             </span>
             <div className="fixed-value">
               <span className="mono">
-                {OPENING_RESERVE_QUOTE} {quoteLabel}
+                {openingReserve.toLocaleString('en-US')} {quoteLabel}
               </span>
               <span className="chip chip-sm muted">fixed</span>
             </div>
@@ -859,7 +867,22 @@ export function CreateLaunch() {
             Drawn from the same maths the contract charges, so this is the shape buyers will
             actually pay.
           </p>
-          <CurveChart config={built.curve} state={fresh} height={150} />
+          {/*
+            * The quote travels with the curve. `CurveChart` defaults to INJ at 18
+            * decimals, which is right for the default pair and silently wrong for any
+            * other: called bare, this chart labelled its axis `0 INJ raised` and
+            * `0.0 INJ` for an E2EUSD curve the row below said tops out at
+            * 15,689.37 E2EUSD, the ceiling collapsing to one decimal place because a
+            * 6-decimal reserve was divided by 1e18. The component's own docblock
+            * records that defect as fixed; the default reinstated it one call site over.
+            */}
+          <CurveChart
+            config={built.curve}
+            state={fresh}
+            height={150}
+            quoteLabel={quoteLabel}
+            quoteDecimals={quoteDecimals}
+          />
           <div style={{ marginTop: 'var(--space-4)' }}>
             <div className="metric-row">
               <span className="k">On the curve</span>

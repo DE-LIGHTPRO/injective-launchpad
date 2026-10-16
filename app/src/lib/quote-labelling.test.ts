@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { fixedCurveFor, graduationWholeFor, openingReserveWholeFor } from './launchLimits.ts';
+
 /**
  * Is a launch's money labelled with the launch's own quote?
  *
@@ -154,5 +156,114 @@ test('the curve axis derives its scale from the quote, not a constant', () => {
   assert.ok(
     !/const ONE = \d/.test(src),
     'a hardcoded unit is back in CurveChart',
+  );
+});
+
+/** Every `.tsx` under `src/`, so a guard over call sites cannot go stale by omission. */
+function tsxFiles(dir: string): string[] {
+  const out: string[] = [];
+  for (const e of readdirSync(dir, { withFileTypes: true })) {
+    const p = join(dir, e.name);
+    if (e.isDirectory()) out.push(...tsxFiles(p));
+    else if (e.name.endsWith('.tsx')) out.push(p);
+  }
+  return out;
+}
+
+test('every curve chart is handed the quote it is drawing', () => {
+  /*
+   * WHAT THE GUARD ABOVE CANNOT SEE, AND THE DEFECT IT LET THROUGH. `quoteLabel` and
+   * `quoteDecimals` are optional props defaulting to INJ at 18 decimals, which is
+   * right for the default pair, so `CurveChart` passed every assertion in this file
+   * while `CreateLaunch` called it bare. With the 6-decimal E2EUSD pair selected the
+   * chart on the create screen read `0 INJ raised` and `0.0 INJ`, under the caption
+   * "Drawn from the same maths the contract charges, so this is the shape buyers will
+   * actually pay", beside a row saying the curve tops out at 15,689.37 E2EUSD.
+   *
+   * A default that is correct for the default case is not a safe default: it reinstates
+   * the defect at any call site that forgets, silently, and checking that the component
+   * USES a prop is not checking that anyone PASSES it. So this reads the call sites,
+   * found by walking the tree rather than listed, since a new chart added later is the
+   * case a named list would miss.
+   */
+  const sites: string[] = [];
+  const offenders: string[] = [];
+  for (const file of tsxFiles(SRC)) {
+    const src = stripComments(readFileSync(file, 'utf8'));
+    for (const m of src.matchAll(/<CurveChart\b([\s\S]*?)\/>/g)) {
+      const rel = file.slice(SRC.length + 1);
+      sites.push(rel);
+      for (const prop of ['quoteLabel', 'quoteDecimals']) {
+        if (!new RegExp(`\\b${prop}=`).test(m[1])) offenders.push(`${rel}: no ${prop}`);
+      }
+    }
+  }
+  // Anti-vacuity: a rename would otherwise leave this passing over nothing.
+  assert.ok(sites.length >= 2, `expected the chart to be used, found ${sites.length} call sites`);
+  assert.deepEqual(offenders, [], 'a curve chart is drawing a launch in the default quote');
+});
+
+test('the create form states the reserve the chosen pair actually opens at', () => {
+  /*
+   * THE SAME DEFECT IN COPY RATHER THAN IN ARITHMETIC, and the worse half: the two rows
+   * it broke are badged "fixed" and are the terms of something a creator can never
+   * change afterwards. `OPENING_RESERVE_QUOTE` is 676, documented in its own file as
+   * "only the INJ default, for copy that is about the launchpad rather than about a
+   * launch", and the form printed it beside whatever ticker was SELECTED:
+   *
+   *     Graduates at E2EUSD raised   1915 E2EUSD   fixed
+   *     Opening reserve              676 E2EUSD    fixed
+   *     Curve ceiling                15,689.37 E2EUSD
+   *
+   * Measured on both deployed E2EUSD curves, 16 Oct 2026: `virtual_inj` 5354000000 and
+   * `graduation_target` 15169000000, i.e. 5354 and 15169 whole E2EUSD. The ceiling row
+   * is built through `fixedCurveFor` and matched the chain, so the card disagreed with
+   * itself and the figure that was right was the one not badged fixed.
+   */
+  const src = stripComments(readFileSync(join(SRC, 'components/CreateLaunch.tsx'), 'utf8'));
+  for (const constant of ['OPENING_RESERVE_QUOTE', 'GRADUATION_TARGET_QUOTE']) {
+    assert.ok(
+      !src.includes(constant),
+      `the create form prints ${constant}, which is the INJ default, beside the selected pair\u2019s ticker`,
+    );
+  }
+  assert.match(
+    src,
+    /openingReserveWholeFor\(/,
+    'the create form is not resolving the opening reserve from the chosen quote',
+  );
+});
+
+test('the stated terms are the terms of the curve that gets signed', () => {
+  /*
+   * The assertion that binds the arithmetic rather than the spelling. A card stating
+   * one reserve and signing another is the failure; these two must come out of the same
+   * place for every quote, including a factory too old to report one.
+   */
+  for (const [decimals, virtualWhole] of [
+    [18, undefined],
+    [6, 5_354],
+    [6, undefined],
+    [18, 676],
+  ] as Array<[number, number | undefined]>) {
+    const quote = { decimals, ...(virtualWhole === undefined ? {} : { virtualWhole }) };
+    const curve = fixedCurveFor(quote);
+    const unit = 10n ** BigInt(decimals);
+    const stated = openingReserveWholeFor(quote);
+    assert.equal(
+      curve.virtualInj,
+      BigInt(stated) * unit,
+      `the form would state ${stated} and the curve opens at ${curve.virtualInj}`,
+    );
+    assert.equal(
+      curve.graduationTarget,
+      graduationWholeFor(stated) * unit,
+      'the form would state a graduation target the curve does not have',
+    );
+  }
+  // Anti-vacuity: the per-quote reserve is a different number, so resolving it matters.
+  assert.notEqual(
+    openingReserveWholeFor({ virtualWhole: 5_354 }),
+    openingReserveWholeFor({}),
   );
 });
