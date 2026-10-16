@@ -315,9 +315,9 @@ console.log(`
       search, so on a pruning endpoint a launch's history empties out overnight.
       Section 1 above measured the window live; this section deliberately
       restates no number, because the hostname balances across nodes pruned to
-      different depths and the figure MOVES BETWEEN RUNS: the shallowest probe
-      answered ~30,600 blocks on one run on 16 Oct 2026 and ~43,000 on another
-      the same day. A snapshot printed here beside a live measurement there is
+      different depths and the figure MOVES BETWEEN RUNS: three runs on
+      16 Oct 2026 answered ~30,600 blocks, ~43,000 and 100,002, a threefold
+      spread in an afternoon. A snapshot printed here beside a live measurement there is
       two numbers for one property, and a reader has no way to tell which is
       current. Ask a provider what height their tx search reaches back to rather
       than what the quota is, and take more than one sample.

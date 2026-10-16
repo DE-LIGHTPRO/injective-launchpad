@@ -82,12 +82,14 @@ returned a lowest retained height of ~100,000 blocks on eight requests and **~30
 on the other two**: it balances across nodes pruned to different depths, so identical
 queries succeed or fail by luck of routing, and the honest window is the shallowest.
 
-**That shallowest figure is not a constant either.** A second ten-probe run the same
-afternoon put it at **~43,000 blocks (7.2 hours)** against the earlier **~30,600
-(5.1 hours)**. Which nodes the balancer happens to offer changes, so the window moves
-between runs. Do not carry either number forward; run the readiness check, which
-measures the current one and reports the spread. Ask a paid provider the same
-question and take more than one sample.
+**That shallowest figure is not a constant either.** Three runs on 16 Oct 2026 gave
+**~30,600 blocks (5.1 hours)**, **~43,000 (7.2 hours)** and **100,002 (16.7 hours)**:
+a threefold spread in one afternoon, from the same hostname, with the same probe.
+Which nodes the balancer happens to offer changes between runs, so no number here is
+the window. Do not carry any of them forward; run the readiness check, which measures
+the current one. This is also the reason a single reading of a paid provider proves
+nothing either - ask them what height their transaction search reaches back to, and
+then sample it more than once.
 
 Everything on the launch page built from transaction search is inside that window:
 the candle chart, the trade history, the fill prices and the 24h volume. A launch
