@@ -484,6 +484,30 @@ export function graduationProgress(cfg: CurveConfig, st: CurveState): number {
 }
 
 /**
+ * The state a launch is in once it has raised `raised`, derived from the shape alone.
+ *
+ * For drawing and for simulating, never for a live launch: a real one's `tokensSold`
+ * is read from the contract. This answers the hypothetical "where would a launch
+ * be if it had raised this much", which is what a sampled line and a draggable
+ * handle both need.
+ *
+ * IT EXISTS BECAUSE IT WAS WRITTEN TWICE. `curvePoints` had it, and `CurveExplorer`
+ * had a second copy that used plain division where this rounds the reserve UP, so
+ * the handle's quote and the line it was drawn under disagreed by a unit at every
+ * position. Worse, the duplication is what let `CurveChart`'s axis-basis fix fail to
+ * reach the explorer: positioning that lives inside a component is out of reach of
+ * every test, which `curve-chart.test.ts` already says in its last assertion.
+ */
+export function stateAtRaised(cfg: CurveConfig, raised: bigint): CurveState {
+  const tokensSold = cfg.virtualTokens - ceilDiv(k(cfg), cfg.virtualInj + raised);
+  return {
+    injCollected: raised,
+    tokensSold: tokensSold > cfg.curveSupply ? cfg.curveSupply : tokensSold,
+    graduated: false,
+  };
+}
+
+/**
  * Sample the curve for plotting: price per token against INJ raised.
  * Pure projection from the config, so it does not depend on live state.
  */
@@ -496,12 +520,7 @@ export function curvePoints(
   const out: Array<{ injRaised: number; price: number }> = [];
   for (let i = 0; i <= samples; i++) {
     const raised = (max * BigInt(i)) / BigInt(samples);
-    const tokensSold = cfg.virtualTokens - ceilDiv(k(cfg), cfg.virtualInj + raised);
-    const st: CurveState = {
-      injCollected: raised,
-      tokensSold: tokensSold > cfg.curveSupply ? cfg.curveSupply : tokensSold,
-      graduated: false,
-    };
+    const st = stateAtRaised(cfg, raised);
     out.push({
       injRaised: Number(raised) / Number(oneToken),
       price: Number(spotPrice(cfg, st, oneToken)) / Number(oneToken),
