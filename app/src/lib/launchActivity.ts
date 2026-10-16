@@ -291,6 +291,22 @@ export interface LaunchEnrichment {
  * mitigation is that this runs AFTER the board paints, and that `Promise.allSettled`
  * means one unreachable curve costs that card its numbers rather than the page its
  * content.
+ *
+ * A FAILED TRADE READ IS `null`, NOT AN EMPTY PAGE, and for a while it was the empty
+ * page. `listTrades` was caught into `[]`, which every helper below then treated as a
+ * launch that has genuinely never traded - so a curve whose history the answering node
+ * had pruned rendered `Vol 24h 0.00` beside `trades unavailable`, in adjacent columns
+ * of one row. Measured on the live testnet board, on both E2EUSD launches at once.
+ *
+ * The helpers were not the problem. `volumeWithin` returns null rather than zero for
+ * an unknown height and says in its own comment that zero and unmeasured must not look
+ * alike; `LaunchList` renders null as a dim placeholder. Both halves were right and
+ * this line had already thrown the distinction away before either ran.
+ *
+ * `loadTradeView` - the launch page, reading the same endpoint through the same
+ * module - got this right from the start, returning `kind: 'error'` because "the node
+ * was unreachable is not evidence about whether it traded". One branch of one product
+ * held the principle the other branch dropped.
  */
 export async function enrichLaunch(
   curve: string,
@@ -298,15 +314,24 @@ export async function enrichLaunch(
 ): Promise<LaunchEnrichment> {
   const [act, trades] = await Promise.all([
     activityFor(curve).catch(() => null),
-    listTrades(curve, ENRICH_TRADE_LIMIT).catch(() => [] as Trade[]),
+    listTrades(curve, ENRICH_TRADE_LIMIT).catch(() => null),
   ]);
   return {
     activity: act,
-    volume24h: volumeWithin(trades, height, BLOCKS_PER_DAY),
-    volumePartial: volumeIsPartial(trades, ENRICH_TRADE_LIMIT, height, BLOCKS_PER_DAY),
-    trades24h: countWithin(trades, height, BLOCKS_PER_DAY),
-    series: priceSeries(trades),
-    traders: uniqueTraders(trades),
+    volume24h: trades === null ? null : volumeWithin(trades, height, BLOCKS_PER_DAY),
+    /*
+     * Not partial, because "at least N" is a claim about a figure we have. With no
+     * figure there is nothing to qualify, and the volume is null anyway.
+     */
+    volumePartial: trades === null ? false : volumeIsPartial(trades, ENRICH_TRADE_LIMIT, height, BLOCKS_PER_DAY),
+    /*
+     * Still 0 on failure, deliberately and for the reason `countWithin` already gives
+     * for an unknown height: this feeds a RANKING, not a readout, and the only
+     * sensible place for a launch nobody could measure is the bottom.
+     */
+    trades24h: trades === null ? 0 : countWithin(trades, height, BLOCKS_PER_DAY),
+    series: trades === null ? [] : priceSeries(trades),
+    traders: trades === null ? 0 : uniqueTraders(trades),
   };
 }
 
