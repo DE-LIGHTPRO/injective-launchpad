@@ -299,9 +299,17 @@ async function signAndBroadcast(opts: {
     message: msgs,
     memo: '',
     /*
-     * The fee scales with the gas limit at Injective's 500000000 wei minimum gas
-     * price. It was a flat 0.002 INJ against a 3000000 limit whatever the
-     * operation, so a fee claim paid a launch's fee.
+     * The fee scales with the gas limit. It was a flat 0.002 INJ against a 3000000
+     * limit whatever the operation, so a fee claim paid a launch's fee.
+     *
+     * 500000000 IS NOT THE MINIMUM, which this comment used to call it. Measured on
+     * 16 Oct 2026 from /cosmos/base/node/v1beta1/config, BOTH chains report
+     * `minimum_gas_price: 160000000inj`, so this is a deliberate 3.1x margin and not a
+     * property of the chain. Keep the margin: the floor is set per node, a validator
+     * may set a higher one, and the whole fee on a 3000000-gas launch is 0.0015 INJ
+     * against 0.00048 at the floor - fractions of a cent to never be refused for
+     * underpaying. The reason to write the measurement down is that somebody reading
+     * "the minimum" would reasonably correct the number DOWN to it.
      */
     fee: {
       amount: [{ denom: 'inj', amount: String(BigInt(opts.gas) * 500_000_000n) }],

@@ -146,6 +146,39 @@ export function translateQueryError(status: number, body: string): ChainError {
         detail,
       );
     }
+    /*
+     * A WRONG ADDRESS IS NOT AN OUTAGE EITHER, and it arrives as a 500 as well.
+     * Measured against the mainnet sentry LCD on 16 Oct 2026:
+     *
+     *   the testnet factory, on mainnet  500  wasm code 22: no such contract: address inj1u35…
+     *   an ordinary account              500  wasm code 22: no such contract: address inj1x33…
+     *   a malformed address              500  decoding bech32 failed: invalid character …
+     *
+     * The 404 branch above already carries the right words for the first two, and
+     * nothing could ever reach it: the LCD answers 404 for a malformed PATH, never for
+     * a missing contract. So the correct message existed, was tested, and was
+     * unreachable, while all three of these rendered as "The node is having trouble.
+     * Try again shortly." across the whole front page.
+     *
+     * THIS IS A LAUNCH-MORNING FAILURE. Step 8 of the runbook sets
+     * NEXT_PUBLIC_FACTORY_ADDRESS on Vercel. Leave the testnet address in place,
+     * mistype a character, or set it before the deploy lands, and the site blames the
+     * node and tells everyone to wait - on the same morning section 1 of the readiness
+     * check is warning about this endpoint's pruning and rate limits, which is exactly
+     * where somebody would then go looking. The fix is one variable.
+     *
+     * The chain has ANSWERED here, which is what separates these from the line below:
+     * a node that could not tell us does not reply with the contract's own address. A
+     * just-instantiated contract read by a lagging node is the one honest exception and
+     * it lasts seconds at this block time, so the copy names the network rather than
+     * claiming the contract can never exist.
+     */
+    if (/no such contract/i.test(detail)) {
+      return new ChainError('That contract was not found on this network.', detail, true);
+    }
+    if (/decoding bech32 failed/i.test(detail)) {
+      return new ChainError('That is not a valid Injective address.', detail, true);
+    }
     return new ChainError('The node is having trouble. Try again shortly.', detail);
   }
   return new ChainError('Could not read from the network.', detail);

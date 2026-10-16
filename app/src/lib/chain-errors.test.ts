@@ -32,8 +32,47 @@ test('pruned history is not reported as a node outage', () => {
   );
 });
 
+test('a wrong factory address is not reported as a node outage', () => {
+  /*
+   * The exact body the mainnet sentry LCD returned on 16 Oct 2026 when asked for the
+   * TESTNET factory, which is what step 8 of the runbook leaves configured until
+   * somebody changes it. The 404 branch already held the right words and the LCD never
+   * answers 404 for this, so a mistyped variable blamed the node on every page.
+   */
+  const wrong = translateQueryError(
+    500,
+    '{"code":2, "message":"codespace wasm code 22: no such contract: address inj1u350rygnvuxyzqcwzz6wulu4q70te4ez3hjtk8", "details":[]}',
+  );
+  assert.match(wrong.message, /not found on this network/i);
+  assert.ok(
+    !/having trouble|try again/i.test(wrong.message),
+    'a missing contract is being reported as an outage, which sends the reader to the one place the fix is not',
+  );
+  /*
+   * And a 404 at the HTTP level, because the chain answered: a launch page for a curve
+   * that does not exist must not tell a crawler a real page lives there.
+   */
+  assert.equal(wrong.notFound, true);
+});
+
+test('a malformed address is named as such, not as an outage', () => {
+  const bad = translateQueryError(
+    500,
+    '{"code":2, "message":"decoding bech32 failed: invalid character not part of charset: 111", "details":[]}',
+  );
+  assert.match(bad.message, /not a valid Injective address/i);
+  assert.ok(!/try again/i.test(bad.message), 'retrying will not repair an address');
+  assert.equal(bad.notFound, true);
+});
+
 test('a genuine node failure still says to retry', () => {
   // The distinction has to cut both ways, or the new branch swallows real outages.
   const down = translateQueryError(500, 'internal server error');
   assert.match(down.message, /try again/i);
+  /*
+   * And it must stay a 200 with the error rendered. This page exists and will work
+   * again in a minute; answering 404 for it would have search engines drop real
+   * launches during an outage.
+   */
+  assert.equal(down.notFound, false);
 });
