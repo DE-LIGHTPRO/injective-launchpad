@@ -209,12 +209,12 @@ export const REWARD_ROUTES: Array<{ value: RewardRoute; label: string; detail: s
   {
     value: 'creator',
     label: 'To you',
-    detail: 'Your 70% accrues on the launch and you claim it whenever you like.',
+    detail: `Your ${CREATOR_FEE_SHARE_BPS / 100}% accrues on the launch and you claim it whenever you like.`,
   },
   {
     value: 'pool',
     label: 'To the pool',
     detail:
-      'Your 70% is held back and paired into the liquidity at graduation, deepening the market everyone trades in. You keep nothing from the fee.',
+      `Your ${CREATOR_FEE_SHARE_BPS / 100}% is held back and paired into the liquidity at graduation, deepening the market everyone trades in. You keep nothing from the fee.`,
   },
 ];

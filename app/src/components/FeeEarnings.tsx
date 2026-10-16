@@ -110,9 +110,17 @@ export function FeeEarnings({
   return (
     <div className="card" style={{ marginTop: 'var(--space-4)' }}>
       <h2>Fees earned</h2>
+      {/*
+        * "Every trade pays {feeBps}%" was the sentence here, and it is the launch's
+        * BASE rate: a buy inside an opening-fee window pays more, and the amount above
+        * the base rate is added to `lp_bonus` rather than split, so it never reaches
+        * either figure below. Naming the rate the split applies to keeps this panel
+        * true in both windows without plumbing the rules in to say so; the quote on
+        * the trade panel is where the fee in force is shown.
+        */}
       <p className="note">
-        Every trade pays {Number(feeBps) / 100}% in {quote.label}.{' '}
-        {CREATOR_FEE_SHARE_BPS / 100}% of that fee is the creator&rsquo;s and{' '}
+        This launch&rsquo;s own fee is {Number(feeBps) / 100}% in {quote.label}, and{' '}
+        {CREATOR_FEE_SHARE_BPS / 100}% of it is the creator&rsquo;s while{' '}
         {PLATFORM_FEE_SHARE_BPS / 100}% runs this launchpad. The split was set when the
         launch was created and cannot be changed.
       </p>

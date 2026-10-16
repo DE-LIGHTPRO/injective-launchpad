@@ -53,6 +53,7 @@ import {
   validateRules,
   describeRules,
   hasAnyRule,
+  MAX_EARLY_FEE_BPS,
   type LaunchRules,
   type EarlyFee,
 } from '@/lib/launchRules';
@@ -822,9 +823,10 @@ export function CreateLaunch() {
               <span className="chip chip-sm muted">fixed</span>
             </div>
             <p className="note">
-              {CREATOR_FEE_SHARE_BPS / 100}% of every trading fee is yours, claimable
-              from your launch at any time. The other {PLATFORM_FEE_SHARE_BPS / 100}%
-              runs this launchpad.
+              {CREATOR_FEE_SHARE_BPS / 100}% of the buy and sell fees you set above is
+              yours, claimable from your launch at any time. The other{' '}
+              {PLATFORM_FEE_SHARE_BPS / 100}% runs this launchpad. An opening fee is not
+              split: the part above your rate goes into the pool at graduation.
             </p>
           </div>
         </div>
@@ -917,7 +919,14 @@ export function CreateLaunch() {
         <div className="field-row">
           <div className="field">
             <label htmlFor="cl-openfee">
-              Opening fee <span className="hint">%, blank for none</span>
+              {/*
+                * The cap named here is MAX_EARLY_FEE_BPS, not the MAX_FEE_BPS the buy
+                * and sell fields carry: the opening fee is allowed to be double the
+                * base rate. Stating the wrong one of the two is the defect
+                * `fee-ceiling-claims.test.ts` exists for.
+                */}
+              Opening fee{' '}
+              <span className="hint">%, up to {MAX_EARLY_FEE_BPS / 100}, blank for none</span>
             </label>
             <input
               id="cl-openfee"

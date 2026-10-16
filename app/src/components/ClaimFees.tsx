@@ -7,6 +7,7 @@ import { useConnectedAccount } from '@/lib/walletStore';
 import { fmt } from '@/lib/curve';
 import { selectClaimable, type ClaimRow } from '@/lib/claimable';
 import { launchPath } from '@/lib/launchPath';
+import { CREATOR_FEE_SHARE_BPS, PLATFORM_FEE_SHARE_BPS } from '@/lib/launchLimits';
 
 /**
  * Every fee this wallet can claim, in one place and one transaction.
@@ -141,8 +142,9 @@ export function ClaimFees() {
       <div className="empty">
         <p>This wallet has not created a launch yet.</p>
         <p className="note">
-          Every trade on a launch you create pays you 70% of its fee, claimable here at
-          any time.
+          Every trade on a launch you create pays you{' '}
+          {CREATOR_FEE_SHARE_BPS / 100}% of the launch&rsquo;s own fee, claimable here
+          at any time.
         </p>
       </div>
     );
@@ -182,8 +184,9 @@ export function ClaimFees() {
                 stored at launch. It is not taken out of your share: it is the same
                 fee, split when the trade happened.
               */}
-            One transaction, one signature. It also settles the launchpad&rsquo;s 30%
-            share of the same fees, which is not deducted from yours.
+            One transaction, one signature. It also settles the launchpad&rsquo;s{' '}
+            {PLATFORM_FEE_SHARE_BPS / 100}% share of the same fees, which is not
+            deducted from yours.
           </p>
         </>
       )}

@@ -168,6 +168,64 @@ test('the opening ceiling is declared once in the app', () => {
   );
 });
 
+test('no screen applies the creator share to "every" fee', () => {
+  /*
+   * The same defect one surface over, and the one that is about somebody's money
+   * rather than their risk. `/claim`, `ClaimFees`, `CreateLaunch` and `FeeEarnings`
+   * all said a version of "70% of every trading fee is yours". Not every: the opening
+   * premium is subtracted before `split_fee` is reached, so a creator who sets a 20%
+   * opening fee on a 1% launch earns 70% of the 1% and nothing at all from the 19%.
+   *
+   * On the create form that mattered most, because the creator sets the opening fee
+   * on the same screen and could reasonably read the two fields together.
+   */
+  const banned = [
+    /\b\d{1,2}%\s+of\s+every\s+trading\s+fee/i,
+    /\bof\s+every\s+trading\s+fee\s+is\s+yours/i,
+    /Every trade pays \{Number\(feeBps\)/,
+    /pays you \d{1,2}% of its fee/i,
+  ];
+  const offenders: string[] = [];
+  for (const file of sourceFiles(SRC)) {
+    const text = userFacingText(readFileSync(file, 'utf8'));
+    for (const re of banned) {
+      const m = re.exec(text);
+      if (m) offenders.push(`${relative(SRC, file)}:${text.slice(0, m.index).split('\n').length} "${m[0]}"`);
+    }
+  }
+  assert.deepEqual(
+    offenders,
+    [],
+    'the share applies to the launch\u2019s own fee rate, not to the opening premium. ' +
+      `Name the rate it splits.\n  ${offenders.join('\n  ')}`,
+  );
+});
+
+test('the fee shares are interpolated rather than typed', () => {
+  /*
+   * `70%` and `30%` appeared as literals in four strings beside code that already
+   * imported the constants. A split is a thing a launchpad could plausibly change, and
+   * the figure a creator reads must move with it rather than being remembered.
+   *
+   * Scoped to a share-shaped sentence so an SVG `width="100%"` and a genuine
+   * `fee of 100% or more` guard are untouched; the point is the claim, not the glyph.
+   */
+  const offenders: string[] = [];
+  for (const file of sourceFiles(SRC)) {
+    const text = userFacingText(readFileSync(file, 'utf8'));
+    for (const m of text.matchAll(
+      /(?<![\d.{])(\d{1,2})%(?=[^.]{0,40}\b(share|of (?:that|the|each|every) fee|is yours|accrues|runs (?:this|the) launchpad)\b)/gi,
+    )) {
+      offenders.push(`${relative(SRC, file)}:${text.slice(0, m.index).split('\n').length} "${m[0]}"`);
+    }
+  }
+  assert.deepEqual(
+    offenders,
+    [],
+    'interpolate CREATOR_FEE_SHARE_BPS or PLATFORM_FEE_SHARE_BPS.\n  ' + offenders.join('\n  '),
+  );
+});
+
 test('no screen quotes a fee ceiling as a bare number', () => {
   /*
    * The habit that would reintroduce this: writing "up to 20%" in a sentence. It is
