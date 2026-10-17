@@ -455,7 +455,19 @@ export const IMPACT_WARN_BPS = 500;
 /** At or above this, the trader is losing a quarter of their money to the shape. 25%. */
 export const IMPACT_SEVERE_BPS = 2_500;
 
-/** Price of one whole token in the smallest quote unit. Display only. */
+/**
+ * Price of one whole token in the smallest quote unit, floored to a whole one.
+ *
+ * NOT FOR DISPLAY, WHICH IS WHAT THIS DOCBLOCK USED TO SAY. "Display only" is exactly
+ * the invitation that put a flat line on every stablecoin launch's chart: a token on
+ * this curve costs a fraction of one 6-decimal base unit, so the floor is 0 and the
+ * caller gets a number that is not wrong by a little. `spotPriceWad` below carries the
+ * precision, `plotPrice` wraps it for the charts, and nothing outside this module
+ * calls this one any more.
+ *
+ * It is kept because the tests use it as an INDEPENDENT second derivation, and a
+ * guard in `curve-chart.test.ts` fails if a component reaches for it again.
+ */
 export function spotPrice(cfg: CurveConfig, st: CurveState, oneToken: bigint): bigint {
   validate(cfg);
   const [injRes, tokRes] = reserves(cfg, st);

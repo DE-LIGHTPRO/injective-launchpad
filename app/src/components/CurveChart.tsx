@@ -27,9 +27,15 @@ function unitFor(decimals: number): bigint {
  * was marking: a launch drawn as past the point it had just graduated at.
  *
  * It is now placed from `injCollected` directly, against the same axis the line is
- * drawn on, and its height comes from `spotPrice` for the real state rather than
+ * drawn on, and its height comes from the same derivation the line does rather than
  * from indexing the sampled array. Both are the actual values instead of a
  * proportion of something else, which is why they cannot drift apart again.
+ *
+ * That height used to come from `spotPrice`, which floors to a whole quote base unit.
+ * A token on this curve costs a fraction of one 6-decimal base unit, so on every
+ * stablecoin-quoted launch the whole curve priced 0 and this chart was a flat line
+ * along the baseline with the marker sitting on it. `chartMarker` and `curvePoints`
+ * both go through `plotPrice` now, which keeps PRICE_WAD precision.
  */
 export function CurveChart({
   config,

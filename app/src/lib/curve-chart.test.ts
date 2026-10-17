@@ -20,7 +20,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   maxCollectable,
@@ -44,7 +44,9 @@ const CFG: CurveConfig = {
   feeBps: 100n,
 };
 
-const chartRaw = readFileSync(join(import.meta.dirname, '..', 'components', 'CurveChart.tsx'), 'utf8');
+const SRC = join(import.meta.dirname, '..');
+
+const chartRaw = readFileSync(join(SRC, 'components', 'CurveChart.tsx'), 'utf8');
 
 /*
  * Comments stripped before any source assertion.
@@ -290,6 +292,45 @@ test('the floor applies only to a graduated launch, so a fresh one still starts 
   const maxX = Number(maxCollectable(CFG)) / Number(ONE);
   const fresh: CurveState = { injCollected: 0n, tokensSold: 0n, graduated: false };
   assert.equal(chartMarker(CFG, fresh, maxX, ONE).injX, 0);
+});
+
+test('no rendered surface prices anything with the flooring variant', () => {
+  /*
+   * THE DURABLE HALF. `spotPrice` floors to a whole quote base unit, which is zero for
+   * a token priced in fractions of a 6-decimal stablecoin unit, and its own docblock
+   * used to recommend it for display. The chart called it and drew every stablecoin
+   * launch flat; the fix was to route both the line and the marker through
+   * `plotPrice`. Nothing stops the next surface making the same call, and nothing
+   * would look wrong on INJ, which is the pair this project develops against.
+   *
+   * So the guard is over the whole rendered tree rather than one file. It names the
+   * replacements, because a guard that only forbids is one someone works around.
+   */
+  const roots = [join(SRC, 'components'), join(SRC, 'app')];
+  const files: string[] = [];
+  const walk = (dir: string) => {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      const p = join(dir, e.name);
+      if (e.isDirectory()) walk(p);
+      else if (/\.tsx?$/.test(e.name)) files.push(p);
+    }
+  };
+  for (const r of roots) walk(r);
+  assert.ok(files.length > 20, `the guard walked ${files.length} files; it is pointed at nothing`);
+
+  const offenders = files.filter((f) => {
+    // Comments stripped: these files document the defect, and the prose describing it
+    // is not the defect. Third guard in this project to need the same treatment.
+    const src = readFileSync(f, 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/(?<!:)\/\/[^\n]*/g, '');
+    return /\bspotPrice\s*\(/.test(src);
+  });
+  assert.deepEqual(
+    offenders.map((f) => f.slice(SRC.length + 1)),
+    [],
+    'these render a price through the flooring variant; use spotPriceWad, or plotPrice via curvePoints/chartMarker for a chart',
+  );
 });
 
 test('the component delegates the marker rather than computing it inline', () => {
