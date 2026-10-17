@@ -184,6 +184,10 @@
    * writes `box-shadow: 0 1px 0 0 var(--glass-highlight) inset` and still asks for
    * `backdrop-filter: var(--glass-blur)`; resolving those to nothing is how the flat
    * pass reaches rules it never edited.
+   *
+   * `--glass-blur-heavy` has since gone the same way as `--glass-fill-strong`: the
+   * header was its last reader, and the header is opaque now. A token nothing reads
+   * advertises a switch that does nothing, which is what the sweep below it is for.
    */
   --glass-fill: var(--surface-1);
   --glass-raised: var(--surface-2);
@@ -191,7 +195,6 @@
   --glass-border-lit: var(--line-strong);
   --glass-highlight: transparent;
   --glass-blur: none;
-  --glass-blur-heavy: none;
   --glass-well: var(--bg);
   --glass-well-inset: none;
   --glass-shadow: none;
@@ -212,52 +215,20 @@ body {
 }
 
 /*
- * The light the glass has to bend.
+ * THE AMBIENT GRADIENT AND THE FILM GRAIN WERE HERE, BOTH `display: none`.
  *
- * Fixed rather than scrolled, so panels pass over the light instead of carrying
- * it, which is what makes the blur change as you scroll and is the entire reason
- * the effect reads as depth. On `body::before` at z-index -1 rather than on a
- * wrapper, because a blurring descendant of a blurring ancestor stacks two
- * filters and costs a second full-viewport composite for no visual gain.
+ * Five full-viewport radial gradients on `body::before` and an inline-SVG noise
+ * layer on `body::after`, each about fifteen lines, each kept alive by a comment
+ * written in the present tense: "the light the glass has to bend", "which is the
+ * entire reason the effect reads as depth". The flat pass turned them off and left
+ * the prose, so this file described a visual system the page does not have, which
+ * is the same defect as a comment describing a control nobody implemented. Their
+ * only remaining reader was the reduced-transparency block, which is also gone.
  *
- * `pointer-events: none` is not decoration here: a fixed full-viewport layer
- * swallows every click on the page without it.
+ * The argument against them is already recorded where it belongs, in the retired
+ * glass tokens above: the backdrop under identical text ranged across twenty units
+ * of luminance, so the same text token passed on one card and failed on the next.
  */
-body::before {
-  display: none;
-  content: '';
-  position: fixed;
-  inset: 0;
-  z-index: -1;
-  pointer-events: none;
-  background:
-    radial-gradient(900px 620px at 8% -8%, rgba(60, 224, 255, 0.22), transparent 60%),
-    radial-gradient(860px 600px at 94% 0%, rgba(91, 157, 255, 0.26), transparent 58%),
-    radial-gradient(760px 620px at 80% 60%, rgba(157, 123, 255, 0.16), transparent 58%),
-    radial-gradient(820px 640px at 2% 74%, rgba(60, 224, 255, 0.08), transparent 58%),
-    radial-gradient(1200px 800px at 48% 115%, rgba(91, 157, 255, 0.12), transparent 60%);
-}
-
-/*
- * Fine grain over the ambient.
- *
- * Gradients this large step visibly on an 8-bit display: a 900px wash across a
- * few units of luminance quantises into bands, and banding is the clearest tell
- * of a cheap backdrop. Noise at 3% dithers the steps below the threshold where
- * the eye joins them into bands. Inline SVG rather than an image so it costs no
- * request and cannot 404, and `fixed` so it does not swim against the ambient
- * while scrolling.
- */
-body::after {
-  display: none;
-  content: '';
-  position: fixed;
-  inset: 0;
-  z-index: -1;
-  pointer-events: none;
-  opacity: 0.032;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
-}
 
 a { color: inherit; text-decoration: none; }
 
@@ -277,21 +248,34 @@ a { color: inherit; text-decoration: none; }
 
 /* ---------------------------------------------------------------- header -- */
 
+/*
+ * ONE DECLARATION, AND AN OPAQUE ONE. This was declared twice, 1,647 lines apart:
+ * here at `rgba(6, 7, 11, 0.62)` under a heavy blur, and again in the system layer
+ * at `rgba(10, 11, 13, 0.92)` with `backdrop-filter: none`. Only source order
+ * decided which rendered, and five of this block's eight properties were dead -
+ * including the padding and the bottom margin, which the second block also set.
+ *
+ * What rendered was the 92% fill with no blur, and the comment that used to sit
+ * here argued for the blur in the present tense: "text crossing under it has to
+ * stop being legible as text". It did not stop. Measured on /risks scrolled to
+ * 900px, two lines of body copy read through the header as a grey ghost, because
+ * 8% of white over this ground is about rgb(28, 29, 31) against a rgb(10, 11, 13)
+ * header. The flat pass had resolved `--glass-blur-heavy` to `none` and left the
+ * alpha behind, which is the whole defect: the fill was sized for a blur that no
+ * longer exists.
+ *
+ * `var(--bg)` rather than a literal, so the header is the page's own ground and
+ * the hairline below is what separates them - which is this stylesheet's stated
+ * principle for every other region.
+ */
 header.top {
   border-bottom: 1px solid var(--line);
-  padding: var(--space-4) 0;
-  margin-bottom: var(--space-7);
-  /*
-   * Heavier blur than a card, and a tinted fill rather than a white one. The
-   * header sits over whatever scrolls beneath it, so text crossing under it has
-   * to stop being legible as text; a card only ever has the ambient wash behind
-   * it. The tint is the background colour at alpha, which keeps the nav reading
-   * as chrome rather than as another panel.
-   */
-  background: rgba(6, 7, 11, 0.62);
-  backdrop-filter: var(--glass-blur-heavy);
-  -webkit-backdrop-filter: var(--glass-blur-heavy);
-  box-shadow: 0 1px 0 0 rgba(255, 255, 255, 0.05) inset;
+  background: var(--bg);
+  margin-bottom: var(--space-6);
+  padding: 0;
+  height: 60px;
+  display: flex;
+  align-items: center;
   position: sticky;
   top: 0;
   z-index: 10;
@@ -472,42 +456,34 @@ h3 { font-size: var(--text-base); font-weight: 600; }
  */
 
 /*
- * The fallback is not cosmetic.
+ * TWO BLOCKS COMPENSATING FOR TRANSLUCENCY WERE HERE, AND THERE IS NONE LEFT TO
+ * COMPENSATE FOR. One was `@supports not (backdrop-filter: blur(1px))`, the other
+ * `@media (prefers-reduced-transparency: reduce)`; both set `.card`, `header.top`
+ * and `.wallet-menu` to `var(--surface-2)`. The flat pass had already resolved
+ * `--glass-blur` to `none` and `--glass-fill` to an opaque `--surface-1`, so there
+ * was no blur to lose and nothing to see through.
  *
- * Without `backdrop-filter` the fill is white at 4.5% alpha and nothing blurs
- * behind it, so the card is effectively transparent and body text sits directly
- * on the ambient gradient. Firefox shipped this in 103 and Safari needs the
- * prefix, but it is also disabled outright by some privacy settings and by
- * low-power modes, where the unprefixed query is the only thing that catches it.
- */
-@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-  .card,
-  header.top,
-  .wallet-menu {
-    background: var(--surface-2);
-    border-color: var(--line);
-  }
-}
-
-/*
- * Transparency is an accessibility setting, not a taste.
+ * Both were wrong in opposite directions, measured by forcing the query on and
+ * reading the resolved style:
  *
- * Someone who has asked their OS to reduce transparency has usually done it
- * because layered translucency is hard to parse, and overriding that is the
- * same category of mistake as ignoring reduced-motion. The layout does not
- * change: only the fill goes solid and the blur stops.
+ *   - On `header.top` the override was DEAD. That rule was redeclared later at
+ *     equal specificity, so the 92% fill survived - the one surface in the app a
+ *     reduced-transparency setting had any business reaching was the one it could
+ *     not. (That fill is now `var(--bg)`; see the header section.)
+ *   - On `.card` it was LIVE AND A CHANGE: the card moved from rgb(16, 17, 20) to
+ *     rgb(21, 23, 27) and its border from `--glass-border` to `--line`, for a card
+ *     that was already fully opaque. Somebody who asked their OS for less
+ *     transparency got a different palette instead of less transparency.
+ *
+ * The third declaration, `body::before { opacity: 0.4 }`, dimmed a layer the flat
+ * pass sets to `display: none`.
+ *
+ * If glass ever returns it returns through the tokens at the top of this file, so
+ * that is where a reduced-transparency override belongs - one block setting
+ * `--glass-blur` and `--glass-fill`, not a hand-kept list of selectors that goes
+ * stale the moment one of them is restyled. `sticky-surface.test.ts` holds the
+ * line: a translucent sticky or fixed surface fails until that block exists.
  */
-@media (prefers-reduced-transparency: reduce) {
-  .card,
-  header.top,
-  .wallet-menu {
-    background: var(--surface-2);
-    backdrop-filter: none;
-    -webkit-backdrop-filter: none;
-    border-color: var(--line);
-  }
-  body::before { opacity: 0.4; }
-}
 
 /*
  * `a.card` WAS DECLARED TWICE FOUR LINES APART, with two different transitions, and
@@ -1924,17 +1900,9 @@ a.text-link, .note a, .sub a { color: var(--accent-text); }
 a.card:hover { background: var(--surface-2); border-color: var(--line-strong); transform: none; box-shadow: none; }
 
 /* ---------------------------------------------------------------- header -- */
-header.top {
-  background: rgba(10, 11, 13, 0.92);
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
-  box-shadow: none;
-  padding: 0;
-  height: 60px;
-  display: flex;
-  align-items: center;
-  margin-bottom: var(--space-6);
-}
+/* The `header.top` surface itself is declared once, in the header section above, and
+   the values that used to be restated here are folded into it. There is nothing left
+   for this layer to win against, which is the point of merging rather than adding. */
 header.top .inner { gap: var(--space-2); width: 100%; }
 header.top .brand { gap: 10px; margin-right: var(--space-4); }
 .wordmark { font-weight: 650; font-size: var(--text-lg); letter-spacing: -0.02em; }

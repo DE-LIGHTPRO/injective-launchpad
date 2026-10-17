@@ -109,50 +109,31 @@ test('the surface a glyph sits on is opaque, so contrast cannot vary with the ba
   );
 });
 
-test('glass degrades to a solid surface where it cannot be drawn', () => {
-  /*
-   * Without `backdrop-filter` the fill is a few percent of white over nothing,
-   * so body text would sit directly on the ambient gradient. It is unsupported
-   * in fewer browsers than it used to be and still switched off by privacy and
-   * low-power settings, which no user-agent string reports.
-   */
-  assert.match(
-    css,
-    /@supports not \(\(backdrop-filter: blur\(1px\)\) or \(-webkit-backdrop-filter: blur\(1px\)\)\)/,
-    'no @supports fallback for a browser without backdrop-filter',
-  );
-  assert.match(
-    css,
-    /@media \(prefers-reduced-transparency: reduce\)/,
-    'reduced transparency is an accessibility setting, not a preference to override',
-  );
-
-  // Both must actually turn the blur off rather than merely restyle the border.
-  const reduced = /@media \(prefers-reduced-transparency: reduce\) \{([\s\S]*?)\n\}/.exec(css)?.[1] ?? '';
-  assert.match(reduced, /backdrop-filter:\s*none/, 'reduced transparency leaves the blur running');
-});
-
-test('a backdrop-filtered surface contains no fixed-position child', () => {
-  /*
-   * `backdrop-filter` makes an element a containing block for `position: fixed`,
-   * so a fixed descendant positions against the card instead of the viewport. On
-   * a sibling project this clipped a dialog's full-screen backdrop to the panel
-   * that opened it, and the dialog was invisible below the fold while being
-   * announced to a screen reader.
-   *
-   * Checked as a property of the stylesheet: the only fixed elements may be the
-   * ambient layers on body, which are not inside anything.
-   */
-  const fixedSelectors: string[] = [];
-  for (const m of cssCode.matchAll(/([^{}]+)\{([^{}]*position:\s*fixed[^{}]*)\}/g)) {
-    for (const sel of m[1].split(',')) fixedSelectors.push(sel.trim());
-  }
-  assert.deepEqual(
-    fixedSelectors.filter((s) => !/^body::(before|after)$/.test(s)),
-    [],
-    'a fixed element other than the ambient layers: check it is not inside a glass surface',
-  );
-});
+/*
+ * TWO TESTS WERE HERE AND BOTH HAD OUTLIVED THEIR PREMISE. They are in
+ * `sticky-surface.test.ts` now, rewritten as conditionals, and the reason they moved
+ * is worth more than either of them was.
+ *
+ * The first required an `@supports not (backdrop-filter)` block and a
+ * `@media (prefers-reduced-transparency: reduce)` block, both of which existed. Its
+ * stated reason was that without the filter "the fill is a few percent of white over
+ * nothing, so body text would sit directly on the ambient gradient". The flat pass
+ * had already made the fill an opaque `#101114` and switched the ambient gradient off,
+ * so there was no blur to lose and nothing to see through: the test was green, the
+ * blocks were there, and between them they did nothing a user could benefit from. What
+ * they did do was change `.card` to a different colour for anyone whose OS asked for
+ * less transparency, and fail to reach the one surface that was actually translucent,
+ * because `header.top` was redeclared below them at equal specificity. A test that
+ * requires a mechanism rather than an outcome cannot see either of those.
+ *
+ * The second asserted no `position: fixed` selector outside `body::before` and
+ * `body::after`. Those two layers are deleted and nothing else is fixed, so it had
+ * become `assert.deepEqual([], [])` - passing, and measuring nothing, with no count
+ * check to say so.
+ *
+ * Both concerns are real and both are now stated as "if a blur comes back, this must
+ * come back with it", which is the form that survives a design change.
+ */
 
 test('every design token a rule reads has a declaration behind it', () => {
   /*
