@@ -18,11 +18,23 @@ import { launchStatus, statusLabel, type LaunchRules } from '@/lib/launchRules';
  */
 export function StatusChip({
   graduated,
-  migrated = false,
+  migrated,
   rules,
 }: {
   graduated: boolean;
-  migrated?: boolean;
+  /**
+   * REQUIRED, and it used to default to false.
+   *
+   * It is the one input that separates the two states this component exists to tell
+   * apart, so defaulting it labels a launch trading against its locked pool
+   * "graduated" - and on chain `graduated` without `migrated` cannot happen, since
+   * `exec_buy` seeds the pool in the same transaction that fills the curve. A default
+   * that is right for the state the chain never reaches is the trap, not the
+   * convenience. The board omitted it and avoided the consequence only by rendering
+   * its own hardcoded "Pool" tag instead, which is the two-call-sites defect this
+   * component was written to remove, re-introduced for one of the four states.
+   */
+  migrated: boolean;
   rules: LaunchRules;
 }) {
   const [now, setNow] = useState(() => Math.floor(Date.now() / 1000));

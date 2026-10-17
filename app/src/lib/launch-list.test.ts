@@ -55,6 +55,10 @@ const row = (
   target: (100n * ONE).toString(),
   progress,
   graduated,
+  // Tied to `graduated` because the contract ties them: `exec_buy` seeds the pool in
+  // the same transaction that fills the curve, so a fixture where they differ would be
+  // a state the chain cannot produce. Selection filters on `graduated` alone anyway.
+  migrated: graduated,
 });
 
 /*

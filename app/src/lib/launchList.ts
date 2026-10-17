@@ -89,6 +89,8 @@ export interface LaunchRow {
   target: string;
   progress: number;
   graduated: boolean;
+  /** Whether the pool has been seeded. The chip's two late stages differ only by this. */
+  migrated: boolean;
   /** Already normalised by `parseProfile`; the values inside are still untrusted. */
   profile: TokenProfile;
   /** Needed for the status chip: a launch before its start time is not "live". */

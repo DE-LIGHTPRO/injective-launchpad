@@ -345,11 +345,16 @@ export function LaunchList({ rows }: { rows: LaunchRow[] }) {
                             {/* Its own element so it can ellipsise on a phone without
                                 clipping the chip beside it. See `.tok-creator`. */}
                             <span className="tok-creator">{addressName(r.creator)}</span>
-                            {r.graduated ? (
-                              <span className="tag tag-pool">Pool</span>
-                            ) : (
-                              <StatusChip graduated={r.graduated} rules={r.rules} />
-                            )}
+                            {/* Every stage through the one chip. A hardcoded "Pool" tag
+                                sat here for the graduated case, which is a second place
+                                deciding what a launch is - exactly what `StatusChip`
+                                exists to stop. */}
+                            <StatusChip
+                              graduated={r.graduated}
+                              migrated={r.migrated}
+                              rules={r.rules}
+                            />
+
                           </span>
                         </div>
                       </div>

@@ -26,6 +26,8 @@ export interface Row {
   target: bigint;
   progress: number;
   graduated: boolean;
+  /** Whether the pool has been seeded. Carried so the board's chip is not guessing. */
+  migrated: boolean;
   rules: LaunchRules;
   config: CurveConfig;
   tokensSold: bigint;
@@ -166,6 +168,7 @@ export async function loadRows(): Promise<BoardLoad> {
         target: d.config.graduationTarget,
         progress: graduationProgress(d.config, d.state),
         graduated: d.state.graduated,
+        migrated: d.migrated,
         rules: d.rules,
         config: d.config,
         tokensSold: d.state.tokensSold,
@@ -264,6 +267,7 @@ export function toRow(r: Row, all: Row[]): LaunchRow {
     target: r.target.toString(),
     progress: r.progress,
     graduated: r.graduated,
+    migrated: r.migrated,
   };
 }
 

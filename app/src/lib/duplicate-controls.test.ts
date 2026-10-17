@@ -42,6 +42,83 @@ test('the wallet connect control lives in exactly one place', () => {
   );
 });
 
+/*
+ * A LAUNCH'S STAGE IS DECIDED IN ONE PLACE, and the board had a second one.
+ *
+ * `StatusChip` exists because the list and the detail page each derived the label from
+ * `graduated` alone and both said "live" on a launch whose start time had not arrived.
+ * The board then went on rendering its own `<span className="tag tag-pool">Pool</span>`
+ * for the graduated case, so three of the four stages came from the component and the
+ * fourth came from a hardcoded span: the same defect, surviving for one stage, in the
+ * file the component was written to fix.
+ *
+ * It was also the reason `StatusChip` could keep `migrated = false` as a default. The
+ * board never passed it and never suffered, because the branch above it meant the chip
+ * only ever saw launches that had not graduated. Remove the span and the default becomes
+ * live: it would label a launch trading against its locked pool "graduated".
+ */
+const STAGE_SOURCES = ['launchStatus(', 'statusLabel('];
+
+test('nothing but the chip decides what stage a launch is in', () => {
+  const SRC = join(import.meta.dirname, '..');
+  const files: string[] = [];
+  const walk = (dir: string) => {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      const p = join(dir, e.name);
+      if (e.isDirectory()) walk(p);
+      else if (e.name.endsWith('.tsx')) files.push(p);
+    }
+  };
+  walk(SRC);
+
+  const renderers: string[] = [];
+  const offenders: string[] = [];
+  for (const file of files) {
+    const rel = file.slice(SRC.length + 1);
+    const src = readFileSync(file, 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, (m) => ' '.repeat(m.length))
+      .replace(/\/\/[^\n]*/g, '');
+    if (/<StatusChip\b/.test(src)) renderers.push(rel);
+    if (rel === 'components/StatusChip.tsx') continue;
+    for (const call of STAGE_SOURCES) {
+      if (src.includes(call)) offenders.push(`${rel}: calls ${call})`);
+    }
+    // The replaced span, by its class rather than by its word: "Pool" is a reasonable
+    // thing to write and `tag-pool` was only ever this one label.
+    if (/tag-pool/.test(src)) offenders.push(`${rel}: renders its own stage badge`);
+  }
+
+  /*
+   * Anti-vacuity, and it is the half that matters here: a guard that only forbids the
+   * second source passes perfectly on a product that has lost the first. The board and
+   * the detail page are both named, because those are the two screens whose
+   * disagreement is the defect on record.
+   */
+  assert.ok(
+    renderers.includes('components/LaunchList.tsx'),
+    'the board no longer renders StatusChip, so its stage label is coming from somewhere else',
+  );
+  assert.ok(
+    renderers.length >= 2,
+    `expected the chip on more than one screen, found ${renderers.join(', ') || 'none'}`,
+  );
+  assert.deepEqual(offenders, [], 'a second place decides what a launch is');
+});
+
+test('the chip is told both late stages, never left to assume one', () => {
+  /*
+   * `migrated` separates "graduated" from "in pool" and nothing else does. Defaulted, it
+   * is wrong for every launch that has one - which, since `exec_buy` seeds the pool in
+   * the same transaction that fills the curve, is every graduated launch there is.
+   */
+  const src = readFileSync(join(COMPONENTS, 'StatusChip.tsx'), 'utf8');
+  for (const prop of ['graduated', 'migrated']) {
+    assert.match(src, new RegExp(`\\b${prop}\\s*:\\s*boolean`), `${prop} is not a required boolean`);
+    assert.doesNotMatch(src, new RegExp(`\\b${prop}\\s*\\?\\s*:`), `${prop} is optional`);
+    assert.doesNotMatch(src, new RegExp(`\\b${prop}\\s*=\\s*(true|false)`), `${prop} is defaulted`);
+  }
+});
+
 test('the header connect button is reachable from anywhere', () => {
   /*
    * The whole argument for removing the in-panel buttons is that the header one is

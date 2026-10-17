@@ -308,24 +308,47 @@ header.top .brand {
 header.top .brand em { color: var(--accent); font-style: normal; }
 header.top .spacer { margin-left: auto; }
 
+/*
+ * ALL FOUR OF THESE WERE DECLARED TWICE, 1,650 LINES APART, and only source order
+ * decided what a chip looked like. A second "chips" section near the end of this file
+ * redeclared `.chip`, `.chip.accent`, `.chip.warn` and `.chip.muted` with conflicting
+ * values, so this block - the tokenised one, the one a reader would believe - lost every
+ * property the later one named:
+ *
+ *   text-transform   uppercase            lost to none
+ *   border-radius    var(--radius-pill)   lost to 6px
+ *   letter-spacing   0.1em                lost to 0.02em
+ *   padding          --space-1/--space-3  lost to 2px 8px
+ *   accent colour    var(--accent) blue   lost to var(--buy) green
+ *   accent border    var(--accent-deep)   lost to an rgba literal
+ *   accent fill      var(--accent-wash)   lost to an rgba literal
+ *   warn border      rgba(242,180,92)     lost to rgba(227,162,59)
+ *   muted fill       var(--glass-well)    lost to transparent
+ *
+ * Which is worse than a wrong value: adjusting `--accent-wash` to restyle a chip changed
+ * nothing on screen, and `--accent` was blue while every chip rendered green. Merged into
+ * one block holding exactly what the browser already computed - measured on all four
+ * tones, inside `.tok-sub` and out, before and after - so this is a deduplication and not
+ * a restyle. The two alpha literals are `--buy` and `--warn` at 35% and at 8% / 6%.
+ */
 .chip {
   font-size: var(--text-micro);
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
+  font-weight: 550;
+  letter-spacing: 0.02em;
   color: var(--text-dim);
   border: 1px solid var(--line);
-  padding: var(--space-1) var(--space-3);
-  border-radius: var(--radius-pill);
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
   white-space: nowrap;
 }
-.chip.accent { color: var(--accent); border-color: var(--accent-deep); background: var(--accent-wash); }
-.chip.warn { color: var(--warn); border-color: rgba(242, 180, 92, 0.35); }
+.chip.accent { color: var(--buy); border-color: rgba(46, 189, 133, 0.35); background: rgba(46, 189, 133, 0.08); }
+.chip.warn { color: var(--warn); border-color: rgba(227, 162, 59, 0.35); background: rgba(227, 162, 59, 0.06); }
 /*
- * A launch that has not opened yet. Deliberately the quietest of the three: it is not
- * a warning, because nothing is wrong, and not an accent, because accenting it would
+ * A launch that has not opened yet. Deliberately the quietest of the four: it is not a
+ * warning, because nothing is wrong, and not an accent, because accenting it would
  * compete with the launches somebody can actually trade.
  */
-.chip.muted { color: var(--text-dim); border-color: var(--line-strong); background: var(--glass-well); }
+.chip.muted { color: var(--text-dim); border-color: var(--line-strong); background: transparent; }
 
 /* ------------------------------------------------------------- typography -- */
 
@@ -1955,16 +1978,13 @@ header.top .chip { font-size: 11px; letter-spacing: 0.04em; padding: 3px 8px; bo
 }
 .skip-link:focus { top: 12px; }
 
-/* --------------------------------------------------------------- chips -- */
-.chip { border-radius: 6px; letter-spacing: 0.02em; text-transform: none; font-size: 11px; font-weight: 550; padding: 2px 8px; }
-.chip.accent { color: var(--buy); border-color: rgba(46, 189, 133, 0.35); background: rgba(46, 189, 133, 0.08); }
-.chip.warn { color: var(--warn); border-color: rgba(227, 162, 59, 0.35); background: rgba(227, 162, 59, 0.06); }
-.chip.muted { background: transparent; }
-.tag {
-  display: inline-flex; align-items: center; height: 18px; padding: 0 6px; border-radius: 4px;
-  font-size: 10.5px; font-weight: 600; letter-spacing: 0.02em;
-}
-.tag-pool { color: var(--accent-text); background: var(--accent-wash); }
+/*
+ * `.tag` AND `.tag-pool` ARE GONE WITH THE ONE ELEMENT THAT USED THEM. The board's
+ * hardcoded "Pool" label now goes through `StatusChip` like every other stage, so a
+ * second chip style with its own 18px height and its own 10.5px font had nothing left
+ * to style. The fractional size is why it is deleted rather than kept for later: an
+ * unused half-pixel step is what the next badge gets built on.
+ */
 
 /* ------------------------------------------------------------------ hero -- */
 .hero { padding: var(--space-6) 0 var(--space-5); border-bottom: 1px solid var(--line); margin-bottom: var(--space-6); }

@@ -82,10 +82,18 @@ test('a live launch still reports the curve, from the count rather than a consta
 
 test('the pool branch is the pool existing, never the graduated flag', () => {
   /*
-   * Discriminating on purpose. `graduated` is set by the buy that fills the curve and
-   * `migrated` by `seed_pool`, which is a separate transaction anyone may send, so there
-   * is a window where the curve is sold out and the pool does not exist yet. Branching on
-   * the flag would show pool rows reading 0 and the whole supply "outside" during it.
+   * NOT because the chain can disagree: it cannot. `exec_buy` sets `graduated` and calls
+   * `seed_pool` in the same transaction (contract.rs:290-297, "there is no window in
+   * which the curve is closed and the pool not yet open"), and the `graduated &&
+   * !migrated` branches in `exec_buy`/`exec_sell` exist only so a curve can never be
+   * stuck there. I first wrote this test asserting that window was reachable, which the
+   * contract says in as many words that it is not - the claim was mine, not measured.
+   *
+   * It is still the right branch for a reason that survives that correction: `pool` and
+   * `graduated` reach the client separately, `pool` being derived from `migrated` at the
+   * chain boundary, and the pool rows have nothing to read unless `pool` is actually
+   * there. Branching on the flag and then reading a null pool is how two rows end up
+   * saying 0 and "the entire supply is outside the pool".
    */
   const d = tokenDistribution(cfg, migrated, LP_RESERVE, null);
   assert.equal(d.kind, 'curve', 'a sold-out curve with no pool yet reported pool reserves');

@@ -554,6 +554,10 @@ export function marketCapExact(
  * different SHAPE once migrated, which is what stops a caller rendering a curve row over
  * a pool launch: the compiler refuses the field rather than the row reading wrong.
  *
+ * The branch is the pool being present, not `graduated`. On chain the two cannot
+ * disagree - `exec_buy` graduates and seeds in one transaction - but they reach the
+ * client separately, and the pool rows have nothing to read unless `pool` is there.
+ *
  * `outside` is `totalSupply - pool.tokens`, sound because after migration the pool is
  * everything the contract holds - 466641431436227154771311462 on both sides against a
  * 1,000,000,000 supply.
