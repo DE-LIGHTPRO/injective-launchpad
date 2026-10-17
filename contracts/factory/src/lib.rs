@@ -88,12 +88,21 @@ pub const MAX_FEE_BPS: u16 = 1_000;
 /// So the curve is identical everywhere and the board's numbers finally mean one thing:
 ///
 /// ```text
-/// virtual_inj        30 INJ    every launch opens at the same price
+/// virtual_inj       676 INJ    every launch opens at the same price
 /// virtual_tokens  1.073 B      sets how far the curve runs before its asymptote
 /// curve_supply      800 M      80% of the fixed supply is purchasable
 /// lp_reserve        200 M      the remaining 20%, held back to pair at graduation
-/// graduation_target  85 INJ    under the ~87.9 INJ this curve can collect
+/// graduation_target 1915 INJ   under the ~1980.95 INJ this curve can collect
 /// ```
+///
+/// This table said 30 / 85 / ~87.9 until 17 Oct 2026, through two rescalings: 30 -> 60
+/// and then 60 -> 676, each of which moved the constant below and left the prose. A
+/// stale figure inside a code fence directly above the declaration it describes is the
+/// most convincing version of a wrong number, which is why
+/// `app/src/lib/curve-shape-prose.test.ts` now derives these from the constants and
+/// fails on a prose copy that disagrees. The app-side guard,
+/// `curve-shape-single-source.test.ts`, strips comments and scans only `app/src`, so
+/// prose here and in the docs was never in anything's scope.
 ///
 /// This is what nearly.trade does: their create form carries no curve parameters at
 /// all and states "Every launch opens at the same price". It is also three fewer
@@ -233,24 +242,30 @@ pub fn fixed_curve(fee_bps: u16, fee_sell_bps: u16, spec: &QuoteSpec) -> CurveCo
 /// 10%, and NOT the 4% nearly.trade uses, because their number does not transfer.
 ///
 /// Their create form reads "Optional. Max 4% of supply (approximately 42.9 NEAR)"
-/// against a launch that opens at a 1,000 NEAR FDV. Measured on this curve, 4% of
-/// supply costs under 1 INJ: the default shape has a 30 INJ opening reserve against an
-/// 85 INJ graduation target, so the first tokens are very cheap and the share moves
-/// fast. Copied literally, the cap would have refused almost every real opening buy
-/// while reading as though it matched the market.
+/// against a launch that opens at a 1,000 NEAR FDV. Their number is a property of
+/// their curve, not of ours, so copying it literally would have put a cap on the
+/// screen that bore no relation to what an opening buy on this shape costs.
 ///
-/// Measured against the default curve, 10 Oct 2026:
+/// Re-derived from the constants above on 17 Oct 2026, so these move when the shape
+/// moves rather than being a measurement of a shape that has since been replaced:
 ///
 /// ```text
-/// 0.5 INJ ->  2.18%      2.5 INJ -> 10.22%      8.5 INJ -> 29.38%
-/// 1.0 INJ ->  4.28%      3.0 INJ -> 12.08%       20 INJ -> 53.33%
-/// 2.0 INJ ->  8.30%      5.0 INJ -> 19.00%       40 INJ -> 76.31%
+///   5 INJ ->  0.79%       35 INJ ->  5.28%      200 INJ -> 24.50%
+///  10 INJ ->  1.56%       70 INJ -> 10.07%      400 INJ -> 39.89%
+///  20 INJ ->  3.08%      100 INJ -> 13.83%
 /// ```
 ///
 /// So the thing worth refusing is the controlling share, not the opening position: a
 /// creator holding a tenth of the curve is ordinary and is published on the launch
 /// page anyway, and one holding three quarters of it before anyone else has seen the
-/// token is the failure this cap exists for. 10% lands at roughly 2.45 INJ here.
+/// token is the failure this cap exists for. 10% lands at roughly 69.5 INJ here, or
+/// 3.6% of the 1915 INJ graduation target.
+///
+/// These figures were measured against the 30 INJ curve and left behind by two
+/// rescalings, which understated the cost of the cap by a factor of about 28 and made
+/// the argument for choosing 10% read as though 2.45 INJ could buy a controlling
+/// share. The CHOICE was still right, because it is a share of supply; the evidence
+/// offered for it had stopped being evidence about this curve.
 ///
 /// The GUARANTEE is a share of supply, so it holds whatever curve a creator picks. The
 /// INJ figures above are a property of the default shape and move with it, which is

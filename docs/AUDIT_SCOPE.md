@@ -22,8 +22,8 @@ with Rust 1.81 to MVP wasm (see `scripts/build-wasm.sh` for why).
 
 A creator mints a fixed 1B-token tokenfactory denom and sends all of it to the factory,
 which instantiates a curve with **no wasm admin** and forwards the tokens. 800M are sold on
-a constant-product curve over virtual reserves (30 INJ / 1.073B tokens). The buy that takes
-collected quote to 85 INJ (scaled to the quote's decimals) partially fills, refunds the
+a constant-product curve over virtual reserves (676 INJ / 1.073B tokens). The buy that takes
+collected quote to 1915 INJ (scaled to the quote's decimals) partially fills, refunds the
 excess, and in the same transaction seeds an in-contract `x*y=k` pool with the collected
 reserve plus any opening-fee premium against the 200M held back plus unsold tokens. From
 then on `Buy` / `Sell` trade against that pool. No message can withdraw it. Fees are taken

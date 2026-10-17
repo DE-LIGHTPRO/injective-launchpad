@@ -30,9 +30,9 @@ nearly.trade: a Rhea pool). This repository used to `BankMsg::Send` the reserve 
 `migration_target` address instead, which made that key the custodian of every
 graduated launch. It now works like this:
 
-1. The buy that reaches the 85 INJ target seeds the pool **in the same transaction**:
+1. The buy that reaches the 1915 INJ target seeds the pool **in the same transaction**:
    quote side = the curve's reserve plus any opening-fee premium; token side = the 200M
-   held back plus whatever the curve never sold. The two prices meet (~4.11e-7 INJ per
+   held back plus whatever the curve never sold. The two prices meet (~9.25e-6 INJ per
    token on both sides), so graduation does not gap the price.
 2. From then on the same `Buy` / `Sell` messages trade against a plain `x * y = k`
    pool (`packages/launchpad-math/src/pool.rs`). Same fee, still split 70/30
@@ -65,13 +65,21 @@ mint key.
 ## Tests
 
 ```bash
-cargo test              # 125: the maths (curve + pool), both contracts, randomized runs
-npm --prefix app test   # 206: the TypeScript port, Rust parity, signing, wallet, env surface
-npx --prefix app tsc --noEmit
-bash scripts/build-wasm.sh  # wasm build + export and opcode checks the chain enforces
+cargo test                    # 146: the maths (curve + pool), both contracts, randomized runs
+npm --prefix app test         # 422: the TypeScript port, Rust parity, signing, wallet, env surface
+npm --prefix app run typecheck
+bash scripts/build-wasm.sh    # wasm build + export and opcode checks the chain enforces
 ```
 
-CI runs all four on every push and pull request.
+CI runs all four on every push and pull request. Counts are as of 17 Oct 2026; each
+runner prints its own, so a stale number here is a stale number and not a failure.
+
+The typecheck line was `npx --prefix app tsc --noEmit`, which does not work: `--prefix`
+tells npx where to find the binary and does not change the working directory, so `tsc`
+finds no `tsconfig.json`, prints its help text and exits 1. Following the README gave a
+wall of usage output that reads as a broken toolchain, which is worse than an error.
+`npm run --prefix` does change directory, which is why the script exists; CI was always
+correct because it sets `working-directory: app` instead.
 
 ### The curve exists twice, and that is the main hazard
 
@@ -168,7 +176,7 @@ and the part a form cannot check.
 anything is signed. `scripts/e2e-testnet.mjs` runs the whole lifecycle with the deploy
 key: create, curve trades, graduation, pool trades, fees, and checks the mint key ended
 with the curve. It mints its own 6-decimal test quote so graduating costs gas instead of
-87 INJ. Run it with `npm --prefix scripts run e2e` after `deploy.mjs`.
+1915 INJ. Run it with `npm --prefix scripts run e2e` after `deploy.mjs`.
 
 ## Holders: not possible from a public endpoint
 

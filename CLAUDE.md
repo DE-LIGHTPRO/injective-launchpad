@@ -13,13 +13,14 @@ the pool fee to the creator). When choosing behaviour, check what those two do f
 ## Layout and commands
 
 - `packages/launchpad-math` (curve + `pool.rs`), `contracts/curve`, `contracts/factory`, `app/` (Next 15), `scripts/`.
-- `cargo test` · `npm --prefix app test` · `npx --prefix app tsc --noEmit` · `bash scripts/build-wasm.sh` (needs Rust 1.81 + wasm32 target).
+- `cargo test` · `npm --prefix app test` · `npm --prefix app run typecheck` · `bash scripts/build-wasm.sh` (needs Rust 1.81 + wasm32 target).
+  - NOT `npx --prefix app tsc --noEmit`, which this line said: `--prefix` on `npx` resolves the binary without changing directory, so tsc finds no tsconfig, prints its help and exits 1. That reads as a broken toolchain rather than as a wrong command.
 - Changed the maths? Run `npm --prefix app run vectors`. The TS test fails if the vectors are stale.
 - CI: `.github/workflows/ci.yml` runs all of the above.
 
 ## Decisions already made (don't re-litigate without new facts)
 
-- Fixed policy for every launch: 1B supply, 800M on the curve / 200M reserve, 30 INJ virtual, 85 INJ graduation, fees split 70/30 creator/platform. Only `fee_bps` (≤10%) is the creator's choice.
+- Fixed policy for every launch: 1B supply, 800M on the curve / 200M reserve, 676 INJ virtual, 1915 INJ graduation, fees split 70/30 creator/platform. Only `fee_bps` (≤10%) is the creator's choice.
 - **Graduation = locked in-contract `x*y=k` pool**, seeded atomically by the graduating buy. No `migration_target`, no withdraw, curves have **no wasm admin**. Same Buy/Sell messages work in both phases.
 - Fees are taken on the quote leg only, in both phases.
 - Launch rules (wallet cap, start time, opening fee) apply to the curve only and expire at graduation.

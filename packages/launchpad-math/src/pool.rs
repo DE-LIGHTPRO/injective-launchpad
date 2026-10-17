@@ -192,7 +192,13 @@ mod tests {
     const ONE: u128 = 1_000_000_000_000_000_000;
 
     fn pool() -> PoolReserves {
-        // What the fixed curve graduates into: ~85 INJ against ~207M tokens.
+        // A synthetic pool, NOT the shipped curve's graduation pool, which is 1915 INJ
+        // against ~206.95M tokens. The token side is close; the quote side is 22.5x
+        // smaller, so a 1 INJ trade here is 1.2% of the reserve where on a real
+        // graduated pool it is 0.05%. These tests are about the x*y=k arithmetic and
+        // its rounding direction, which hold at any ratio, so the fixture stays - but
+        // a price-impact figure read off it is not a figure about a real launch. This
+        // comment claimed it was the real pool, through two rescalings of the curve.
         PoolReserves {
             quote: Uint128::new(85 * ONE),
             tokens: Uint128::new(207_000_000 * ONE),
