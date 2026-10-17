@@ -27,6 +27,7 @@ import {
   graduationProgress,
   curvePoints,
   chartMarker,
+  stateAtRaised,
   spotPrice,
   type CurveConfig,
   type CurveState,
@@ -132,13 +133,81 @@ test('the marker is clamped to the axis rather than drawn off the end', () => {
   assert.equal(injX, maxX, 'the marker left the axis');
 });
 
-test('the marker height is the real spot price for the state', () => {
-  // Not the nearest sample, which is a second way of saying "roughly here".
-  const st: CurveState = { injCollected: amt(3n), tokensSold: amt(100_000_000n), graduated: false };
-  const { price } = chartMarker(CFG, st, 87.9, ONE);
-  const expected = Number(spotPrice(CFG, st, ONE)) / Number(ONE);
-  assert.equal(price, expected);
-  assert.ok(price > 0, 'a plottable state must produce a price');
+test('the marker height is the price at the state, on the line that is drawn', () => {
+  /*
+   * ASSERTED AGAINST `curvePoints`, not against a formula. This compared the marker to
+   * `Number(spotPrice(CFG, st, ONE)) / Number(ONE)`, which pinned the exact expression
+   * `chartMarker` used rather than the property that matters - and that expression
+   * floors to zero on a 6-decimal quote, so the test defended the defect below. The
+   * claim is "the dot is on the line", and `curvePoints` is the line.
+   */
+  const maxX = Number(maxCollectable(CFG)) / Number(ONE);
+  const samples = 70;
+  const pts = curvePoints(CFG, ONE, samples);
+  for (const i of [7, 35, 66]) {
+    const raised = (maxCollectable(CFG) * BigInt(i)) / BigInt(samples);
+    const { price } = chartMarker(CFG, stateAtRaised(CFG, raised), maxX, ONE);
+    assert.equal(price, pts[i].price, `the marker is off the line at sample ${i}`);
+    assert.ok(price > 0, 'a plottable state must produce a price');
+  }
+});
+
+test('a 6-decimal quote draws a real curve, not a flat line on the baseline', () => {
+  /*
+   * THE ONE PAIR THIS PROJECT DEVELOPS AGAINST IS THE ONE IT CANNOT GO WRONG ON.
+   *
+   * `spotPrice` returns a bigint - whole quote base units per token - and on an
+   * 18-decimal INJ quote that is a large number. On Injective's 6-decimal stablecoins
+   * a token on this curve costs a fraction of one base unit, so it floored to 0 at
+   * EVERY sampled position: `maxY` fell through to its `|| 1` guard and the entire
+   * bonding curve was drawn as a flat line along the bottom of the card, with the
+   * marker correctly sitting on it.
+   *
+   * `spotPriceWad` exists in `curve.ts` precisely because of this flooring, and its
+   * docblock records the symptom - "every USDC launch showed price 0 and market cap 0".
+   * That fix reached the price and market-cap readouts and never reached the chart.
+   *
+   * The config is the live E2EUSD launch, read from the chain on 17 Oct 2026.
+   */
+  const USD: CurveConfig = {
+    virtualInj: 5_354_000_000n,
+    virtualTokens: amt(1_073_000_000n),
+    curveSupply: amt(800_000_000n),
+    graduationTarget: 15_169_000_000n,
+    feeBps: 100n,
+  };
+  const QUOTE_ONE = 1_000_000n;
+  const pts = curvePoints(USD, QUOTE_ONE, 70);
+
+  assert.equal(
+    new Set(pts.map((p) => p.price)).size,
+    pts.length,
+    'the curve has repeated prices, so part of it is flat',
+  );
+  for (let i = 1; i < pts.length; i++) {
+    assert.ok(pts[i].price > pts[i - 1].price, `the curve does not rise at sample ${i}`);
+  }
+  /*
+   * And the value is right, not merely non-zero: the opening price is the virtual
+   * reserve over the virtual token supply, 5354 / 1,073,000,000 of a whole quote unit.
+   * A fix that scaled by the wrong power of ten would pass every assertion above.
+   */
+  assert.ok(
+    Math.abs(pts[0].price - 5354 / 1_073_000_000) < 1e-15,
+    `the opening price is ${pts[0].price}, not the virtual reserve over the virtual supply`,
+  );
+
+  // The marker on that same curve has a height too, rather than lying on the axis.
+  const maxX = Number(maxCollectable(USD)) / Number(QUOTE_ONE);
+  const migratedUsd: CurveState = {
+    injCollected: 0n,
+    tokensSold: USD.curveSupply,
+    graduated: true,
+  };
+  const { price } = chartMarker(USD, migratedUsd, maxX, QUOTE_ONE);
+  const maxY = Math.max(...pts.map((p) => p.price));
+  assert.ok(price > 0, 'the marker is back on the baseline');
+  assert.ok(price > maxY * 0.9, `the marker at the target is only ${price / maxY} of the way up`);
 });
 
 test('an unplottable state loses the marker, not the whole chart', () => {

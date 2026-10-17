@@ -329,7 +329,14 @@ export function sellPriceImpactBps(cfg: CurveConfig, st: CurveState, tokensIn: b
  * Measured on the live testnet, 17 Oct 2026: launch 3, in-pool, 800,000,000 of
  * 800,000,000 sold, 6,724.38 quote locked, progress bar at 100%, marker at x = 0.
  * Every other figure on the page was right, which is why nothing looked broken.
- * It reached four surfaces, including `CurveGlyph` on every board card.
+ *
+ * THE FLOOR REACHES ONE SURFACE, and the first version of this note claimed four.
+ * `chartMarker` has three callers, but `CurveGlyph` renders only inside
+ * `KingOfTheHill`, which filters on `!r.graduated`, and `CurveExplorer` builds its
+ * states with `stateAtRaised`, which returns `graduated: false`. So a graduated launch
+ * can reach neither, and the launch page's `CurveChart` is the only place this is
+ * observable. Counting call sites is not counting surfaces - the same mistake as
+ * calling a registration a wiring, in the direction that overstates a fix.
  *
  * Expressed as a floor rather than a branch on migration, because a launch that has
  * graduated but not yet been migrated still holds a real reserve at or just above
@@ -363,7 +370,9 @@ export function chartMarker(
   const at = raisedUnits === st.injCollected ? st : stateAtRaised(cfg, raisedUnits);
   let price = 0;
   try {
-    price = Number(spotPrice(cfg, at, oneToken)) / Number(oneToken);
+    // `plotPrice`, the same derivation `curvePoints` draws the line from, so the dot
+    // cannot sit off it. Asking `spotPrice` here floored to zero on a 6-decimal quote.
+    price = plotPrice(cfg, at, oneToken);
   } catch {
     // An unplottable state leaves the marker on the floor rather than throwing out
     // the whole chart: the line is still true even when the marker cannot be placed.
@@ -544,9 +553,59 @@ export function stateAtRaised(cfg: CurveConfig, raised: bigint): CurveState {
   };
 }
 
+/** The token side of every launch on this launchpad is 18 decimals. The quote is not. */
+const TOKEN_ONE = 10n ** 18n;
+
 /**
- * Sample the curve for plotting: price per token against INJ raised.
+ * A plottable price: whole quote units per whole token, as a float.
+ *
+ * THE CHART WAS DRAWN FROM `spotPrice`, WHICH FLOORS TO A WHOLE QUOTE BASE UNIT, and
+ * `spotPriceWad` exists directly above because that floors to zero on a 6-decimal
+ * quote. Its own docblock records the symptom - "every USDC launch showed price 0 and
+ * market cap 0" - and the fix reached the price and market-cap readouts and never
+ * reached the chart, which kept calling the lossy one.
+ *
+ * Measured on the live testnet, 17 Oct 2026, launch E2E88375 against its 6-decimal
+ * E2EUSD quote: all 71 sampled prices came back 0, so `maxY` fell through to its
+ * `|| 1` guard and the entire bonding curve was a flat line along the baseline, with
+ * the marker correctly sitting on it. A launch that had sold its whole curve supply
+ * was drawn as a launch with no curve. On an 18-decimal INJ quote the same expression
+ * is fine, which is why this survived: the one pair the project develops against is
+ * the one pair it cannot go wrong on.
+ *
+ * The other two callers were not equally affected, and saying so took measuring the
+ * three rather than reasoning about them. Over 41 samples of that same live shape:
+ *
+ *   CurveChart     quote unit 1e6    all 41 prices 0            flat
+ *   CurveGlyph     1e18 always       4 to 77, 41 distinct       coarse at the open
+ *   CurveExplorer  1e18, 18-dec shape  6.3e11 to 9.7e12         unaffected
+ *
+ * So only the launch page was flat. `CurveGlyph` passes the TOKEN unit whatever the
+ * quote is, which left it non-zero but quantised in steps of one part in four at the
+ * bottom of the curve, distorting exactly the stretch a new launch sits on; and
+ * `CurveExplorer` draws an 18-decimal INJ shape, where this expression was never
+ * lossy. An estimate of the glyph's range by hand was wrong by a factor of four
+ * before it was measured, which is the whole argument for measuring.
+ *
+ * So the price no longer depends on the unit the caller passes for the x axis. It is
+ * computed at `PRICE_WAD` precision against the token's own 18 decimals and scaled
+ * down once, which is the same number a human means by "price" and cannot floor.
+ * `pool` is null deliberately: these functions draw the CURVE, and a graduated
+ * launch's position on it comes from the shape (see `chartMarker`), never from the
+ * pool that replaced it.
+ */
+function plotPrice(cfg: CurveConfig, st: CurveState, quoteOne: bigint): number {
+  const wad = spotPriceWad(cfg, st, null, TOKEN_ONE);
+  return Number(wad) / Number(PRICE_WAD) / Number(quoteOne);
+}
+
+/**
+ * Sample the curve for plotting: price per token against quote raised.
  * Pure projection from the config, so it does not depend on live state.
+ *
+ * `oneToken` is the QUOTE's unit, which is what both axes are scaled by: callers pass
+ * `10 ** quoteDecimals`. It is not the token's unit, and the two coincide only on an
+ * 18-decimal quote.
  */
 export function curvePoints(
   cfg: CurveConfig,
@@ -560,7 +619,7 @@ export function curvePoints(
     const st = stateAtRaised(cfg, raised);
     out.push({
       injRaised: Number(raised) / Number(oneToken),
-      price: Number(spotPrice(cfg, st, oneToken)) / Number(oneToken),
+      price: plotPrice(cfg, st, oneToken),
     });
   }
   return out;

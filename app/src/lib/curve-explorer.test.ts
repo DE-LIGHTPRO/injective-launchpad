@@ -101,11 +101,23 @@ test('the handle height is the price at the position it is drawn at', () => {
    * vertical. An earlier version computed the height from its own inverted copy of
    * the curve formula and floated the handle above the line everywhere but the ends.
    */
-  for (const t of [0.1, 0.5, 0.95]) {
-    const raised = BigInt(Math.round(t * Number(SHAPE.graduationTarget)));
+  /*
+   * ASSERTED AGAINST THE DRAWN LINE, not against a formula. This read
+   * `assert.equal(price, whole(spotPrice(SHAPE, st, ONE)))`, which pinned the exact
+   * expression `chartMarker` used rather than the property that matters, and that
+   * expression floored every price to zero on a 6-decimal quote. A test that encodes
+   * a claim is only as good as the claim. "The handle sits on the line" is the claim,
+   * and `curvePoints` is the line, so compare the two.
+   */
+  const axisMax = whole(maxCollectable(SHAPE));
+  const samples = 60;
+  const pts = curvePoints(SHAPE, ONE, samples);
+  for (const i of [6, 30, 57]) {
+    // A state at exactly a sampled position, so the dot and that sample must agree.
+    const raised = (maxCollectable(SHAPE) * BigInt(i)) / BigInt(samples);
     const st = stateAtRaised(SHAPE, raised);
-    const { price } = chartMarker(SHAPE, st, whole(maxCollectable(SHAPE)), ONE);
-    assert.equal(price, whole(spotPrice(SHAPE, st, ONE)));
+    const { price } = chartMarker(SHAPE, st, axisMax, ONE);
+    assert.equal(price, pts[i].price, `the handle is off the line at sample ${i}`);
     assert.ok(price > 0, 'a drawable position must have a price');
   }
   // Rising, because this curve's price rises with the reserve. An inverted formula
