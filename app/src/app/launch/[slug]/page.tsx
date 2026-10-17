@@ -20,7 +20,7 @@ import { StatusChip } from '@/components/StatusChip';
 import { CreatorPosition } from '@/components/CreatorPosition';
 import { FeeEarnings } from '@/components/FeeEarnings';
 import { CopyButton } from '@/components/CopyButton';
-import { graduationProgress, fmt, spotPriceWad, maxCollectable } from '@/lib/curve';
+import { graduationProgress, fmt, spotPriceWad, maxCollectable, tokenDistribution } from '@/lib/curve';
 import { NETWORK, isDeployed, isDevBuild, getPinnedCurveCodeIdsRaw } from '@/lib/config';
 import { isDemoMode } from '@/lib/demo';
 import { PriceChart } from '@/components/PriceChart';
@@ -279,7 +279,7 @@ export default async function LaunchPage({ params }: { params: Promise<{ slug: s
   const price = spotPriceWad(detail.config, detail.state, detail.pool, ONE);
   const reserveNow = detail.pool ? detail.pool.quote : detail.state.injCollected;
   const ceiling = maxCollectable(detail.config);
-  const remaining = detail.config.curveSupply - detail.state.tokensSold;
+  const supply = tokenDistribution(detail.config, detail.state, detail.lpReserve, detail.pool);
 
   return (
     <>
@@ -471,20 +471,44 @@ export default async function LaunchPage({ params }: { params: Promise<{ slug: s
                 {fmt(ceiling, quote.decimals, 2)} {quote.label}
               </span>
             </div>
-            <div className="metric-row">
-              <span className="k">Sold</span>
-              <span className="v mono">
-                {fmt(detail.state.tokensSold, 18, 0)} / {fmt(detail.config.curveSupply, 18, 0)}
-              </span>
-            </div>
-            <div className="metric-row">
-              <span className="k">Still on the curve</span>
-              <span className="v mono">{fmt(remaining, 18, 0)} {symbol}</span>
-            </div>
-            <div className="metric-row">
-              <span className="k">Held back for liquidity</span>
-              <span className="v mono">{fmt(detail.lpReserve, 18, 0)} {symbol}</span>
-            </div>
+            {/*
+                THREE ROWS ABOUT THE CURVE, AND MIGRATION INVALIDATED ALL THREE. The
+                reason, the measurement and the reason the split cannot be reconstructed
+                are all on `tokenDistribution` in `curve.ts`, which is where this now
+                comes from so that it can be tested by behaviour rather than by reading
+                this file. In short: after `seed_pool`, `tokensSold` is a constant and
+                `lpReserve` is what WAS held back, and the page printed both in the
+                present tense on a launch badged "Liquidity locked".
+              */}
+            {supply.kind === 'pool' ? (
+              <>
+                <div className="metric-row">
+                  <span className="k">In the locked pool</span>
+                  <span className="v mono">{fmt(supply.inPool, 18, 0)} {symbol}</span>
+                </div>
+                <div className="metric-row">
+                  <span className="k">Held outside the pool</span>
+                  <span className="v mono">{fmt(supply.outside, 18, 0)} {symbol}</span>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="metric-row">
+                  <span className="k">Sold</span>
+                  <span className="v mono">
+                    {fmt(supply.sold, 18, 0)} / {fmt(supply.curveSupply, 18, 0)}
+                  </span>
+                </div>
+                <div className="metric-row">
+                  <span className="k">Still on the curve</span>
+                  <span className="v mono">{fmt(supply.onCurve, 18, 0)} {symbol}</span>
+                </div>
+                <div className="metric-row">
+                  <span className="k">Held back for liquidity</span>
+                  <span className="v mono">{fmt(supply.heldBack, 18, 0)} {symbol}</span>
+                </div>
+              </>
+            )}
             <div className="metric-row">
               <span className="k">Creator</span>
               <span className="v mono">

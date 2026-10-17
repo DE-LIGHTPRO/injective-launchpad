@@ -531,6 +531,58 @@ export function marketCapExact(
   return (q * totalSupply) / t;
 }
 
+/**
+ * Where the supply is, as a launch page can honestly state it.
+ *
+ * MIGRATION REPURPOSES THE FIELDS THESE ROWS WERE READING. `seed_pool` sets
+ * `tokens_sold = curve_supply` and moves `lp_reserve + unsold` into the pool, so after
+ * it runs `tokensSold` is a constant rather than a count and `lpReserve` is the amount
+ * that WAS held back rather than the amount now locked. The launch page printed both as
+ * present-tense facts. Measured on E2E88375 against the chain's bank module rather than
+ * the contract's own report of itself:
+ *
+ *   Sold                      800,000,000 / 800,000,000   claimed
+ *   contract token balance    466,641,431.436             measured
+ *   Held back for liquidity   200,000,000                 claimed
+ *
+ * which overstates sales by 1.5x and understates the locked pool by 2.33x, on a launch
+ * badged "Liquidity locked".
+ *
+ * The split of the curve supply into bought and tipped-into-the-pool is NOT recoverable:
+ * `seed_pool` keeps it only in the `graduate` event's attributes, and `pool_tokens` moves
+ * with every pool trade afterwards. So this does not reconstruct it. It returns a
+ * different SHAPE once migrated, which is what stops a caller rendering a curve row over
+ * a pool launch: the compiler refuses the field rather than the row reading wrong.
+ *
+ * `outside` is `totalSupply - pool.tokens`, sound because after migration the pool is
+ * everything the contract holds - 466641431436227154771311462 on both sides against a
+ * 1,000,000,000 supply.
+ */
+export type TokenDistribution =
+  | { kind: 'curve'; sold: bigint; curveSupply: bigint; onCurve: bigint; heldBack: bigint }
+  | { kind: 'pool'; inPool: bigint; outside: bigint };
+
+export function tokenDistribution(
+  cfg: CurveConfig,
+  st: CurveState,
+  lpReserve: bigint,
+  pool: PoolReserves | null | undefined,
+): TokenDistribution {
+  const totalSupply = cfg.curveSupply + lpReserve;
+  if (pool) {
+    const outside = totalSupply - pool.tokens;
+    return { kind: 'pool', inPool: pool.tokens, outside: outside > 0n ? outside : 0n };
+  }
+  const sold = st.tokensSold > cfg.curveSupply ? cfg.curveSupply : st.tokensSold;
+  return {
+    kind: 'curve',
+    sold,
+    curveSupply: cfg.curveSupply,
+    onCurve: cfg.curveSupply - sold,
+    heldBack: lpReserve,
+  };
+}
+
 /** How far along the curve this launch is, 0..1, for progress bars. */
 export function graduationProgress(cfg: CurveConfig, st: CurveState): number {
   // A graduated curve's reserve has moved into the pool, so `injCollected` reads zero
