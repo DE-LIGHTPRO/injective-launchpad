@@ -717,8 +717,16 @@ export async function currentHeight(): Promise<number | null> {
   try {
     const res = await fetch(`${getLcdUrl()}/cosmos/base/tendermint/v1beta1/blocks/latest`, {
       headers: { accept: 'application/json' },
-      // The ticker is decoration on a page that must render without it, so a slow
-      // node delays nothing: the age column is simply absent.
+      /*
+       * The ticker is decoration on a page that must render without it, so a slow node
+       * costs the age column rather than the launches.
+       *
+       * That used to read "a slow node delays nothing", which was a claim about the
+       * CALLER that the caller did not honour: the front page awaited this after the
+       * rows, so a stalling node held the whole render for the full timeout below. A
+       * comment here cannot make that true - only being off the critical path can, which
+       * is why `page.tsx` now reads this in the same `Promise.all` as the board.
+       */
       signal: AbortSignal.timeout(4_000),
     });
     if (!res.ok) return null;
@@ -893,16 +901,20 @@ export interface Quote {
 }
 
 /**
- * Resolve a launch's quote, including the decimals that scale every figure shown in
- * it.
+ * A launch's quote, including the decimals that scale every figure shown in it, picked
+ * from an allowlist already in hand.
  *
  * The decimals come from the factory's allowlist, which is the same source the
  * contract scaled the launch's curve with. Falling back to the network default is
  * right for a factory that predates the allowlist, where every launch really was in
  * the default quote.
+ *
+ * SEPARATE FROM THE READ because the read is one request for the whole board and the
+ * pick is per launch, and conflating them cost one identical request per launch. See
+ * `resolveQuote` below. This is not a second resolver: it is the resolver, with the
+ * fetch hoisted out of it, and `resolveQuote` is the one-denom convenience over it.
  */
-export async function resolveQuote(denom: string): Promise<Quote> {
-  const { quotes } = await listQuotes();
+export function quoteFromList(denom: string, quotes: QuoteAsset[]): Quote {
   const found = quotes.find((q) => q.denom === denom);
   return {
     denom,
@@ -910,4 +922,19 @@ export async function resolveQuote(denom: string): Promise<Quote> {
     label: quoteLabel(denom, quotes),
     ...(found?.virtualWhole !== undefined ? { virtualWhole: found.virtualWhole } : {}),
   };
+}
+
+/**
+ * The same thing for a caller that holds only a denom, at the cost of a request.
+ *
+ * ONE DENOM, ONE READ: do not call this inside a loop or a fan-out. The allowlist is
+ * the same list for every launch on the board, so N launches meant N byte-identical
+ * `quotes {}` queries to the same contract. `ClaimFees` did exactly that inside its
+ * per-launch fan-out, which made a third of a creator's requests pure duplication, and
+ * the comment above it reported "three requests per launch" as the intended cost.
+ * Read the list once and call `quoteFromList` per launch.
+ */
+export async function resolveQuote(denom: string): Promise<Quote> {
+  const { quotes } = await listQuotes();
+  return quoteFromList(denom, quotes);
 }

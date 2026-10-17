@@ -94,10 +94,30 @@ export default async function Home() {
     );
   }
 
-  const { rows, error, errorDetail, unreadable } = await loadRows();
-  // Read alongside the rows rather than inside the ticker, so one slow call does not
-  // serialise behind another.
-  const height = await currentHeight();
+  /*
+   * ONE AWAIT, because two awaits on one line each is a serial read.
+   *
+   * This was `await loadRows()` then `await currentHeight()` under a comment claiming
+   * the height was read "alongside the rows, so one slow call does not serialise behind
+   * another". Hoisting it out of the ticker was half the job and the comment described
+   * the other half as though it had been done. Measured against the configured LCD, five
+   * samples each: `launches` 155ms, `quotes` 169ms, `blocks/latest` 173ms, all serial, so
+   * ~500ms of this page's time to first byte was three round trips taking turns.
+   *
+   * The worst case is what settles it. `currentHeight` carries its own 4s timeout and its
+   * own comment saying a slow node "delays nothing: the age column is simply absent" -
+   * true of the ticker, false of the page, which waited out that whole timeout before
+   * rendering a single launch. Sampling caught the tail live: 539ms for the height and
+   * 682ms for the launches on a healthy chain, because the hostname is a load balancer.
+   *
+   * Safe to combine because neither rejects: `currentHeight` returns null from its own
+   * catch and `loadRows` resolves a `BoardLoad` carrying its error. If a future read here
+   * can throw, it needs settling per item rather than adding back a turn.
+   */
+  const [{ rows, error, errorDetail, unreadable }, height] = await Promise.all([
+    loadRows(),
+    currentHeight(),
+  ]);
 
   return (
     <>

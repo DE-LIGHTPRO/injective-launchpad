@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import type { Metadata } from 'next';
 import { notFound, redirect } from 'next/navigation';
-import { getLaunch, listLaunches, getLaunchDetail, resolveQuote, symbolOf, short, ChainError, contractFacts } from '@/lib/chain';
+import { getLaunch, listLaunches, listQuotes, getLaunchDetail, resolveQuote, quoteFromList, symbolOf, short, ChainError, contractFacts } from '@/lib/chain';
 import { resolveLaunchSlug, launchPath, pathForSlug, parseLaunchRef } from '@/lib/launchPath';
 import { assessCurveCode, blocksTrading, pinnedCodeIds } from '@/lib/codeCheck';
 import { CodeCheck } from '@/components/CodeCheck';
@@ -191,12 +191,22 @@ export default async function LaunchPage({ params }: { params: Promise<{ slug: s
 
   if (!resolved) notFound();
 
-  let launch, detail, facts;
+  let launch, detail, facts, quotes;
   try {
     launch = resolved;
-    [detail, facts] = await Promise.all([
+    /*
+     * The allowlist joins this group even though the pick below needs `detail` first.
+     *
+     * `quotes {}` takes no argument, so it depended on nothing and was a fourth serial
+     * round trip purely because `resolveQuote` bundles the read with the pick. Measured
+     * against the configured LCD at a median 169ms over five samples, on the page a
+     * trader actually lands on, which was paying four phases in a row: the board, the
+     * detail, the quote, then the trade history.
+     */
+    [detail, facts, { quotes }] = await Promise.all([
       getLaunchDetail(launch.curve),
       contractFacts(launch.curve, launch.denom),
+      listQuotes(),
     ]);
   } catch (e) {
     /*
@@ -246,7 +256,7 @@ export default async function LaunchPage({ params }: { params: Promise<{ slug: s
    * `NETWORK.quoteSymbol` and scaled as 18 decimals, so a USDC-paired launch showed
    * numbers a trillion times too large under the wrong ticker.
    */
-  const quote = await resolveQuote(detail.quoteDenom);
+  const quote = quoteFromList(detail.quoteDenom, quotes);
   const totalSupply = detail.config.curveSupply + detail.lpReserve;
   const nowSeconds = Math.floor(Date.now() / 1000);
 

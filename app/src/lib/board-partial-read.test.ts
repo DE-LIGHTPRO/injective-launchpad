@@ -38,6 +38,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { loadRows } from './boardRows.ts';
 import { DETAIL_CONCURRENCY } from './chain.ts';
 import { FIXED_CURVE, FIXED_LP_RESERVE } from './launchLimits.ts';
+import { maskComments } from './testing/maskComments.ts';
 
 const FACTORY = 'inj1factorytestonlyxxxxxxxxxxxxxxxxxxxxxxx';
 const QUOTE = 'inj';
@@ -382,6 +383,31 @@ function loadRowsCallers(): string[] {
   return found.sort();
 }
 
+/**
+ * True when some `loadRows()` call in this file is bound by a declaration whose pattern
+ * names `unreadable` - so the notice is fed by the load rather than by a local `[]`.
+ *
+ * It reads the BINDING rather than matching a shape of await, which is the whole point.
+ * This was `/unreadable\b[^=]*=\s*await loadRows|…/`, which required the call to sit
+ * immediately after the `=`. Putting the board and the block height into one
+ * `Promise.all` - two independent reads that had been costing a round trip taking turns -
+ * failed it on a page that still passes `unreadable` straight through. A guard anchored
+ * to the punctuation of one correct spelling refuses the next one.
+ */
+function bindsUnreadableFromLoad(src: string): boolean {
+  const masked = maskComments(src);
+  for (const m of masked.matchAll(/\bloadRows\s*\(/g)) {
+    // The declaration this call initialises: `const <pattern> = … loadRows(…)`.
+    const kw = masked.lastIndexOf('const ', m.index);
+    if (kw === -1) continue;
+    const eq = masked.indexOf('=', kw);
+    // An `=` after the call is a different statement, so this call is not a binding.
+    if (eq === -1 || eq > (m.index as number)) continue;
+    if (/\bunreadable\b/.test(masked.slice(kw, eq))) return true;
+  }
+  return false;
+}
+
 test('every page that loads the board also renders the gap', () => {
   const callers = loadRowsCallers();
   /*
@@ -402,9 +428,8 @@ test('every page that loads the board also renders the gap', () => {
       /<UnreadableNotice\s+unreadable=/,
       `${file} loads the board and never renders the gap`,
     );
-    assert.match(
-      src,
-      /unreadable\b[^=]*=\s*await loadRows|unreadable[,}][\s\S]{0,80}= await loadRows/,
+    assert.ok(
+      bindsUnreadableFromLoad(src),
       `${file} renders the notice without taking \`unreadable\` from the load`,
     );
   }

@@ -4,8 +4,9 @@ import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import {
   listLaunches,
+  listQuotes,
   getLaunchDetail,
-  resolveQuote,
+  quoteFromList,
   symbolOf,
   mapWithConcurrency,
   DETAIL_CONCURRENCY,
@@ -63,7 +64,20 @@ export function ClaimFees() {
     let live = true;
     void (async () => {
       try {
-        const launches = await listLaunches();
+        /*
+         * The allowlist is read ONCE, here, and picked from per launch below.
+         *
+         * It used to be `await resolveQuote(d.quoteDenom)` inside the fan-out, and
+         * `resolveQuote` is `listQuotes()` plus a local find - so a creator with ten
+         * launches sent ten byte-identical `quotes {}` queries to the same contract, a
+         * third of this page's requests, for a list that is the same for every launch on
+         * the board. Nothing cached them: `smartQuery` is a bare `fetch` and this is a
+         * client component, so Next's request dedupe never sees it.
+         *
+         * Read alongside the launches rather than after them, because neither needs the
+         * other.
+         */
+        const [launches, { quotes }] = await Promise.all([listLaunches(), listQuotes()]);
         /*
          * Only this wallet's launches are read in full. Reading every launch on the
          * board to find a handful would be N round trips for a page about one
@@ -71,10 +85,9 @@ export function ClaimFees() {
          */
         const mine = launches.filter((l) => l.creator === account.address);
         /*
-         * BOUNDED, like the board's. Each launch here is `getLaunchDetail` (two smart
-         * queries) plus `resolveQuote`, so a prolific creator fans out three requests
-         * per launch at once - see `DETAIL_CONCURRENCY` for what the endpoint does to a
-         * burst.
+         * BOUNDED, like the board's. Each launch here is `getLaunchDetail`, two smart
+         * queries, so a prolific creator fans out two requests per launch at once - see
+         * `DETAIL_CONCURRENCY` for what the endpoint does to a burst.
          *
          * STILL ALL-OR-NOTHING, unlike the board's, and that is the right answer here
          * rather than an omission. This page is the input to ONE transaction that claims
@@ -96,7 +109,7 @@ export function ClaimFees() {
             creator: d.creator,
             owed: d.creatorOwed,
             quoteDenom: d.quoteDenom,
-            quote: await resolveQuote(d.quoteDenom),
+            quote: quoteFromList(d.quoteDenom, quotes),
           };
         });
         if (live) setRows(detailed);
