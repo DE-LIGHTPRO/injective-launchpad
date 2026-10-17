@@ -352,7 +352,13 @@ header.top .spacer { margin-left: auto; }
 
 /* ------------------------------------------------------------- typography -- */
 
-h1 { font-size: var(--text-display); font-weight: 680; letter-spacing: -0.03em; line-height: 1.15; }
+/*
+ * `h1` IS SET BY THE SYSTEM LAYER, not here. It declared the same four properties
+ * that the layer at the end of this file redeclares, so all four were dead: a reader
+ * here would believe the page's largest text is `var(--text-display)` at weight 680
+ * when it renders at 1.875rem and 640. `h2` and `h3` keep their declarations because
+ * each still contributes one the layer does not name.
+ */
 h2 { font-size: var(--text-lg); font-weight: 620; letter-spacing: -0.01em; margin-bottom: var(--space-4); }
 h3 { font-size: var(--text-base); font-weight: 600; }
 .sub { color: var(--text-dim); margin-top: var(--space-2); max-width: 58ch; }
@@ -506,25 +512,27 @@ h3 { font-size: var(--text-base); font-weight: 600; }
   body::before { opacity: 0.4; }
 }
 
+/*
+ * `a.card` WAS DECLARED TWICE FOUR LINES APART, with two different transitions, and
+ * the hover rule that followed is gone because the system layer cancels it.
+ *
+ * The second declaration was presumably written without the first in view - that is
+ * what four lines does - so the 0.2s timing read as current and the 0.25s one won.
+ * Merged, keeping the longer list because it is the one that was rendering.
+ *
+ * The hover rule lifted the card 2px and gave it a lit edge and a blue glow. The
+ * system layer at the end of this file sets `transform: none; box-shadow: none` on
+ * the same selector, per its own principle of "no blur, glow, grain or gradients",
+ * so every property it declared was already being overridden. Deleting it changes
+ * nothing on screen, and it was the only remaining reader of `--glass-fill-strong`
+ * anywhere in the project. `--glass-border-lit` still has five.
+ */
 a.card {
   display: block;
-  transition: border-color 0.2s var(--ease), transform 0.2s var(--ease);
-}
-a.card {
   transition:
     border-color 0.25s var(--ease),
     transform 0.25s var(--ease),
     box-shadow 0.25s var(--ease);
-}
-/* Lit edge and a slightly denser pane, which is what a card catching light does. */
-a.card:hover {
-  border-color: var(--glass-border-lit);
-  background: var(--glass-fill-strong);
-  transform: translateY(-2px);
-  box-shadow:
-    0 1px 0 0 rgba(255, 255, 255, 0.2) inset,
-    0 22px 48px -22px rgba(0, 0, 0, 0.9),
-    0 0 0 1px rgba(91, 157, 255, 0.14);
 }
 a.card:focus-visible { border-color: var(--accent-deep); }
 
@@ -659,15 +667,20 @@ input.amount:focus { outline: none; border-color: var(--accent-deep); box-shadow
   cursor: pointer;
   transition: filter 0.18s var(--ease);
 }
-.go { box-shadow: 0 1px 0 0 rgba(255, 255, 255, 0.22) inset, 0 8px 20px -10px rgba(91, 157, 255, 0.5); }
-.go:hover:not(:disabled) { filter: brightness(1.08); }
-.go:disabled { background: var(--surface-3); color: var(--text-faint); cursor: not-allowed; }
-.go.ghost {
-  background: transparent;
-  border: 1px solid var(--line-strong);
-  color: var(--text);
-}
-.go.ghost:hover:not(:disabled) { border-color: var(--accent-deep); }
+/*
+ * THE PRIMARY BUTTON'S INSET HIGHLIGHT, BLUE GLOW, BRIGHTNESS HOVER AND GHOST
+ * VARIANT ALL USED TO BE DECLARED HERE AND NONE OF THEM RENDERED.
+ *
+ * The system layer sets `box-shadow: none; filter: none` on `.go` and gives the
+ * ghost variant a flat `var(--surface-1)` fill and a `#3a3f48` hover, which is its
+ * stated principle rather than an accident. Each of the deleted rules named the same
+ * selector as a later one and only properties that later one redeclares, so the
+ * browser computed the same page without them.
+ *
+ * `:disabled` stays: `cursor: not-allowed` is the one property the layer does not
+ * name, and losing it would make a dead button look pressable.
+ */
+.go:disabled { cursor: not-allowed; }
 
 .quote-box {
   background: var(--surface-3);
@@ -817,26 +830,22 @@ input.amount:focus { outline: none; border-color: var(--accent-deep); box-shadow
   margin-bottom: var(--space-3);
 }
 .search { flex: 1 1 14rem; min-width: 0; }
-.search input {
-  width: 100%;
-  background: var(--surface-2);
-  border: 1px solid var(--line);
-  color: var(--text);
-  border-radius: var(--radius-md);
-  padding: var(--space-2) var(--space-3);
-  font: inherit;
-  font-size: var(--text-sm);
-}
+/*
+ * THE SEARCH FIELD IS STYLED BY THE SYSTEM LAYER. Its two rules here declared only
+ * properties that layer redeclares, including every token in them, so a reader would
+ * have believed the field's radius is `var(--radius-md)` and its focus ring is
+ * `var(--ring)` when neither reaches the screen.
+ */
 .search input::placeholder { color: var(--text-faint); }
-.search input:focus-visible { outline: none; box-shadow: var(--ring); border-color: var(--accent-deep); }
-.toggle { display: inline-flex; align-items: center; gap: var(--space-2); font-size: var(--text-sm); color: var(--text-dim); cursor: pointer; }
 .sr-only {
   position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
   overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
 }
 /* The native checkbox is drawn by the platform rather than by this CSS, so it
    needs its own coarse-pointer sizing: a 13px box is well under the 24px floor
-   and no class-based rule reaches it. */
+   and no class-based rule reaches it. `.toggle` itself is in the form-controls
+   section below; this stays here because moving it would change where it sits in
+   the cascade relative to the other coarse-pointer rules. */
 @media (pointer: coarse) {
   .toggle input[type='checkbox'] { width: 24px; height: 24px; }
 }
@@ -988,15 +997,18 @@ button:disabled { color: var(--text-faint); cursor: not-allowed; }
 /* The extension's own mark, so a row is recognisable before the name is read. */
 .wallet-list img { width: 22px; height: 22px; border-radius: var(--radius-xs, 4px); flex: none; }
 button.ghost { background: transparent; border: 1px solid var(--line); color: var(--text-dim); }
-/* The header's connect trigger: the one action on the page, so it reads as one. */
+/*
+ * The header's connect trigger: the one action on the page, so it reads as one.
+ *
+ * The gradient, the inset highlight and the brightness hover are gone because the
+ * system layer sets this selector to a flat `var(--accent)` with `box-shadow: none`
+ * and `filter: none`, and its hover to `#3a76f5`. `border-color` and `font-weight`
+ * stay; nothing later names either.
+ */
 .wallet > button:not(.ghost) {
-  background: linear-gradient(180deg, var(--accent), var(--accent-deep));
   border-color: transparent;
-  color: #050a1a;
   font-weight: 650;
-  box-shadow: 0 1px 0 0 rgba(255, 255, 255, 0.22) inset;
 }
-.wallet > button:not(.ghost):hover { filter: brightness(1.06); }
 
 /*
  * The create form, which had no styling at all.
@@ -1679,7 +1691,8 @@ header.top .brand { display: inline-flex; align-items: center; gap: var(--space-
  * otherwise a uniform grid of strangers' tokens, and three equal cards above a grid
  * of equal cards is just more grid.
  */
-.hill { margin-top: var(--space-5); }
+/* `margin-top` was declared here and then twice more in the system layer, which sets
+   it to 0; this was the only property it had. The strip's spacing is decided there. */
 .hill-head { margin-bottom: var(--space-3); }
 .hill-head h2 { margin: 0 0 var(--space-1); }
 
@@ -1710,7 +1723,8 @@ header.top .brand { display: inline-flex; align-items: center; gap: var(--space-
      shrink and the page scrolls sideways. */
   min-width: 0;
 }
-.hill-king:hover { border-color: var(--accent-deep); }
+/* The hover border was `var(--accent-deep)` here and `var(--line-strong)` in the
+   system layer, which also gives it a background. Only the layer's version rendered. */
 
 .hill-crown {
   grid-column: 1 / -1;
