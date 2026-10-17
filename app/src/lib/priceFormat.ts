@@ -4,9 +4,19 @@
  * Launch prices are tiny: 0.0000002942 INJ per token. Printed in full, the number is
  * all zeros and the digits that matter are at the end, where the eye gets lost
  * counting. DEX screeners settled on subscript zeros, 0.0₆2942, which keeps the
- * significant digits up front and the magnitude one glance away. This returns the
- * parts so a component can render the subscript as markup; `priceText` gives the
- * same thing as plain text for titles and share cards.
+ * significant digits up front and the magnitude one glance away. `priceParts` returns
+ * the pieces so a component can render the subscript as markup, and
+ * `priceDecimalText` writes the same number out in full for anything that is read
+ * rather than looked at.
+ *
+ * THERE WAS A THIRD, `priceText`, which assembled the folded form as plain text using
+ * the `₀₁₂₃...` subscript characters, "for titles and share cards". It had five passing
+ * tests and no call site, and the purpose in its own docblock is the one purpose the
+ * docblock on `priceDecimalText` forty lines below rules out: a `₆` is a character most
+ * screen readers skip, and a page title or an OG card is read and indexed rather than
+ * glanced at. Deleted rather than wired, so the compiler now refuses what that prose
+ * recommended. The folding logic it exercised is reachable through `priceParts`, which
+ * is what those tests now assert against.
  */
 
 export interface PriceParts {
@@ -39,18 +49,6 @@ export function priceParts(raw: bigint, decimals: number, significant = 4): Pric
   // The subscript counts every zero after the point, the convention screeners use:
   // 0.0₆2942 is 0.0000002942.
   return { lead: '0.0', zeros: leadingZeros, digits: sig };
-}
-
-const SUBSCRIPT = '₀₁₂₃₄₅₆₇₈₉';
-
-export function priceText(raw: bigint, decimals: number, significant = 4): string {
-  const p = priceParts(raw, decimals, significant);
-  if (p.zeros === 0) return p.digits;
-  const sub = String(p.zeros)
-    .split('')
-    .map((d) => SUBSCRIPT[Number(d)])
-    .join('');
-  return `${p.lead}${sub}${p.digits}`;
 }
 
 /**

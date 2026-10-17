@@ -3,37 +3,47 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { priceDecimalText, priceParts, priceText, tickerHue } from './priceFormat.ts';
+import { priceDecimalText, priceParts, tickerHue } from './priceFormat.ts';
 import { maskComments } from './testing/maskComments.ts';
 
 const E18 = 10n ** 18n;
+
+/*
+ * These five drove `priceText`, which assembled the folded form as a plain string with
+ * `₀₁₂₃...` characters. It had no call site, and the only purpose its docblock gave -
+ * titles and share cards - is the case `priceDecimalText` exists to cover, because a
+ * subscript digit is skipped by most screen readers and a title is read rather than
+ * looked at. So the function is gone and the assertions moved onto `priceParts`, which
+ * `Price.tsx` actually renders: the folding logic they test is the same logic, reached
+ * the way the product reaches it.
+ */
+const PLAIN = (digits: string) => ({ lead: '', zeros: 0, digits });
 
 test('a tiny price folds its zeros into a subscript', () => {
   // 0.0000002942 INJ, the demo launch's spot price.
   const raw = 294_200_000_000n; // 2.942e-7 at 18 decimals
   assert.deepEqual(priceParts(raw, 18), { lead: '0.0', zeros: 6, digits: '2942' });
-  assert.equal(priceText(raw, 18), '0.0₆2942');
 });
 
 test('a price with few zeros is printed plainly', () => {
-  assert.equal(priceText(12_340_000_000_000_000n, 18), '0.01234');
-  assert.equal(priceText(1_200_000_000_000_000n, 18), '0.0012');
+  assert.deepEqual(priceParts(12_340_000_000_000_000n, 18), PLAIN('0.01234'));
+  assert.deepEqual(priceParts(1_200_000_000_000_000n, 18), PLAIN('0.0012'));
 });
 
 test('prices at or above one are grouped, not folded', () => {
-  assert.equal(priceText(1234n * E18 + 5n * 10n ** 17n, 18), '1,234.5');
-  assert.equal(priceText(2n * E18, 18), '2');
+  assert.deepEqual(priceParts(1234n * E18 + 5n * 10n ** 17n, 18), PLAIN('1,234.5'));
+  assert.deepEqual(priceParts(2n * E18, 18), PLAIN('2'));
 });
 
 test('works at six decimals, as a USDC-priced launch needs', () => {
-  assert.equal(priceText(3n, 6), '0.0₅3');
-  assert.equal(priceText(300n, 6), '0.0003');
-  assert.equal(priceText(1n, 9), '0.0₈1');
+  assert.deepEqual(priceParts(3n, 6), { lead: '0.0', zeros: 5, digits: '3' });
+  assert.deepEqual(priceParts(300n, 6), PLAIN('0.0003'));
+  assert.deepEqual(priceParts(1n, 9), { lead: '0.0', zeros: 8, digits: '1' });
 });
 
 test('zero and negatives are zero, never a minus sign or NaN', () => {
-  assert.equal(priceText(0n, 18), '0');
-  assert.equal(priceText(-5n, 18), '0');
+  assert.deepEqual(priceParts(0n, 18), PLAIN('0'));
+  assert.deepEqual(priceParts(-5n, 18), PLAIN('0'));
 });
 
 /*
