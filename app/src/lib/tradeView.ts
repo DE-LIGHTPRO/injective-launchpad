@@ -1,4 +1,11 @@
-import { listTrades, currentHeight, symbolOf, type Quote, type Trade } from './chain.ts';
+import {
+  listTrades,
+  currentHeight,
+  symbolOf,
+  type LaunchDetail,
+  type Quote,
+  type Trade,
+} from './chain.ts';
 import { firstBlockShare } from './creatorHolding.ts';
 import { buildSeries, changeBps, type Series } from './priceSeries.ts';
 import { isDemoMode } from './demo.ts';
@@ -49,8 +56,46 @@ export interface TradeView {
 
 export type TradeViewResult =
   | { kind: 'demo' }
-  | { kind: 'error'; message: string }
-  | { kind: 'view'; view: TradeView };
+  | { kind: 'error'; message: string; tradedOnChain: boolean }
+  | { kind: 'view'; view: TradeView; tradedOnChain: boolean };
+
+/**
+ * Whether the CURVE says this launch has ever traded, which the tx search cannot.
+ *
+ * THE TRADE SURFACES WERE ASKING ONE SOURCE AND GIVING ONE ANSWER. Trade history
+ * comes from the chain's own transaction search, and the node that answers keeps a
+ * window of recent blocks: a launch older than that window gets a 500, which the page
+ * renders as "this says nothing about whether the launch has traded", and an empty
+ * result renders as "nothing yet". Both are read off the search alone while the page
+ * already holds the contract's state from a query that succeeded.
+ *
+ * Measured against the live testnet on 17 Oct 2026: all four launches on the factory
+ * returned `height N is not available, lowest height is M`, including one with
+ * 495,558 tokens sold and one graduated with the whole 800,000,000 curve supply sold.
+ * So the chart disabled its Market tab with the tooltip "No trades yet" and the trade
+ * card declined to say either way, about two launches whose own state settles it.
+ *
+ * MONOTONIC EVIDENCE ONLY, which is the whole difficulty. `tokensSold` and
+ * `injCollected` both go back DOWN on a sell, so a buyer who sold out completely
+ * returns them to zero; `graduated` and the lifetime fee counters never reverse, and
+ * a fee accrues on the first buy. `owed + paid` is therefore the durable half, and it
+ * is why this takes the detail rather than just the curve state.
+ *
+ * It returns false rather than null for the all-zero case. The one way that is wrong
+ * is a curve deployed before the `*_paid` counters existed whose fees were then fully
+ * paid out, which `getLaunchDetail` reads as zero and cannot distinguish from absent.
+ * The mainnet factory deploys counted curves, so on mainnet all-zero means untraded.
+ */
+export function hasEverTraded(
+  d: Pick<
+    LaunchDetail,
+    'state' | 'platformOwed' | 'creatorOwed' | 'platformPaid' | 'creatorPaid'
+  >,
+): boolean {
+  if (d.state.graduated) return true;
+  if (d.state.tokensSold > 0n || d.state.injCollected > 0n) return true;
+  return d.platformOwed + d.creatorOwed + d.platformPaid + d.creatorPaid > 0n;
+}
 
 /**
  * How many trades one page load reads. Bounds the chart, the 24h sum and the list.
@@ -71,6 +116,7 @@ export async function loadTradeView({
   denom,
   quote,
   totalSupply,
+  tradedOnChain,
 }: {
   curve: string;
   denom: string;
@@ -82,6 +128,12 @@ export async function loadTradeView({
   quote: Quote;
   /** Base units as a string, for the opening-concentration figure. */
   totalSupply?: string;
+  /**
+   * `hasEverTraded(detail)`, from the contract state the caller already read. Carried
+   * on the result so the chart and the trade list reach the same verdict from one
+   * resolver instead of each deriving it from whatever it happens to hold.
+   */
+  tradedOnChain: boolean;
 }): Promise<TradeViewResult> {
   if (isDemoMode()) return { kind: 'demo' };
 
@@ -89,7 +141,7 @@ export async function loadTradeView({
   try {
     trades = await listTrades(curve, TRADE_LIMIT);
   } catch (e) {
-    return { kind: 'error', message: (e as Error).message };
+    return { kind: 'error', message: (e as Error).message, tradedOnChain };
   }
 
   const series = buildSeries(trades, quote.decimals);
@@ -103,6 +155,7 @@ export async function loadTradeView({
 
   return {
     kind: 'view',
+    tradedOnChain,
     view: {
       trades,
       series,

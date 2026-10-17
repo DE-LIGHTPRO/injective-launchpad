@@ -27,7 +27,7 @@ import { PriceChart } from '@/components/PriceChart';
 import { DemoBanner } from '@/components/DemoBanner';
 import { TradePanel } from '@/components/TradePanel';
 import { Trades } from '@/components/Trades';
-import { loadTradeView } from '@/lib/tradeView';
+import { hasEverTraded, loadTradeView } from '@/lib/tradeView';
 import { EMPTY_SERIES } from '@/lib/priceSeries';
 
 export const dynamic = 'force-dynamic';
@@ -255,11 +255,18 @@ export default async function LaunchPage({ params }: { params: Promise<{ slug: s
    * list are the same data asked two ways; fetching it in each would be two tx
    * searches for one curve on one render.
    */
+  /*
+   * Resolved here, once, from the state read above, and handed to both surfaces. The
+   * tx search cannot answer "has this ever traded" when the node that holds those
+   * blocks has pruned them; the curve can, and it costs no request.
+   */
+  const tradedOnChain = hasEverTraded(detail);
   const tradeView = await loadTradeView({
     curve: launch.curve,
     denom: launch.denom,
     quote,
     totalSupply: totalSupply.toString(),
+    tradedOnChain,
   });
 
   const ruleCopy = describeRules(
@@ -425,6 +432,7 @@ export default async function LaunchPage({ params }: { params: Promise<{ slug: s
               quoteLabel={quote.label}
               quoteDecimals={quote.decimals}
               sym={symbol}
+              tradedOnChain={tradedOnChain}
               /* Whole tokens, which turns a fill price into a market cap. */
               totalSupplyTokens={Number(totalSupply / 10n ** 18n)}
             />

@@ -16,6 +16,11 @@ import { fillPrice } from '@/lib/priceSeries';
  * No trades yet is the normal state of a new launch. An unreachable node is not
  * evidence about trading. And demo mode has no chain to read at all, which is
  * said rather than shown as an empty list.
+ *
+ * Two of those three then split on `tradedOnChain`, the curve's own answer to "has
+ * this ever traded", which the transaction search cannot give. Pruned history looks
+ * identical to an untraded launch from here, so without it a graduated launch reads
+ * as one nobody has bought.
  */
 export function Trades({ result, quote }: { result: TradeViewResult; quote: Quote }) {
   if (result.kind === 'demo') {
@@ -31,12 +36,37 @@ export function Trades({ result, quote }: { result: TradeViewResult; quote: Quot
     );
   }
 
-  if (result.kind === 'error') {
+  /*
+   * A FAILED READ IS NOT EVIDENCE, BUT THE CURVE IS, and it is already on the page.
+   *
+   * This branch used to end in "This says nothing about whether the launch has
+   * traded", which was honest about the tx search and weaker than what the render
+   * holds: `tradedOnChain` comes from the contract's own state, read by a query that
+   * succeeded. So when the curve says nothing has ever been sold, the answer is the
+   * untraded state below rather than an error, whatever the search did; and when it
+   * says the launch HAS traded, say that instead of declining to.
+   */
+  if (result.kind === 'error' && result.tradedOnChain) {
     return (
       <div className="card">
         <h2>Trades</h2>
         <p className="note danger-text">{result.message}</p>
-        <p className="note">This says nothing about whether the launch has traded.</p>
+        <p className="note">
+          The curve&rsquo;s own state says this launch has traded. What could not be read is
+          the record of those trades, not whether they happened.
+        </p>
+      </div>
+    );
+  }
+
+  if (result.kind === 'error') {
+    return (
+      <div className="card">
+        <h2>Trades</h2>
+        <p className="note">
+          Nothing yet. The curve reports nothing sold, so there is no history missing:
+          the first buy will appear here within a block.
+        </p>
       </div>
     );
   }
@@ -118,9 +148,17 @@ export function Trades({ result, quote }: { result: TradeViewResult; quote: Quot
           on the line above.
         </p>
       )}
+      {/*
+          An empty result and an untraded launch are different things, and the search
+          cannot separate them: the node indexes a window of recent blocks, so a
+          launch older than that window can answer 200 with nothing in it. The curve
+          settles which sentence this is.
+        */}
       {trades.length === 0 && (
         <p className="note">
-          Nothing yet. The first buy will appear here within a block.
+          {result.tradedOnChain
+            ? 'The curve reports trades that this search did not return, so the record of them is older than the window the answering node keeps.'
+            : 'Nothing yet. The first buy will appear here within a block.'}
         </p>
       )}
       {trades.length > 0 && (

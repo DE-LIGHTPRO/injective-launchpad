@@ -48,6 +48,7 @@ export function PriceChart({
   sym,
   change,
   totalSupplyTokens,
+  tradedOnChain,
 }: {
   series: Series;
   config: CurveConfig;
@@ -59,6 +60,13 @@ export function PriceChart({
   change: number | null;
   /** Whole tokens in existence, which turns a fill price into a market cap. */
   totalSupplyTokens: number;
+  /**
+   * `hasEverTraded(detail)`. An empty series means no history was READ, which is not
+   * the same as nothing having happened, and this chart cannot tell the two apart on
+   * its own. Resolved once by the page and passed in so that this and the trade list
+   * cannot disagree about it.
+   */
+  tradedOnChain: boolean;
 }) {
   const hasTrades = series.points.some((p) => p.time > 0);
   const [view, setView] = useState<'price' | 'curve'>(hasTrades ? 'price' : 'curve');
@@ -72,8 +80,14 @@ export function PriceChart({
           {/*
               Disabled rather than hidden when there is nothing to plot. Hiding it
               would leave a reader wondering whether this launchpad has a price chart
-              at all; disabled with a title says the launch has not traded yet, which
-              is the actual answer.
+              at all; disabled with a title says why.
+
+              AND THE TITLE SAID THE WRONG WHY. It read "No trades yet" whenever the
+              series was empty, which conflates a launch nobody has bought with one
+              whose history the answering node has pruned. On the live testnet that was
+              every launch there, including a graduated one with the whole curve supply
+              sold. An empty series is an absence of DATA; `tradedOnChain` is the
+              absence of TRADES, and only the second one is this sentence.
             */}
           <button
             role="tab"
@@ -81,7 +95,13 @@ export function PriceChart({
             aria-selected={view === 'price'}
             className={`chart-tab ${view === 'price' ? 'on' : ''}`}
             disabled={!hasTrades}
-            title={hasTrades ? undefined : 'No trades yet'}
+            title={
+              hasTrades
+                ? undefined
+                : tradedOnChain
+                  ? 'No fill history could be read for this launch'
+                  : 'No trades yet'
+            }
             onClick={() => setView('price')}
           >
             Market
@@ -106,6 +126,7 @@ export function PriceChart({
           sym={sym}
           change={change}
           totalSupplyTokens={totalSupplyTokens}
+          tradedOnChain={tradedOnChain}
           labelledBy={titleId}
         />
       ) : (
@@ -169,6 +190,7 @@ function Candles({
   sym,
   change,
   totalSupplyTokens,
+  tradedOnChain,
   labelledBy,
 }: {
   series: Series;
@@ -177,6 +199,8 @@ function Candles({
   sym: string;
   change: number | null;
   totalSupplyTokens: number;
+  /** See `PriceChart`: an empty series is unread history, not an untraded launch. */
+  tradedOnChain: boolean;
   labelledBy: string;
 }) {
   /*
@@ -230,7 +254,9 @@ function Candles({
           summary={null}
         />
         <p className="note">
-          Nothing has traded yet, so there is no price history to draw.
+          {tradedOnChain
+            ? 'This launch has traded, but no fill history could be read for it. The node that answered keeps a window of recent blocks, so trades older than that window are not in its transaction search.'
+            : 'Nothing has traded yet, so there is no price history to draw.'}
         </p>
       </>
     );
