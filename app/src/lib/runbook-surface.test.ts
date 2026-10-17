@@ -58,8 +58,42 @@ function walk(dir: string, out: string[] = []): string[] {
   return out;
 }
 
+/**
+ * The workflows the runbook tells you to run, and the scripts they run in turn.
+ *
+ * Step 10 is `gh workflow run payout.yml`, not `node scripts/payout-keeper.mjs`, so a
+ * scan for `scripts/*.mjs` in the runbook never sees the keeper at all. It is the one
+ * script that runs unattended against real fees, which makes it the worst one to leave
+ * out of the surface guards. Derived both hops rather than listed, so a second workflow
+ * is covered by adding the step.
+ */
+function workflowsTheRunbookRuns(): Array<{ file: string; yaml: string; scripts: string[] }> {
+  return [...new Set([...RUNBOOK.matchAll(/gh workflow run ([a-z0-9-]+\.yml)/g)].map((m) => m[1]))].map(
+    (file) => {
+      const yaml = readFileSync(join(ROOT, '.github', 'workflows', file), 'utf8');
+      return {
+        file,
+        yaml,
+        scripts: [...new Set([...yaml.matchAll(/node scripts\/([a-z0-9-]+\.mjs)/g)].map((m) => m[1]))],
+      };
+    },
+  );
+}
+
 test('every script the runbook runs has its variables named in the runbook', () => {
-  const scripts = [...new Set([...RUNBOOK.matchAll(/scripts\/([a-z0-9-]+\.mjs)/g)].map((m) => m[1]))];
+  const workflows = workflowsTheRunbookRuns();
+  const viaWorkflow = workflows.flatMap((w) => w.scripts);
+  assert.ok(
+    viaWorkflow.length > 0,
+    'no script was found behind any `gh workflow run` step; the indirect half of this guard is reading nothing',
+  );
+
+  const scripts = [
+    ...new Set([
+      ...[...RUNBOOK.matchAll(/scripts\/([a-z0-9-]+\.mjs)/g)].map((m) => m[1]),
+      ...viaWorkflow,
+    ]),
+  ];
   assert.ok(
     scripts.length >= 3,
     `the runbook scan found ${scripts.length} scripts; a pattern that matches nothing makes this guard vacuous`,
@@ -75,6 +109,44 @@ test('every script the runbook runs has its variables named in the runbook', () 
     [...new Set(missing)].sort(),
     [],
     'read on the mainnet path and absent from docs/MAINNET-RUNBOOK.md',
+  );
+});
+
+test('every variable a scheduled script reads is passed in by the workflow that runs it', () => {
+  /*
+   * Named in the runbook is not the same as reaching the process, and this is the
+   * deploy.mjs command-block rule in the one place nobody is watching. A GitHub Actions
+   * step sees only what its `env:` block maps: an unmapped variable is not an error, it
+   * is simply absent, and `payout-keeper.mjs` defaults the network to testnet when it
+   * cannot read one. A fourth variable added to the keeper would be set as a repository
+   * variable by an operator following step 10, named in the runbook, passing every guard
+   * here, and still unset in the run - every fifteen minutes, against real fees.
+   *
+   * The three shell refusals in payout.yml are hand-written and cover the three that
+   * exist today; this is derived from what the script reads, so the next one is covered
+   * by writing it rather than by remembering.
+   */
+  const workflows = workflowsTheRunbookRuns();
+  assert.ok(workflows.length > 0, 'no workflow found in the runbook; this guard is vacuous');
+
+  const missing: string[] = [];
+  for (const { file, yaml, scripts } of workflows) {
+    assert.ok(scripts.length > 0, `${file} runs no script; this guard is pointed at the wrong workflow`);
+    for (const s of scripts) {
+      const read = readsOf([join(ROOT, 'scripts', s)]).names;
+      assert.ok(read.size > 0, `no variables found in scripts/${s}; the scan is looking in the wrong place`);
+      for (const v of read) {
+        if (!new RegExp(`^\\s+${v}:\\s*\\$\\{\\{`, 'm').test(yaml)) {
+          missing.push(`${v} (read by scripts/${s}, not in the env block of ${file})`);
+        }
+      }
+    }
+  }
+
+  assert.deepEqual(
+    [...new Set(missing)].sort(),
+    [],
+    'the workflow runs the script without this variable, so it is unset in every scheduled run',
   );
 });
 
