@@ -18,6 +18,7 @@
  * either way, because they do not stop being true.
  */
 import { readFileSync, existsSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -296,18 +297,38 @@ if (existsSync(envExample)) {
 }
 
 /*
- * MEASURED DRIFT, because "re-derive it" read as housekeeping. 676 was chosen at
- * INJ $7.92 on 11 Oct 2026. INJ was $9.09 five days later (CoinGecko, 16 Oct 2026,
- * one venue - the script's own two were unreachable from here), so the same
- * constant now opens a launch at $5,727 against the $5,000 it was picked for, and
- * the constant for $5,000 today is 590. Fourteen per cent in five days is the rate
- * this premise goes stale at, and nothing in the product can notice: the curve has
- * no oracle, deliberately, so the number is only ever as current as the morning
- * somebody derived it.
+ * MEASURED HERE, NOT RESTATED. This line printed a dated snapshot: 676 was chosen at
+ * INJ $7.92 on 11 Oct 2026, INJ was $9.09 five days later, so the same constant
+ * opened a launch at $5,727 against the $5,000 it was picked for and the constant
+ * for $5,000 was 590. Every figure was true and attributed, and it was still the one
+ * number in this report that is wrong on the morning it gets read: fourteen per cent
+ * of drift in five days is the rate this premise goes stale at. Section 4 below
+ * deliberately restates no pruning depth for exactly this reason, and the same
+ * argument applies here with more force, because this is the line a hurried operator
+ * would copy.
+ *
+ * DERIVED BY RUNNING THE DERIVER, so there is one implementation of the price read
+ * and one of the arithmetic. That script refuses when no venue answers or when two
+ * disagree by more than 2%, and a refusal is reported as "not from here" rather than
+ * falling back to a number. The curve has no oracle, deliberately, so the constant
+ * is only ever as current as the morning somebody derived it.
  */
+let derivedScale = null;
+try {
+  const out = execFileSync('node', [join(ROOT, 'scripts', 'derive-curve-scale.mjs'), '5000'], {
+    encoding: 'utf8',
+    timeout: 60_000,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  derivedScale = out.match(/virtual_quote_whole = (\d+)/)?.[1] ?? null;
+} catch {
+  /* No venue, or two that disagree. Either one is an answer, and it is not a number. */
+}
 hm(
   'The opening reserve must be re-derived for mainnet.',
-  'node scripts/derive-curve-scale.mjs 5000. 676 was chosen at INJ $7.92 on 11 Oct 2026; at $9.09 on 16 Oct it opens at $5,727 and the right constant is 590.',
+  derivedScale
+    ? `For a $5,000 open at INJ's price just now, INJ_QUOTE_VIRTUAL_WHOLE=${derivedScale}. Run node scripts/derive-curve-scale.mjs 5000 and read what that curve does before using it.`
+    : 'node scripts/derive-curve-scale.mjs 5000. No venue priced INJ from here, so nothing is derived: whatever is in use is a premise about the day it was chosen.',
 );
 
 const keeper = join(ROOT, 'scripts', '.env.keeper.local');
