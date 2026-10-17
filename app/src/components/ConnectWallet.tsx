@@ -279,7 +279,8 @@ export function ConnectWallet({
                  */
                 <details className="raw" open={error.expand}>
                   <summary>What the wallet said</summary>
-                  <pre>{error.detail}</pre>
+                  {/* Focusable because it scrolls: see `.raw pre:focus-visible`. */}
+                  <pre tabIndex={0}>{error.detail}</pre>
                 </details>
               )}
             </>

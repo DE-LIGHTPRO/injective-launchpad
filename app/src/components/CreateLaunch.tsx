@@ -1150,7 +1150,8 @@ export function CreateLaunch() {
 
             <details className="raw">
               <summary>The five messages, exactly as they will be sent</summary>
-              <pre>{JSON.stringify(plan.plan.messages, null, 2)}</pre>
+              {/* Focusable because it scrolls in both axes: see `.raw pre:focus-visible`. */}
+              <pre tabIndex={0}>{JSON.stringify(plan.plan.messages, null, 2)}</pre>
             </details>
 
             <label className="toggle" style={{ marginTop: 'var(--space-4)' }}>

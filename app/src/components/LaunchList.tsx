@@ -299,12 +299,19 @@ export function LaunchList({ rows }: { rows: LaunchRow[] }) {
       )}
 
       {shown.length > 0 && (
-        <div className="table-wrap">
+        <div className="table-wrap" tabIndex={0} role="region" aria-label="Launch board">
           {/*
               A table, because this is tabular data a trader scans down a column of.
               The whole row is clickable through a stretched link on the token cell,
               so the markup stays a real table for screen readers and the only
               interactive element per row is that one link.
+
+              `tabIndex={0}` and `role="region"`: this div scrolls horizontally, and a
+              scroll container that is not focusable fails WCAG 2.1.1 - the columns past
+              its right edge are reachable by gesture and by nothing else. It was
+              `tabIndex: -1` with no role and no label, measured on a 375px viewport
+              with 106px hidden. The label is what makes the extra tab stop
+              intelligible rather than a mystery stop before the first row.
             */}
           <table className="board">
             <thead>
@@ -335,7 +342,9 @@ export function LaunchList({ rows }: { rows: LaunchRow[] }) {
                             {symbolOf(r.denom)}
                           </Link>
                           <span className="tok-sub">
-                            {addressName(r.creator)}
+                            {/* Its own element so it can ellipsise on a phone without
+                                clipping the chip beside it. See `.tok-creator`. */}
+                            <span className="tok-creator">{addressName(r.creator)}</span>
                             {r.graduated ? (
                               <span className="tag tag-pool">Pool</span>
                             ) : (

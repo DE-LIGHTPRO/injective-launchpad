@@ -141,7 +141,9 @@ export function Portfolio({ rows }: { rows: LaunchRow[] }) {
         </div>
       )}
 
-      <div className="table-wrap">
+      {/* Focusable for the same reason as the launch board: a scroll container with no
+          tab stop fails WCAG 2.1.1. See the longer note in LaunchList. */}
+      <div className="table-wrap" tabIndex={0} role="region" aria-label="Your holdings">
         <table className="board">
           <thead>
             <tr>

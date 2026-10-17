@@ -1056,6 +1056,14 @@ button.ghost { background: transparent; border: 1px solid var(--line); color: va
   background: var(--surface-3); border-radius: var(--radius-sm);
   font-size: var(--text-micro); overflow-x: auto; max-height: 18rem;
 }
+/*
+ * The same WCAG 2.1.1 problem as `.table-wrap`, in the two places it matters most: this
+ * is the raw plan - the five messages exactly as they will be signed - and the wallet's
+ * own words when a connection fails. Both scroll in both axes and neither had a tab
+ * stop, so a keyboard user could open the disclosure and then read only the first
+ * screenful of what they are about to sign. The callers set `tabIndex={0}`.
+ */
+.raw pre:focus-visible { outline: 2px solid var(--accent-text); outline-offset: -2px; }
 
 .trades { list-style: none; margin: 0; padding: 0; }
 .trades li { display: grid; grid-template-columns: 3.2rem 1fr auto; gap: var(--space-3); align-items: baseline; padding: var(--space-2) 0; border-top: 1px solid var(--line); }
@@ -1988,6 +1996,17 @@ header.top .chip { font-size: 11px; letter-spacing: 0.04em; padding: 3px 8px; bo
 .board-count { margin-left: auto; font-size: var(--text-xs); color: var(--text-faint); }
 
 .table-wrap { border: 1px solid var(--line); border-radius: 12px; background: var(--surface-1); overflow-x: auto; }
+/*
+ * A scroll container has to be focusable, and this one was not.
+ *
+ * WCAG 2.1.1: content reachable only by scrolling a region must be reachable by
+ * keyboard, and `overflow-x: auto` alone gives a div no tab stop. On a 375px phone the
+ * board hid 106px past its right edge, so Market cap - the column the board is read by -
+ * was unreachable without a trackpad gesture. The callers set `tabIndex={0}` and
+ * `role="region"`; this is the focus ring that makes the stop visible, inset so the
+ * rounded border is not clipped by it.
+ */
+.table-wrap:focus-visible { outline: 2px solid var(--accent-text); outline-offset: -2px; }
 table.board { width: 100%; border-collapse: collapse; font-size: var(--text-sm); }
 table.board th {
   text-align: left; font-weight: 500; font-size: var(--text-xs); color: var(--text-faint);
@@ -2012,6 +2031,69 @@ table.board .dim { color: var(--text-faint); }
 .row-link:focus-visible::after { box-shadow: inset 0 0 0 2px var(--accent-text); border-radius: 0; }
 .tok-sub { display: inline-flex; align-items: center; gap: 8px; font-size: var(--text-xs); color: var(--text-faint); }
 .tok-sub .chip { padding: 0 6px; height: 18px; display: inline-flex; align-items: center; font-size: 10.5px; }
+.tok-creator { min-width: 0; }
+
+/*
+ * Make the four surviving columns fit a phone, rather than hiding a fifth.
+ *
+ * MEASURED, 375x812: `hide-md` drops Vol 24h and Trades and `hide-sm` drops Bonding and
+ * Age - deliberate progressive disclosure, and not enough. The four that remain totalled
+ * 447px against a 341px container, so MARKET CAP rendered as a 23px sliver with 106px
+ * past the right edge: the column the comment above calls "given the weight a board is
+ * read by". At 320px it was 161px hidden, with only `#` and Token fully visible.
+ *
+ * Dropping Market cap to `hide-sm` too was the wrong fix. It is the figure the board
+ * exists to rank by, and a phone would then show a board with no magnitude on it. The
+ * width came from desktop padding and an unbounded creator name, so both are tightened
+ * and every column keeps its data.
+ *
+ * THIS BLOCK MUST STAY BELOW THE `table.board` RULES IT OVERRIDES. It was first written
+ * up beside the other `max-width: 640px` rules, ~90 lines above `table.board td`, and
+ * the padding override silently did nothing: equal specificity, so the later rule wins
+ * and the later rule was the desktop one. The measurement said 55px saved where 106 was
+ * expected, which is the only reason it was caught - a media query that parses and does
+ * not apply looks exactly like a media query that applies.
+ */
+@media (max-width: 640px) {
+  /*
+   * 16px of horizontal cell padding is right at desktop density and is 128px of a 341px
+   * viewport across four columns. 8px keeps the columns visually separate at this size.
+   * The `#` cell sets `padding-right: 0`, so it contributes half.
+   */
+  table.board th,
+  table.board td { padding-left: 8px; padding-right: 8px; }
+
+  /*
+   * The creator name is the only unbounded string in the row. `white-space: nowrap` on
+   * the cell held `SpryTeakFinch` at full width and set the Token column to 202px.
+   *
+   * The cap goes on the NAME, not on `.tok-sub` or `.tok-text`. Capping the sub line
+   * clipped the status chip beside it - "live" rendered 14px wide out of 30 - because
+   * the name is a bare text node and `.tok-sub > :first-child` selects the chip. The
+   * name now has its own span so it can ellipsise while the chip keeps its width, and
+   * bounding the name bounds the column: a flex column is as wide as its widest child,
+   * and the token symbol, which is the row's identity, is short and stays in full.
+   */
+  .tok { gap: 8px; }
+  .tok-creator {
+    max-width: 48px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .tok-sub .chip { flex: 0 0 auto; }
+
+  /*
+   * The rank column goes, and it is the only one that can.
+   *
+   * Everything else in the row is a fact you cannot derive from the screen: the symbol,
+   * the price, the market cap. The rank is the row's position in a list that is already
+   * displayed in rank order, so hiding it removes a label and no information - which is
+   * what `hide-sm` is for and what dropping Market cap would not have been.
+   *
+   * It is carried here rather than by adding `hide-sm` in the two components, because
+   * `.c-rank` is already the class both of them put on that cell and Portfolio has no
+   * rank column to confuse. 24px: 16 of content and its 8px left pad.
+   */
+  table.board .c-rank { display: none; }
+}
 .c-progress { width: 150px; }
 .prog { display: flex; align-items: center; gap: 10px; }
 .prog-track { flex: 1; height: 4px; border-radius: 2px; background: var(--surface-3); overflow: hidden; }
