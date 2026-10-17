@@ -104,13 +104,38 @@
   --space-7: 3rem;
   --space-8: 4rem;
 
-  /* Radius. `--radius-xs` was read at two sites as `var(--radius-xs)` and never
-     declared: the fallback carried it, so the screen was right and the scale was a lie
-     by omission. 4px is in use, so it is a step. */
+  /*
+   * RADIUS. `--radius-xs` was read at two sites as `var(--radius-xs)` and never declared:
+   * the fallback carried it, so the screen was right and the scale was a lie by omission.
+   * 4px is in use, so it is a step.
+   *
+   * `--radius-lg` was 14px and is 12px, because 12px is the panel radius this interface
+   * had already chosen and the token was not told. Measured across every selector in the
+   * file that declares a radius, the system layer retargeted five panels to a `12px`
+   * literal - `.card`, `.stats`, `.table-wrap`, `.ticker`, `.metric-strip` - and left
+   * seven more reading this token at 14px. On the home page that put nine panels of
+   * IDENTICAL 1032px width and identical 1px hairline down one column alternating
+   * between the two: `.stats` 12, `.totals` 14, `.totals` 14, `.pairs-card` 14,
+   * `.table-wrap` 12, `.explorer` 14, `.steps` 14, `.chain-status` 14. Nobody chose
+   * that - it is one decision that reached under half its surface - so the token takes
+   * the value the decision had, the five literals are deleted, and the panel radius is
+   * one lever again.
+   *
+   * THE SCALE STILL DOES NOT NAME EVERY RADIUS IN USE, and the remainder is a design
+   * call rather than a defect, so it is recorded here instead of guessed at. Measured
+   * usage, after the change above: 2px x3 (`.prog-track`, its fill, `.daybar > i`),
+   * 4px x2, 6px x13, 8px x6, 10px x16, 12px x12, pill/50%. So 8px and 2px have readers
+   * and no step, and - the part worth a decision - the controls span THREE radii with no
+   * role behind the difference: a 6px `.top-nav a` sits beside an 8px `.btn` in the same
+   * header, and `.search input` is 8px while `input.amount` is 10px. Two text inputs
+   * 2px apart is drift of the kind this scale exists to stop. Collapsing controls onto
+   * one step would move every control in the app, which is a visual decision and not a
+   * cleanup, so it is left alone and written down.
+   */
   --radius-xs: 4px;
   --radius-sm: 6px;
   --radius-md: 10px;
-  --radius-lg: 14px;
+  --radius-lg: 12px;
   --radius-pill: 999px;
 
   --ring: 0 0 0 2px var(--bg), 0 0 0 4px rgba(115, 162, 255, 0.7);
@@ -1870,7 +1895,10 @@ h3 { font-weight: 600; }
 .note { color: var(--text-faint); font-size: var(--text-sm); line-height: 1.55; }
 a.text-link, .note a, .sub a { color: var(--accent-text); }
 
-.card { border-radius: 12px; padding: var(--space-5); }
+/* The `border-radius: 12px` that was here is now `--radius-lg` itself, so this rule has
+   no opinion on the radius and `.card`'s own declaration above carries it. Four more
+   panels restated the same literal; see the radius block for the measurement. */
+.card { padding: var(--space-5); }
 a.card:hover { background: var(--surface-2); border-color: var(--line-strong); transform: none; box-shadow: none; }
 
 /* ---------------------------------------------------------------- header -- */
@@ -1895,12 +1923,12 @@ header.top .brand { gap: 10px; margin-right: var(--space-4); }
   font-weight: 500;
   color: var(--text-dim);
   padding: 6px 10px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
 }
 .top-nav a:hover { color: var(--text); background: var(--surface-2); }
 /* The `11px` here was `--text-micro` written as a literal, so it restated the base
    chip's size and read as an override that changes something. */
-header.top .chip { font-size: var(--text-micro); letter-spacing: 0.04em; padding: 3px 8px; border-radius: 6px; text-transform: none; }
+header.top .chip { font-size: var(--text-micro); letter-spacing: 0.04em; padding: 3px 8px; border-radius: var(--radius-sm); text-transform: none; }
 
 .btn, .nav-create {
   display: inline-flex;
@@ -1986,7 +2014,7 @@ header.top .chip { font-size: var(--text-micro); letter-spacing: 0.04em; padding
 
 .skip-link {
   position: absolute; left: var(--space-4); top: -48px; z-index: 20;
-  background: var(--surface-3); color: var(--text); padding: 8px 12px; border-radius: 6px;
+  background: var(--surface-3); color: var(--text); padding: 8px 12px; border-radius: var(--radius-sm);
 }
 .skip-link:focus { top: 12px; }
 
@@ -2012,7 +2040,7 @@ header.top .chip { font-size: var(--text-micro); letter-spacing: 0.04em; padding
   grid-template-columns: repeat(4, minmax(0, 1fr));
   margin-top: var(--space-6);
   border: 1px solid var(--line);
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   background: var(--surface-1);
 }
 .stat { padding: 14px 18px; }
@@ -2058,7 +2086,7 @@ header.top .chip { font-size: var(--text-micro); letter-spacing: 0.04em; padding
   font-variant-numeric: tabular-nums;
 }
 .board-tab.is-active .board-tab-count { color: var(--accent-text); }
-.board-tab:focus-visible { outline: none; box-shadow: var(--ring); border-radius: 6px; }
+.board-tab:focus-visible { outline: none; box-shadow: var(--ring); border-radius: var(--radius-sm); }
 .board-bar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin-bottom: var(--space-3); }
 .search { position: relative; flex: 1 1 260px; display: flex; align-items: center; }
 .search svg { position: absolute; left: 11px; color: var(--text-faint); pointer-events: none; }
@@ -2075,7 +2103,7 @@ header.top .chip { font-size: var(--text-micro); letter-spacing: 0.04em; padding
 .board-bar .toggle { font-size: var(--text-sm); color: var(--text-dim); margin: 0 var(--space-2); }
 .board-count { margin-left: auto; font-size: var(--text-xs); color: var(--text-faint); }
 
-.table-wrap { border: 1px solid var(--line); border-radius: 12px; background: var(--surface-1); overflow-x: auto; }
+.table-wrap { border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface-1); overflow-x: auto; }
 /*
  * A scroll container has to be focusable, and this one was not.
  *
@@ -2205,7 +2233,7 @@ table.board .dim { color: var(--text-faint); }
 .hill-crown { color: var(--gold); letter-spacing: 0.06em; font-weight: 600; }
 
 /* ------------------------------------------------------------ ticker -- */
-.ticker { border-radius: 12px; background: var(--surface-1); }
+.ticker { background: var(--surface-1); }
 
 /* ------------------------------------------------------- trust, share -- */
 .trust { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: var(--space-3); }
@@ -2230,7 +2258,7 @@ table.board .dim { color: var(--text-faint); }
 .footer-nav a { font-size: var(--text-sm); color: var(--text-dim); }
 .footer-nav a:hover { color: var(--text); }
 
-.demo-banner { background: rgba(227, 162, 59, 0.06); border-color: rgba(227, 162, 59, 0.25); border-radius: 10px; }
+.demo-banner { background: rgba(227, 162, 59, 0.06); border-color: rgba(227, 162, 59, 0.25); border-radius: var(--radius-md); }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition: none !important; animation: none !important; scroll-behavior: auto !important; }
@@ -2268,7 +2296,7 @@ table.board .dim { color: var(--text-faint); }
 .ticker { margin: 0 0 var(--space-7); }
 .ticker li { padding-top: 9px; padding-bottom: 9px; font-size: var(--text-sm); }
 .hill { margin-bottom: var(--space-2); }
-.metric-strip { border-radius: 12px; background: var(--surface-1); }
+.metric-strip { background: var(--surface-1); }
 .metric-strip > div { background: transparent; }
 
 /* Launch page: chart and history left, the trade panel pinned right like an exchange. */

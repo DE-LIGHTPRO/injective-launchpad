@@ -229,6 +229,68 @@ test('every design token a rule reads has a declaration behind it', () => {
   );
 });
 
+test('a radius that has a step on the scale is written as that step', () => {
+  /*
+   * The scale was documented and unenforced, and it drifted exactly the way rule 25
+   * describes for colour: `--radius-lg` was 14px while FIVE panels restated a `12px`
+   * literal over it, so the token named a value most of its own surface had stopped
+   * using. On the home page that left nine panels of identical 1032px width and
+   * identical hairline alternating 12 and 14 down one column - one decision that reached
+   * under half of what it applied to, and invisible to review because each rule is
+   * locally plausible.
+   *
+   * This asserts the cheap half, which is the half that drifts: a literal that EQUALS a
+   * declared step is always a mistake, because it restates a value the token already
+   * owns and silently stops tracking it. Compared in pixels, since the scale is written
+   * in px and the spacing scale next door is written in rem - a string compare there
+   * reports every literal off-scale and proves nothing.
+   *
+   * Values with no step (8px on controls, 2px on the progress bars) are NOT failures
+   * here. Naming them means either renaming two tokens across thirty call sites or
+   * collapsing three control radii into one, and both are design decisions; the radius
+   * block carries the measurement so the next person decides with it rather than
+   * guessing. A guard that failed on them would be a guard someone deletes.
+   */
+  const px = (v: string): number | null => {
+    const m = /^(-?[\d.]+)(px|rem)$/.exec(v.trim());
+    if (!m) return null;
+    return m[2] === 'rem' ? parseFloat(m[1]) * 16 : parseFloat(m[1]);
+  };
+
+  const steps = new Map<number, string>();
+  for (const m of cssCode.matchAll(/^\s*(--radius-[\w-]+):\s*([^;]+);/gm)) {
+    const p = px(m[2]);
+    if (p !== null) steps.set(p, m[1]);
+  }
+  // A broken regex here would pass this test by finding no steps to compare against.
+  assert.ok(steps.size >= 4, `only ${steps.size} radius steps found: the scan is not measuring`);
+
+  const lines = css
+    .replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' '))
+    .split('\n');
+  const restated: string[] = [];
+  let seen = 0;
+  for (let i = 0; i < lines.length; i += 1) {
+    for (const m of lines[i].matchAll(/\bborder(?:-[a-z]+)*-radius\s*:\s*([^;}]+)/g)) {
+      for (const token of m[1].trim().split(/\s+/)) {
+        if (token.includes('(')) continue;
+        const p = px(token);
+        if (p === null || p === 0) continue;
+        seen += 1;
+        const step = steps.get(Math.abs(p));
+        if (step) restated.push(`${token} is ${step} (line ${i + 1}: ${lines[i].trim().slice(0, 72)})`);
+      }
+    }
+  }
+  assert.ok(seen > 0, 'no literal radii found at all: the scan is not measuring');
+
+  assert.deepEqual(
+    restated,
+    [],
+    'these radii equal a declared step and are written as a literal, so the token no longer controls them',
+  );
+});
+
 test('a state modifier outranks the base colour it exists to override', () => {
   /*
    * The half that a "does this class exist" check cannot see.
