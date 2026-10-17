@@ -234,6 +234,18 @@ prefix publishes a value into the browser bundle, where a write-capable token ca
 rotated without a rebuild. `runbook-surface.test.ts` fails if this table and the code
 disagree in either direction.
 
+**`NEXT_PUBLIC_NETWORK` and `NEXT_PUBLIC_LCD_URL` are two rows above, set separately,
+and they must name the same chain.** The first picks the chain id every signature
+commits to, the denom creation fee and the explorer; the second overrides the endpoint
+alone, and that endpoint serves the board, the balances, the account sequence a
+transaction is signed against and the broadcast. Each is locally correct, so nothing
+errors where the error is: the board fills with the other chain's launches and reads as
+the market, the two chains' denom fees differ by 10x, and the first thing that fails is
+the broadcast, after the user has signed. Step 10 says the same for the keeper, which
+has asked the endpoint which chain it is since it was written; the app now asks too and
+puts a red banner on every page when the answer disagrees, but that is a check a visitor
+sees, not one that stops the deployment. Getting both right here is the cheap place.
+
 ### 9. Verify what is actually live
 
 ```bash

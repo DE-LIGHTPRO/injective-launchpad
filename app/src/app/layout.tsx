@@ -7,6 +7,7 @@ import { SITE_URL, BRAND_NAME, BRAND_TAGLINE } from '@/lib/brand';
 import { NETWORK } from '@/lib/config';
 import { isDemoMode } from '@/lib/demo';
 import { ConnectWallet } from '@/components/ConnectWallet';
+import { ChainMismatchBanner } from '@/components/ChainMismatchBanner';
 import './globals.css';
 
 /*
@@ -99,6 +100,14 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           </div>
         </header>
         <main id="main" className="wrap">
+          {/*
+              Here rather than per page, and above the content rather than in the header,
+              because the claim it makes is about everything below it: when the endpoint
+              being read is not the chain being signed for, every launch, balance and
+              price on the page is the other chain's. A page added later would not know
+              to ask. It renders nothing unless the probe came back and disagreed.
+            */}
+          <ChainMismatchBanner />
           {children}
         </main>
         <footer className="site-footer">

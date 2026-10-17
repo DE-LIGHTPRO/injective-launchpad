@@ -353,6 +353,43 @@ h3 { font-size: var(--text-base); font-weight: 600; }
 .demo-banner span { color: var(--text-dim); }
 
 /*
+ * The same shape as the demo banner, in `--danger` rather than `--warn`, and the
+ * difference in colour is the difference in claim. A demo says these numbers are not
+ * real; this says these numbers are real and belong to a chain other than the one you
+ * are about to sign for. It is the only banner here that can appear on a production
+ * deployment that an operator believes is correctly configured.
+ */
+.chain-mismatch {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  background: linear-gradient(90deg, rgba(246, 70, 93, 0.14), transparent);
+  border: 1px solid rgba(246, 70, 93, 0.35);
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-4);
+  margin-bottom: var(--space-5);
+  font-size: var(--text-sm);
+  color: var(--danger);
+}
+/*
+ * `flex: 0 0 auto` because a flex item shrinks to fit by default, and without it the
+ * two-word label wrapped to two lines with 1032px of room beside it. Below 640px the
+ * label stacks above the sentence instead: side by side it left the sentence 194px,
+ * and this is the one banner nobody can afford to skim.
+ */
+.chain-mismatch strong { color: var(--danger); flex: 0 0 auto; }
+.chain-mismatch span { color: var(--text-dim); }
+.chain-mismatch code { color: var(--text); }
+
+@media (max-width: 640px) {
+  .chain-mismatch {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-2);
+  }
+}
+
+/*
  * A board that is missing launches it knows about. Same weight as the demo banner on
  * purpose: both say "what you are looking at is not the thing you think it is", and
  * styling this one down would make an incomplete board read as a complete one.
