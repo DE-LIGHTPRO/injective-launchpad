@@ -4,8 +4,19 @@
  * WHY A MIRROR AT ALL. These numbers have to be in the browser: a form that lets a
  * creator fill in a supply the contract will refuse wastes a signature and a fee, and
  * tells them nothing until the chain rejects it. But a mirror is a second copy of a
- * fact, which is how a UI and a contract come to disagree quietly, so
- * `launch-limits.test.ts` reads the Rust source and fails if either value drifts.
+ * fact, which is how a UI and a contract come to disagree quietly, so every value below
+ * that says "mirrors X" is read out of the Rust and compared by a test.
+ *
+ * WHERE, because this docblock named `launch-limits.test.ts` and no such file has ever
+ * existed - a pointer at nothing, which reads exactly like a pointer at a guard, and six
+ * of the ten mirrored figures turned out to be pinned nowhere at all:
+ *
+ *   - `contract-mirror.test.ts`     the curve shape, the graduation ratio, the opening
+ *                                   reserve, both string ceilings, and `fixedCurveFor`'s
+ *                                   scaling
+ *   - `execution-wiring.test.ts`    `CREATOR_FEE_SHARE_BPS`, `FIXED_TOTAL_SUPPLY`,
+ *                                   `MAX_INITIAL_BUY_BPS`
+ *   - `fee-ceiling-claims.test.ts`  `MAX_FEE_BPS`, against the factory and the math crate
  *
  * The contract is the authority in both cases. Nothing here relaxes anything: the form
  * refuses early and the factory refuses again.
@@ -43,19 +54,14 @@ export const CREATOR_FEE_SHARE_BPS = 7_000;
 /** The platform's share, derived rather than written twice. */
 export const PLATFORM_FEE_SHARE_BPS = 10_000 - CREATOR_FEE_SHARE_BPS;
 
-/**
- * How a trading fee divides.
- *
- * Integer arithmetic, rounding the creator's side DOWN, which is what `split_fee` does
- * on chain: the odd base unit lands with the platform rather than being conjured. A
- * float here would show a creator a figure a base unit off what they actually get,
- * which is the kind of small disagreement that reads as the panel being wrong about
- * everything.
+/*
+ * `splitFee` LIVED HERE AND NOTHING CALLED IT. It mirrored the contract's `split_fee`
+ * carefully, down to rounding the creator's side so the odd base unit lands with the
+ * platform - and the two figures it computed are read straight off the chain as
+ * `creatorOwed` and `platformOwed`, which is the only honest source for money somebody
+ * is about to claim. A client that re-derives an owed amount can disagree with the
+ * balance that actually pays out.
  */
-export function splitFee(fee: bigint): { creator: bigint; platform: bigint } {
-  const creator = (fee * BigInt(CREATOR_FEE_SHARE_BPS)) / 10_000n;
-  return { creator, platform: fee - creator };
-}
 
 /**
  * The most of the CURVE's supply a creator may take in their own opening buy, in bps.
@@ -189,19 +195,31 @@ export const LP_RESERVE_TOKENS = 200_000_000;
  */
 export const OPENING_RESERVE_QUOTE = 676;
 
-/** 676 * 17/6, floored. Derived rather than declared, so the two cannot disagree. */
-export const GRADUATION_TARGET_QUOTE = Number(graduationWholeFor(OPENING_RESERVE_QUOTE));
+/*
+ * `GRADUATION_TARGET_QUOTE` LIVED HERE, and its only reference anywhere was a test
+ * forbidding the create form from printing it. An INJ-only figure of exactly the kind
+ * that produced the `1915 E2EUSD` defect `openingReserveWholeFor` records, kept around
+ * for nothing but to be refused. Callers derive the target from the quote's own reserve
+ * through `graduationWholeFor(openingReserveWholeFor(quote))`.
+ */
 
 /**
  * The market cap a launch opens at, in whole units of its quote.
  *
  * `virtualQuote / virtualTokens * totalSupply`, which is the same arithmetic the
- * contract's own test asserts. Exposed because it is the figure the policy was chosen
- * FOR, and a reader of the create form should see it rather than the reserve that
- * produces it.
+ * contract's own test asserts. It is the figure the whole reserve policy was chosen FOR,
+ * so the create form states it rather than leaving a creator to infer it from a virtual
+ * reserve.
+ *
+ * TAKES THE RESERVE, never assuming the default. Passing the INJ constant while showing
+ * the selected pair's ticker is the one defect this file has already had.
+ *
+ * The divisor was the literal `1_073_000_000`, a third copy of `virtualTokens` written in
+ * whole tokens. Derived now, so a curve reshaping cannot leave the market cap behind.
  */
 export function openingMarketCap(virtualWhole: number = OPENING_RESERVE_QUOTE): number {
-  return (virtualWhole * Number(FIXED_TOTAL_SUPPLY_TOKENS)) / 1_073_000_000;
+  const virtualTokensWhole = Number(FIXED_CURVE.virtualTokens / 10n ** 18n);
+  return (virtualWhole * Number(FIXED_TOTAL_SUPPLY_TOKENS)) / virtualTokensWhole;
 }
 
 /**

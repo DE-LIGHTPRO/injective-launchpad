@@ -239,16 +239,35 @@ test('the create form states the reserve the chosen pair actually opens at', () 
    * itself and the figure that was right was the one not badged fixed.
    */
   const src = stripComments(readFileSync(join(SRC, 'components/CreateLaunch.tsx'), 'utf8'));
-  for (const constant of ['OPENING_RESERVE_QUOTE', 'GRADUATION_TARGET_QUOTE']) {
-    assert.ok(
-      !src.includes(constant),
-      `the create form prints ${constant}, which is the INJ default, beside the selected pair\u2019s ticker`,
-    );
-  }
+  /*
+   * `GRADUATION_TARGET_QUOTE` was the second name checked here and no longer exists. This
+   * loop refusing it was its ONLY reference in the repo, so it was deleted rather than
+   * kept as a constant whose documented purpose is not to be used; TypeScript now refuses
+   * what this line used to.
+   */
+  assert.ok(
+    !src.includes('OPENING_RESERVE_QUOTE'),
+    'the create form prints OPENING_RESERVE_QUOTE, which is the INJ default, beside the ' +
+      'selected pair\u2019s ticker',
+  );
   assert.match(
     src,
     /openingReserveWholeFor\(/,
     'the create form is not resolving the opening reserve from the chosen quote',
+  );
+
+  /*
+   * And the market cap the reserve exists to set, which has the SAME two failure modes:
+   * derivable and shown nowhere (it was, for months, with its own passing tests), or
+   * shown from the INJ default beside the selected ticker. So this requires the call and
+   * requires the resolved reserve to be the argument - `openingMarketCap()` bare would
+   * typecheck, pass a test of the function, and print 630 under E2EUSD.
+   */
+  assert.match(
+    src,
+    /openingMarketCap\(openingReserve\)/,
+    'the create form either no longer states the opening market cap, or is deriving it ' +
+      'from something other than the chosen pair\u2019s resolved reserve',
   );
 });
 

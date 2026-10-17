@@ -11,14 +11,30 @@
  *   - fees rounded UP, off the input
  *   - partial fill on the buy that empties the curve, with a refund
  *
- * `curve.test.mjs` checks the same properties the Rust tests do. If you change
+ * `curve.test.ts` checks the same properties the Rust tests do. If you change
  * one side, change the other.
  */
 
+import { MAX_FEE_BPS as MAX_FEE_BPS_FORM } from './launchLimits.ts';
+
 export const BPS_DENOM = 10_000n;
-export const MAX_FEE_BPS = 1_000n;
-/** Max u128, the contract's ceiling. Quotes above this cannot be executed. */
-export const U128_MAX = (1n << 128n) - 1n;
+
+/**
+ * The same cap the form enforces, in the bigint this module works in.
+ *
+ * DERIVED, not written again. This was `1_000n` here and `1_000` in `launchLimits.ts`,
+ * each a mirror of a different Rust file - the factory and `launchpad-math`, which
+ * `fee-ceiling-claims.test.ts` already proves agree. But that test imports the
+ * `launchLimits` copy, so this third one was pinned by nothing, in the module that
+ * actually refuses a trade. Its own docblock is where the rule is written down: pinning a
+ * claim to a constant is worthless while there are two constants to drift apart.
+ *
+ * `U128_MAX` was declared beside it and nothing read it. The contract's ceiling is real,
+ * but it is enforced on chain and every quote here is bounded by the curve's reserves
+ * long before a u128 is in reach, so the constant only ever documented a limit this
+ * module does not check.
+ */
+export const MAX_FEE_BPS = BigInt(MAX_FEE_BPS_FORM);
 
 export interface CurveConfig {
   virtualInj: bigint;
@@ -370,11 +386,6 @@ export function poolQuoteSell(pool: PoolReserves, feeBps: bigint, tokensIn: bigi
   return { fee, injOut };
 }
 
-export function poolSpotPrice(pool: PoolReserves, oneToken: bigint): bigint {
-  if (pool.tokens <= 0n) throw new CurveError('the pool has no liquidity');
-  return (pool.quote * oneToken) / pool.tokens;
-}
-
 const toBpsNumber = (b: bigint) =>
   b > BigInt(Number.MAX_SAFE_INTEGER) ? Number.MAX_SAFE_INTEGER : Number(b);
 
@@ -409,21 +420,13 @@ export function spotPrice(cfg: CurveConfig, st: CurveState, oneToken: bigint): b
   return (injRes * oneToken) / tokRes;
 }
 
-/**
- * The price a launch trades at right now: the pool's once graduated, else the curve's.
- *
- * One function so no page can quote a graduated launch off its exhausted curve, which
- * would read the curve's terminal state rather than the market that replaced it.
+/*
+ * `launchSpotPrice` LIVED HERE AND NOTHING CALLED IT, and `poolSpotPrice` above went with
+ * it, having had no other caller. Its docblock claimed to be the one function that stops
+ * a page quoting a graduated launch off its exhausted curve - a real guarantee, supplied
+ * by `pricingReserves` below, which every live caller goes through. Two functions making
+ * the same promise is one promise and one decoy.
  */
-export function launchSpotPrice(
-  cfg: CurveConfig,
-  st: CurveState,
-  pool: PoolReserves | null | undefined,
-  oneToken: bigint,
-): bigint {
-  if (pool && pool.quote > 0n && pool.tokens > 0n) return poolSpotPrice(pool, oneToken);
-  return spotPrice(cfg, st, oneToken);
-}
 
 /** The reserves a launch currently prices against: the pool's once graduated, else the curve's. */
 function pricingReserves(

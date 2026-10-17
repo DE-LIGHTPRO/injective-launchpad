@@ -38,6 +38,7 @@ import {
   LP_RESERVE_TOKENS,
   openingReserveWholeFor,
   graduationWholeFor,
+  openingMarketCap,
 } from '@/lib/launchLimits';
 import { useConnectedAccount } from '@/lib/walletStore';
 import { profileForChain, profileFieldError, imageSrc } from '@/lib/tokenProfile';
@@ -723,8 +724,23 @@ export function CreateLaunch() {
               </span>
               <span className="chip chip-sm muted">fixed</span>
             </div>
+            {/*
+             * THE RESERVE IS THE INPUT; THE MARKET CAP IS WHAT IT MEANS. A virtual
+             * reserve is an implementation detail of the curve, and a creator reading
+             * "676 INJ" beside the word "fixed" has no way to turn it into the thing
+             * they actually want to know. `openingMarketCap` is the figure the reserve
+             * policy was chosen FOR, and it was derivable and shown nowhere.
+             *
+             * Passed the RESOLVED reserve, never the INJ default, which is the defect
+             * these two rows already had.
+             */}
             <p className="note">
-              Every launch opens at the same price, so being early on one is worth what
+              That opens this launch at a market cap of{' '}
+              <span className="mono">
+                {Math.round(openingMarketCap(openingReserve)).toLocaleString('en-US')}{' '}
+                {quoteLabel}
+              </span>
+              . Every launch opens at the same price, so being early on one is worth what
               it is worth on any other.
             </p>
           </div>
