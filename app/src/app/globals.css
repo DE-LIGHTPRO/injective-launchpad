@@ -950,23 +950,26 @@ button:disabled { color: var(--text-faint); cursor: not-allowed; }
   position: absolute; top: calc(100% + var(--space-2)); right: 0; z-index: 20;
   min-width: 15rem; max-width: min(22rem, calc(100vw - 2rem));
   /*
-   * A popover opens over content rather than over the ambient wash, so its fill
-   * is darker than a card's: a white-alpha fill here would let the text behind
-   * it show through the menu text.
-   */
-  /*
-   * Raised from 0.78 to 0.94 after reading the page through it.
+   * OPAQUE, because the blur that the transparency was costed against is gone.
    *
-   * The comment above was right about the hazard and the number was still wrong:
-   * card headings and a checkbox label were legible through the menu text at 0.78,
-   * even with the heavy blur, because the blur smears contrast without removing it.
-   * A popover that lets the page show through its own labels is harder to read than
-   * an opaque one and gains nothing. The glass still reads: the border, the inset
-   * highlight and the shadow are what make it a pane, not the transparency.
+   * This was `rgba(13, 16, 24, 0.94)` over `backdrop-filter: var(--glass-blur-heavy)`,
+   * and the comment that defended it reasoned explicitly from "even with the heavy
+   * blur". The flat pass then set `--glass-blur-heavy: none` - deliberately, so that
+   * rules it never edited would resolve to nothing - and this rule did not resolve to
+   * nothing, because the fill beside it is a LITERAL. A token would have flattened with
+   * the rest; a literal is exactly the thing rule-25 reasoning says goes stale in
+   * silence. The result shipped as 6% of the page showing through a pane with no blur
+   * behind it, which is the one state the two comments agreed was worse than opaque.
+   *
+   * Measured through the phone menu that shares this fill: the hero headline was legible
+   * across the whole pane at 375px. 6% of a 32px white heading over a near-black fill is
+   * not a wash, it is a ghost of the words.
+   *
+   * `--surface-3` is the raised step, so the pane sits above the cards it opens over and
+   * follows the palette if the palette moves. The border and the shadow are what make it
+   * read as a pane, which is what the second comment already concluded.
    */
-  background: rgba(13, 16, 24, 0.94);
-  backdrop-filter: var(--glass-blur-heavy);
-  -webkit-backdrop-filter: var(--glass-blur-heavy);
+  background: var(--surface-3);
   border: 1px solid var(--glass-border-lit);
   border-radius: var(--radius-md); padding: var(--space-3);
   box-shadow: 0 1px 0 0 var(--glass-highlight) inset, 0 20px 48px -16px rgb(0 0 0 / 0.7);
@@ -2023,7 +2026,89 @@ header.top .chip { font-size: var(--text-micro); letter-spacing: 0.04em; padding
   color: var(--text-dim);
 }
 
-@media (max-width: 720px) { .top-nav { display: none; } }
+/*
+ * THE NAV AND ITS REPLACEMENT SWAP AT THE SAME BREAKPOINT, which is the whole point of
+ * writing them as one pair of rules: this was `.top-nav { display: none }` alone, with
+ * nothing in its place, so below 720px the six primary destinations were reachable only
+ * by scrolling to the footer - 2800px down on the home page. `display: none` also removes
+ * the nav from the accessibility tree, so it was not a hidden nav, it was no nav.
+ *
+ * `.mobile-nav` is hidden above the breakpoint and shown below it, so exactly one of the
+ * two is ever in the header. Two separate media queries would let a future edit move one
+ * edge and leave a width with both or neither.
+ */
+.mobile-nav { display: none; }
+@media (max-width: 720px) {
+  .top-nav { display: none; }
+  .mobile-nav { display: block; position: relative; }
+}
+/* Square, and the same height as the Create and Connect buttons it sits beside, so the
+   header stays on one baseline. 36px is already over the 24px WCAG 2.5.8 floor, which is
+   why there is no coarse-pointer rule for it. */
+.mobile-nav-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--surface-1);
+  color: var(--text-dim);
+}
+.mobile-nav-btn:hover { background: var(--surface-2); color: var(--text); }
+.mobile-nav-btn[aria-expanded='true'] { background: var(--surface-2); color: var(--text); }
+/*
+ * IT CARRIES ITS OWN WIDTH, because the containing block is 36px wide.
+ *
+ * This was written `left: 0; right: 0` on the assumption it would span the header, and
+ * measured 36px wide on the running page with every 93px link spilling out of the pane:
+ * `.mobile-nav` is the positioned ancestor, so both insets resolved against the trigger
+ * rather than against anything the eye would call a container. Anchored to the trigger's
+ * left edge and sized by its own content instead, so it opens inwards from x 66 on a
+ * 375px screen. The `max-width` is the floor under that: a longer destination name has
+ * to wrap inside the pane, never widen the document.
+ *
+ * The fill is the wallet popover's, for the reason recorded there: this opens over page
+ * content, not over the ambient wash, and it is opaque because the blur that would have
+ * paid for transparency is not running. Copying the translucent literal is how I found
+ * that - the hero headline read straight through this pane on the first measurement.
+ */
+.mobile-nav-menu {
+  position: absolute;
+  top: calc(100% + var(--space-3));
+  left: 0;
+  min-width: 13rem;
+  max-width: calc(100vw - 5rem);
+  z-index: 20;
+  display: grid;
+  gap: 2px;
+  padding: var(--space-2);
+  background: var(--surface-3);
+  border: 1px solid var(--glass-border-lit);
+  border-radius: var(--radius-md);
+  box-shadow: 0 1px 0 0 var(--glass-highlight) inset, 0 20px 48px -16px rgb(0 0 0 / 0.7);
+}
+.mobile-nav-menu a {
+  display: flex;
+  align-items: center;
+  /* 44px, not the 24px floor: this is the only way to reach these six destinations on a
+     phone, and it is a list of same-sized rows where a thumb has nothing else to aim at. */
+  min-height: 44px;
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-base);
+  font-weight: 500;
+  color: var(--text-dim);
+}
+.mobile-nav-menu a:hover { background: var(--surface-2); color: var(--text); }
+/* The page you are on, marked rather than merely not linked - the link still works, and a
+   menu that gives no answer to "where am I" is the one people open twice. */
+.mobile-nav-menu a[aria-current='page'] {
+  background: var(--accent-wash);
+  color: var(--text);
+}
 @media (max-width: 640px) {
   .hide-sm { display: none !important; }
   header.top .wordmark { display: none; }
@@ -2276,6 +2361,32 @@ table.board .dim { color: var(--text-faint); }
 .footer-nav { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-5); }
 .footer-nav a { font-size: var(--text-sm); color: var(--text-dim); }
 .footer-nav a:hover { color: var(--text); }
+
+/*
+ * EVERY CONTROL LEFT UNDER THE WCAG 2.5.8 FLOOR WAS IN THIS FOOTER, and that is not a
+ * coincidence: the coarse-pointer sizing is class-based, and these links carry no class
+ * of their own, so none of it reached them. Measured on a 375px phone with the coarse
+ * rules active, before this: nine failures, the eight footer nav links at 20.8px and the
+ * footer brand at 18px. Nothing else on the home page was under 24.
+ *
+ * The footer was also, until the phone menu landed beside it, the ONLY place a primary
+ * destination could be reached below 720px - so the smallest targets in the app were the
+ * ones a phone user had no alternative to.
+ *
+ * `min-height` with the row gap left alone is what satisfies 2.5.8 here: the nav's
+ * row gap is `--space-2`, so a 24px row and an 8px gap put 32px between the centres of
+ * two stacked links and the targets cannot overlap. Growing the font instead would
+ * reflow the footer on every width.
+ */
+@media (pointer: coarse) {
+  .footer-nav { gap: var(--space-3) var(--space-5); }
+  .footer-nav a,
+  .site-footer .brand {
+    display: inline-flex;
+    align-items: center;
+    min-height: 24px;
+  }
+}
 
 .demo-banner { background: rgba(227, 162, 59, 0.06); border-color: rgba(227, 162, 59, 0.25); border-radius: var(--radius-md); }
 

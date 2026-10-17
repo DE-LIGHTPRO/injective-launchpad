@@ -7,7 +7,9 @@ import { SITE_URL, BRAND_NAME, BRAND_TAGLINE } from '@/lib/brand';
 import { NETWORK } from '@/lib/config';
 import { isDemoMode } from '@/lib/demo';
 import { ConnectWallet } from '@/components/ConnectWallet';
+import { MobileNav } from '@/components/MobileNav';
 import { ChainMismatchBanner } from '@/components/ChainMismatchBanner';
+import { PRIMARY_NAV, CREATE_NAV, FOOTER_NAV } from '@/lib/navItems';
 import './globals.css';
 
 /*
@@ -69,16 +71,26 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <BrandMark size={26} id="hdr" />
               <span className="wordmark">{BRAND_NAME}</span>
             </Link>
+            {/*
+                One list, three navigations. This nav, the phone menu beside it and the
+                footer nav were three hand-written copies of the same six links; see
+                `navItems.ts` for why that is the shape of defect that ships.
+              */}
             <nav className="top-nav" aria-label="Primary">
-              <Link href="/">Launches</Link>
-              <Link href="/watchlist">Watchlist</Link>
-              <Link href="/portfolio">Portfolio</Link>
-              <Link href="/claim">Claim</Link>
-              <Link href="/analytics">Analytics</Link>
-              {/* Last in the list and present on every page: somebody looking for
-                  what can go wrong should not have to go looking. */}
-              <Link href="/risks">Risks</Link>
+              {PRIMARY_NAV.map((item) => (
+                <Link key={item.href} href={item.href}>
+                  {item.label}
+                </Link>
+              ))}
             </nav>
+            {/*
+                The same destinations on a phone, where the nav above is `display: none`.
+                Before this there was nothing in its place: the six destinations were
+                reachable only from the footer, and `display: none` takes the nav out of
+                the accessibility tree too, so a screen-reader user had no primary nav at
+                all. It hides itself above 720px, which is where `.top-nav` appears.
+              */}
+            <MobileNav />
             <span className="spacer" />
             {/*
                 Hidden below 640px. On a phone these two chips pushed the wallet button
@@ -87,7 +99,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               */}
             {isDemoMode() && <span className="chip warn hide-sm">demo</span>}
             <span className="chip hide-sm">{NETWORK.name}</span>
-            <Link href="/create" className="nav-create">
+            {/* The destination comes from the same place the footer's reads it from; the
+                label is shorter here because the header has a button's worth of room. */}
+            <Link href={CREATE_NAV.href} className="nav-create">
               <PlusIcon size={14} /> Create
             </Link>
             {/*
@@ -127,15 +141,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               </p>
             </div>
             <nav className="footer-nav" aria-label="Footer">
-              <Link href="/">Launches</Link>
-              <Link href="/create">Create a launch</Link>
-              <Link href="/watchlist">Watchlist</Link>
-              <Link href="/portfolio">Portfolio</Link>
-              <Link href="/claim">Claim</Link>
-              <Link href="/analytics">Analytics</Link>
-              {/* Last in the list and present on every page: somebody looking for
-                  what can go wrong should not have to go looking. */}
-              <Link href="/risks">Risks</Link>
+              {FOOTER_NAV.map((item) => (
+                <Link key={item.href} href={item.href}>
+                  {item.label}
+                </Link>
+              ))}
               <a href={NETWORK.explorer} target="_blank" rel="noopener noreferrer">
                 Injective {NETWORK.name} explorer
               </a>

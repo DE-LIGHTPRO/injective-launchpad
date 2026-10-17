@@ -44,8 +44,10 @@ export function ConnectWallet({
   const menuId = useId();
   const menuRef = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
+  // Distinguishes a close from the first render, which look identical from `open` alone.
+  const everOpened = useRef(false);
 
-  useDismissOnEscape(open, () => setOpen(false));
+  useDismissOnEscape(open, () => setOpen(false), '.wallet');
 
   /*
    * Focus follows the menu, and comes back when it closes.
@@ -60,14 +62,26 @@ export function ConnectWallet({
    */
   useEffect(() => {
     if (open) {
+      everOpened.current = true;
       const first = menuRef.current?.querySelector<HTMLElement>('button, a');
       first?.focus();
       return;
     }
     /*
+     * ONLY AFTER A CLOSE, which the first version did not check - and so it ran on
+     * MOUNT, where `open` is false and the active element is the body, and focused
+     * the Connect button on every cold page load. Measured on /portfolio: with no
+     * wallet connected and nothing clicked, `document.activeElement` was this
+     * trigger the moment the page settled. That puts a keyboard user past the skip
+     * link before their first Tab, and drops a screen reader into the header
+     * instead of at the top of the document, on every page.
+     */
+    if (!everOpened.current) return;
+    everOpened.current = false;
+    /*
      * Restored when focus was LOST, which is the only signal available here.
      *
-     * The first version asked whether the active element was still inside the
+     * An earlier version asked whether the active element was still inside the
      * menu. That can never be true: by the time this effect runs the menu has
      * unmounted, `menuRef.current` is null, and the check is unreachable. Focus
      * restore simply never happened, and Escape left the user on the body.
