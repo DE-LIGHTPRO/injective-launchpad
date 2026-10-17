@@ -1273,7 +1273,11 @@ button.ghost { background: transparent; border: 1px solid var(--line); color: va
 }
 .explorer-svg:active { cursor: grabbing; }
 .explorer-svg:focus-visible { outline: none; box-shadow: var(--ring); }
-.explorer-axis { fill: var(--text-faint); font-size: 10px; font-family: ui-monospace, Menlo, monospace; }
+/* `font-size: 10px` and a monospace stack used to be declared here and neither
+   rendered: the system layer puts `.explorer-axis` in the group that takes
+   `--face-sans` with tabular figures, then sets it to 11px. Measured, the axis draws
+   at 11px in Inter. `fill` is the one property nothing later names, so it stays. */
+.explorer-axis { fill: var(--text-faint); }
 
 .explorer-read {
   display: grid;
@@ -1445,7 +1449,18 @@ button.ghost { background: transparent; border: 1px solid var(--line); color: va
 
 .card-by { font-size: var(--text-xs); color: var(--text-faint); margin-top: 2px; }
 .card-badges { display: inline-flex; align-items: center; gap: var(--space-2); flex: none; }
-.chip-sm { font-size: 9px; letter-spacing: 0.08em; padding: 2px var(--space-2); }
+/*
+ * ONE COMPONENT HAD FOUR SIZES: `.chip` at `--text-micro`, `header.top .chip` at an
+ * 11px literal that is the same 11px, `.tok-sub .chip` at 10.5px, and this at 9px.
+ *
+ * 9px was the smallest text on the site and it is 2px under the scale's own floor. It
+ * is also not decoration: these five chips are the word "fixed" beside each launch
+ * parameter on `/create`, which is the one thing telling a creator the number cannot
+ * be changed after deployment. Contrast was never the problem - measured 7.73:1 - and
+ * contrast is not what 9px fails. `padding` here is `2px 8px`, byte-identical to the
+ * base chip, so after this the class is distinguished by its wider tracking alone.
+ */
+.chip-sm { font-size: var(--text-micro); letter-spacing: 0.08em; padding: 2px var(--space-2); }
 
 /* Market cap, given the weight a board is read by. */
 .card-mc { display: flex; align-items: baseline; gap: var(--space-2); margin-top: var(--space-4); }
@@ -1872,7 +1887,7 @@ header.top {
 }
 header.top .inner { gap: var(--space-2); width: 100%; }
 header.top .brand { gap: 10px; margin-right: var(--space-4); }
-.wordmark { font-weight: 650; font-size: 1.0625rem; letter-spacing: -0.02em; }
+.wordmark { font-weight: 650; font-size: var(--text-lg); letter-spacing: -0.02em; }
 .wordmark em { font-style: normal; color: var(--text-faint); }
 .top-nav { display: flex; gap: 2px; }
 .top-nav a {
@@ -1883,7 +1898,9 @@ header.top .brand { gap: 10px; margin-right: var(--space-4); }
   border-radius: 6px;
 }
 .top-nav a:hover { color: var(--text); background: var(--surface-2); }
-header.top .chip { font-size: 11px; letter-spacing: 0.04em; padding: 3px 8px; border-radius: 6px; text-transform: none; }
+/* The `11px` here was `--text-micro` written as a literal, so it restated the base
+   chip's size and read as an override that changes something. */
+header.top .chip { font-size: var(--text-micro); letter-spacing: 0.04em; padding: 3px 8px; border-radius: 6px; text-transform: none; }
 
 .btn, .nav-create {
   display: inline-flex;
@@ -1985,7 +2002,9 @@ header.top .chip { font-size: 11px; letter-spacing: 0.04em; padding: 3px 8px; bo
 .hero { padding: var(--space-6) 0 var(--space-5); border-bottom: 1px solid var(--line); margin-bottom: var(--space-6); }
 .hero-eyebrow { font-size: var(--text-xs); font-weight: 550; color: var(--text-faint); letter-spacing: 0.02em; margin-bottom: var(--space-3); display: block; }
 .hero h1 { font-size: clamp(2rem, 4.2vw, 2.875rem); line-height: 1.08; letter-spacing: -0.035em; max-width: 20ch; font-weight: 650; }
-.hero .sub { font-size: 1.0625rem; max-width: 52ch; margin-top: var(--space-3); line-height: 1.55; }
+/* `1.0625rem` in both this and `.wordmark` was `--text-lg` spelled out, so the scale
+   looked unused at exactly the two places the eye lands first. */
+.hero .sub { font-size: var(--text-lg); max-width: 52ch; margin-top: var(--space-3); line-height: 1.55; }
 .hero-cta { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-5); }
 .hero-cta .go { width: auto; margin: 0; height: 40px; padding: 0 18px; }
 .stats {
@@ -1999,6 +2018,12 @@ header.top .chip { font-size: 11px; letter-spacing: 0.04em; padding: 3px 8px; bo
 .stat { padding: 14px 18px; }
 .stat + .stat { border-left: 1px solid var(--line); }
 .stat .k { display: block; font-size: var(--text-xs); color: var(--text-faint); font-weight: 500; }
+/* 20px is deliberately off the scale and stays: the scale steps 17 to 22, and these are
+   the home page's headline figures, so neither neighbour is right. It is left as a
+   literal rather than given a step of its own, because a step with one reader is a
+   token pretending to be a system. Do not "normalise" it to 22px - that is a 2px
+   change on the three numbers the front page is built around, with no defect behind
+   it, which is the opposite of what the scale is for. */
 .stat .v { display: block; font-size: 1.25rem; font-weight: 600; letter-spacing: -0.02em; margin-top: 2px; }
 @media (max-width: 720px) {
   .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -2007,7 +2032,10 @@ header.top .chip { font-size: 11px; letter-spacing: 0.04em; padding: 3px 8px; bo
 }
 
 .section-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-3); margin: var(--space-7) 0 var(--space-3); }
-.section-head h2 { margin: 0; font-size: 1.125rem; }
+/* `font-size: 1.125rem` was an 18px override on an `h2` that is already 17px: a
+   one-pixel change, which nobody can see and which therefore is not a decision. Both
+   section headings had it. `margin: 0` is the override that does something. */
+.section-head h2 { margin: 0; }
 .section-head .note { margin: 0; }
 
 /* ----------------------------------------------------------------- board -- */
@@ -2082,7 +2110,11 @@ table.board .dim { color: var(--text-faint); }
 .row-link:focus-visible { box-shadow: none; }
 .row-link:focus-visible::after { box-shadow: inset 0 0 0 2px var(--accent-text); border-radius: 0; }
 .tok-sub { display: inline-flex; align-items: center; gap: 8px; font-size: var(--text-xs); color: var(--text-faint); }
-.tok-sub .chip { padding: 0 6px; height: 18px; display: inline-flex; align-items: center; font-size: 10.5px; }
+/* The last fractional font size in the file. Half a pixel under the base chip is not a
+   decision anyone can see, it is drift - and it is the specific thing that makes an
+   interface read as unconsidered, because 10.5px is a number nobody chose twice. The
+   base chip is already `--text-micro`, so the declaration goes rather than changes. */
+.tok-sub .chip { padding: 0 6px; height: 18px; display: inline-flex; align-items: center; }
 .tok-creator { min-width: 0; }
 
 /*
@@ -2167,7 +2199,7 @@ table.board .dim { color: var(--text-faint); }
 
 /* --------------------------------------------------------- top movers -- */
 .hill { margin-top: 0; }
-.hill-head h2 { font-size: 1.125rem; }
+.hill-head h2 { font-size: var(--text-lg); }
 .hill-king { border-color: var(--line); box-shadow: none; background: var(--surface-1); }
 .hill-king:hover { border-color: var(--line-strong); background: var(--surface-2); }
 .hill-crown { color: var(--gold); letter-spacing: 0.06em; font-weight: 600; }
@@ -2231,7 +2263,7 @@ table.board .dim { color: var(--text-faint); }
   font-size: inherit;
   letter-spacing: -0.005em;
 }
-.explorer-axis { font-size: 11px; }
+.explorer-axis { font-size: var(--text-micro); }
 
 .ticker { margin: 0 0 var(--space-7); }
 .ticker li { padding-top: 9px; padding-bottom: 9px; font-size: var(--text-sm); }
