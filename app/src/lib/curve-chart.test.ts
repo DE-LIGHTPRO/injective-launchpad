@@ -152,6 +152,77 @@ test('an unplottable state loses the marker, not the whole chart', () => {
   assert.equal(price, 0);
 });
 
+/*
+ * A MIGRATED LAUNCH HAS NO RESERVE, AND READING THAT AS A POSITION DREW IT AT THE ORIGIN.
+ *
+ * `contracts/curve/src/contract.rs` sets `inj_collected` to zero at migration - the
+ * reserve leaves the curve for the locked pool - and `tokens_sold` to the whole curve
+ * supply. So the one number the marker was placed by stops being a position and becomes
+ * a balance that is no longer held. Measured on the live testnet, 17 Oct 2026: a launch
+ * with 800,000,000 of 800,000,000 sold and 6,724.38 quote locked rendered its progress
+ * bar at 100% and its marker at x = 0, on the same card whose note says "the marker is
+ * where this one has reached". Every other figure on the page was right.
+ *
+ * The state is not a point on the curve at all, so the position AND the price both have
+ * to come from the shape. Those are two separate things a fix can get half of, which is
+ * why they are asserted separately below.
+ */
+const MIGRATED: CurveState = {
+  injCollected: 0n,
+  tokensSold: CFG.curveSupply,
+  graduated: true,
+};
+
+test('a migrated launch is drawn at its graduation target, not at the origin', () => {
+  const maxX = Number(maxCollectable(CFG)) / Number(ONE);
+  const { injX } = chartMarker(CFG, MIGRATED, maxX, ONE);
+  assert.ok(
+    Math.abs(injX - Number(CFG.graduationTarget) / Number(ONE)) < 1e-6,
+    `a launch that traversed the whole curve is drawn at ${injX}`,
+  );
+  assert.ok(injX > 0, 'the marker is back on the origin');
+});
+
+test('a migrated launch takes its price from the target too, not from its emptied state', () => {
+  /*
+   * The discriminating half. `reserves` reads the quote side from `injCollected`, which
+   * migration zeroed, and the token side from `tokensSold`, which it maxed - so the
+   * emptied state prices about 3.7x BELOW the curve at the target on this shape. A fix
+   * that moved only the x position would put the dot on the axis at the right place and
+   * well under the line it is drawn on.
+   */
+  const { price } = chartMarker(CFG, MIGRATED, Number(maxCollectable(CFG)) / Number(ONE), ONE);
+  const fromEmptyState = Number(spotPrice(CFG, MIGRATED, ONE)) / Number(ONE);
+  assert.ok(price > 0, 'a migrated launch has no marker height at all');
+  assert.ok(
+    price > fromEmptyState * 2,
+    `the price came from the emptied state (${price} against ${fromEmptyState})`,
+  );
+});
+
+test('a launch graduated but not yet migrated keeps its own reserve, which is the better figure', () => {
+  /*
+   * Expressed as a floor rather than a branch on migration for this case: graduation is
+   * set on the buy that CROSSES the target, so the reserve sits at or just above it and
+   * is a real position. Overwriting it with the target would move the marker backwards.
+   */
+  const maxX = Number(maxCollectable(CFG)) / Number(ONE);
+  const over = CFG.graduationTarget + amt(2n);
+  const { injX } = chartMarker(CFG, { injCollected: over, tokensSold: 0n, graduated: true }, maxX, ONE);
+  assert.ok(Math.abs(injX - 87) < 1e-6, `a graduated launch holding 87 INJ is drawn at ${injX}`);
+});
+
+test('the floor applies only to a graduated launch, so a fresh one still starts at zero', () => {
+  /*
+   * The mutation this exists for: flooring unconditionally puts every untraded launch at
+   * its graduation target, which is the same defect pointing the other way and looks
+   * perfectly plausible on a board of in-pool launches.
+   */
+  const maxX = Number(maxCollectable(CFG)) / Number(ONE);
+  const fresh: CurveState = { injCollected: 0n, tokensSold: 0n, graduated: false };
+  assert.equal(chartMarker(CFG, fresh, maxX, ONE).injX, 0);
+});
+
 test('the component delegates the marker rather than computing it inline', () => {
   /*
    * The one source assertion worth keeping, and it is about STRUCTURE rather than

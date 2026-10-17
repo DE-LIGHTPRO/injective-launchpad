@@ -317,6 +317,23 @@ export function sellPriceImpactBps(cfg: CurveConfig, st: CurveState, tokensIn: b
  *
  * `price` is the real spot price for the state rather than the nearest sampled
  * point, which needs no interpolation and cannot drift from the line it sits on.
+ *
+ * A GRADUATED LAUNCH IS AT LEAST AT THE TARGET, WHATEVER ITS RESERVE SAYS, and
+ * without that floor every migrated launch was drawn at the very start of its own
+ * curve. Migration sets `inj_collected` to zero (curve/src/contract.rs: the reserve
+ * moves into the locked pool) and `tokens_sold` to the whole curve supply, so the
+ * reserve stops being a position and becomes a balance that is no longer held.
+ * Reading it as a position put the "you are here" line and dot on the origin for a
+ * launch that had traversed the entire curve.
+ *
+ * Measured on the live testnet, 17 Oct 2026: launch 3, in-pool, 800,000,000 of
+ * 800,000,000 sold, 6,724.38 quote locked, progress bar at 100%, marker at x = 0.
+ * Every other figure on the page was right, which is why nothing looked broken.
+ * It reached four surfaces, including `CurveGlyph` on every board card.
+ *
+ * Expressed as a floor rather than a branch on migration, because a launch that has
+ * graduated but not yet been migrated still holds a real reserve at or just above
+ * the target, and that figure is the better one. `Math.max` keeps it.
  */
 export function chartMarker(
   cfg: CurveConfig,
@@ -324,12 +341,29 @@ export function chartMarker(
   axisMaxInj: number,
   oneToken: bigint = 10n ** 18n,
 ): { injX: number; price: number } {
-  const raised = Number(st.injCollected) / Number(oneToken);
-  // Clamped so a state past the ceiling cannot be drawn off the end of the axis.
-  const injX = Math.min(Math.max(raised, 0), axisMaxInj);
+  const raisedUnits =
+    st.graduated && st.injCollected < cfg.graduationTarget ? cfg.graduationTarget : st.injCollected;
+  const raised = Number(raisedUnits) / Number(oneToken);
+  /*
+   * Clamped at the top so a state past the ceiling cannot be drawn off the end of the
+   * axis. There is deliberately NO lower clamp: `injCollected` is a Uint128 and
+   * `graduationTarget` is non-negative, so `raised` cannot be negative, and the
+   * `Math.max(raised, 0)` that was here survived every mutation because nothing can
+   * reach it. `priceImpactBps` above lost a clamp for exactly that reason - an
+   * unreachable bound reads as a real guarantee somebody might rely on, and the only
+   * test that can cover it is one that exercises nothing.
+   */
+  const injX = Math.min(raised, axisMaxInj);
+  /*
+   * And the price comes from the SAME point, so the dot cannot sit off the line it is
+   * drawn on. A migrated state is not a point on the curve at all - zero raised
+   * against the whole supply sold - so where the position was taken from the shape,
+   * the price is too.
+   */
+  const at = raisedUnits === st.injCollected ? st : stateAtRaised(cfg, raisedUnits);
   let price = 0;
   try {
-    price = Number(spotPrice(cfg, st, oneToken)) / Number(oneToken);
+    price = Number(spotPrice(cfg, at, oneToken)) / Number(oneToken);
   } catch {
     // An unplottable state leaves the marker on the floor rather than throwing out
     // the whole chart: the line is still true even when the marker cannot be placed.
