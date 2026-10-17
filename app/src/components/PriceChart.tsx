@@ -406,7 +406,7 @@ function Candles({
           <text
             x={PLOT_W + 6}
             y={lastY + 4}
-            fill="var(--on-accent)"
+            fill="var(--on-ticker)"
             fontSize="10"
             fontFamily="var(--font-mono)"
           >

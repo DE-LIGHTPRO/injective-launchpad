@@ -68,8 +68,10 @@
   --warn: #e3a23b;
   --danger: #f6465d;
 
-  /* Faces, from next/font in layout.tsx; the stacks are the fallback while loading. */
-  --face-display: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+  /* Faces, from next/font in layout.tsx; the stacks are the fallback while loading.
+     There is no `--face-display`: it was declared and read by nothing, and the headings
+     it existed for are set in `--face-sans` by the system layer at the end of this file.
+     A declared-and-unread token advertises a lever that moves nothing. */
   --face-sans: var(--font-sans), ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
   --face-mono: var(--font-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
 
@@ -80,7 +82,17 @@
   --text-base: 0.9375rem;  /* 15px */
   --text-lg: 1.0625rem;    /* 17px */
   --text-xl: 1.375rem;     /* 22px */
-  --text-display: 2rem;    /* 32px */
+  /*
+   * 30px, not the 32px this said, because 30px is what the page has been rendering.
+   *
+   * `h1` was declared twice: once near the top of the file at `var(--text-display)`,
+   * and again in the system layer at a literal `1.875rem` that won. Removing the dead
+   * half stranded this step with no reader at all, which is the worse of the two
+   * failures: anyone adjusting the largest text on the site would have edited a number
+   * nothing reads. So the step takes the measured value and `h1` reads it back. The
+   * screen does not move.
+   */
+  --text-display: 1.875rem; /* 30px */
 
   /* Spacing, 4px base */
   --space-1: 0.25rem;
@@ -92,103 +104,44 @@
   --space-7: 3rem;
   --space-8: 4rem;
 
-  /* Radius */
+  /* Radius. `--radius-xs` was read at two sites as `var(--radius-xs)` and never
+     declared: the fallback carried it, so the screen was right and the scale was a lie
+     by omission. 4px is in use, so it is a step. */
+  --radius-xs: 4px;
   --radius-sm: 6px;
   --radius-md: 10px;
   --radius-lg: 14px;
   --radius-pill: 999px;
 
-  /*
-   * Glass.
-   *
-   * Glassmorphism is four things together, and leaving any one out is what makes
-   * most attempts read as "translucent grey box" rather than as glass:
-   *
-   *   1. something BEHIND it worth blurring  (the ambient orbs on body::before)
-   *   2. a translucent fill, not a solid one (--glass-fill)
-   *   3. a blur that also saturates, because real glass concentrates the colour
-   *      it passes rather than just smearing it (--glass-blur)
-   *   4. an edge that catches light: a hairline border plus a brighter inset on
-   *      the top edge only, which is where light lands (--glass-border/-highlight)
-   *
-   * The fill is white at low alpha over a dark ground, so it RAISES local
-   * luminance and therefore raises contrast with light text. That is why glass is
-   * safe here and would need re-measuring in a light theme, where the same fill
-   * would lower it.
-   */
-  /*
-   * A FLAT fill reads as a tinted box; a directional one reads as glass.
-   *
-   * The first pass used a single white alpha and the panes came out looking like
-   * the dark cards they replaced, with the border doing all the work. Real glass
-   * is brighter where the light meets it and falls off across the pane, so the
-   * fill is a gradient from the top left and the alpha is carried by it.
-   */
-  /*
-   * The dark base under the gradient is an ACCESSIBILITY control, not a tint.
-   *
-   * Pure white-alpha glass passes the whole ambient through, so the colour a
-   * glyph sits on becomes whatever happens to be behind that card: measured
-   * across one screen the backdrop under identical text ranged from rgb(24,44,52)
-   * to rgb(44,36,76), and the same token passed in one card and failed in the
-   * next. That variance is glassmorphism's real failure mode and it is invisible
-   * in a screenshot of the card that happens to pass.
-   *
-   * A dark floor at 38% damps the range without hiding the refraction: the pane
-   * still takes the hue behind it, which is the whole effect, but it no longer
-   * takes the full luminance. Apple's dark materials are a dark tint plus blur
-   * for the same reason, not white alpha.
-   */
-  --glass-fill: linear-gradient(
-      135deg,
-      rgba(255, 255, 255, 0.1) 0%,
-      rgba(255, 255, 255, 0.04) 42%,
-      rgba(255, 255, 255, 0.022) 100%
-    ),
-    linear-gradient(rgba(7, 9, 16, 0.38), rgba(7, 9, 16, 0.38));
-  --glass-fill-strong: linear-gradient(
-      135deg,
-      rgba(255, 255, 255, 0.15) 0%,
-      rgba(255, 255, 255, 0.06) 42%,
-      rgba(255, 255, 255, 0.032) 100%
-    ),
-    linear-gradient(rgba(7, 9, 16, 0.3), rgba(7, 9, 16, 0.3));
-  --glass-border: rgba(255, 255, 255, 0.11);
-  --glass-border-lit: rgba(255, 255, 255, 0.2);
-  --glass-highlight: rgba(255, 255, 255, 0.14);
-  --glass-blur: blur(20px) saturate(150%);
-  --glass-blur-heavy: blur(32px) saturate(170%);
-  /*
-   * A control set INTO the glass rather than floating on it.
-   *
-   * A solid near-black fill would read as a hole punched through the pane. This
-   * is dark at alpha, so the ambient light still reaches it faintly, plus an
-   * inset shadow at the top edge, which is the same lighting logic as the card's
-   * highlight run in reverse: light lands on a raised edge and is occluded by a
-   * recessed one. That pairing is what makes the two read as one object.
-   */
-  --glass-well: rgba(3, 4, 7, 0.55);
-  --glass-well-inset:
-    0 1px 2px 0 rgba(0, 0, 0, 0.5) inset,
-    0 -1px 0 0 rgba(255, 255, 255, 0.04) inset;
-
-  --glass-shadow:
-    0 1px 0 0 var(--glass-highlight) inset,
-    0 16px 40px -20px rgba(0, 0, 0, 0.8),
-    0 2px 8px -4px rgba(0, 0, 0, 0.5);
-
   --ring: 0 0 0 2px var(--bg), 0 0 0 4px rgba(115, 162, 255, 0.7);
-  --shadow: 0 12px 32px -18px rgba(0, 0, 0, 0.9);
+  /* No `--shadow`: nothing read it. The flat surfaces this interface settled on carry
+     their separation with the hairlines above rather than with a drop shadow. */
   --ease: cubic-bezier(0.2, 0.7, 0.3, 1);
 
   /*
-   * Glass, retired. The variables stay so every component that used them keeps
-   * working, but they now resolve to flat surfaces: frosted blur over coloured orbs is
-   * the signature look of generated UI, and it cost legibility (contrast varied with
-   * whatever happened to be behind a card).
+   * GLASS, RETIRED. The names stay because ninety-odd rules below read them; every one
+   * now resolves to a flat surface. Frosted blur over coloured orbs is the signature
+   * look of generated UI, and it cost legibility: measured across one screen, the
+   * backdrop under identical text ranged from rgb(24,44,52) to rgb(44,36,76), so the
+   * same text token passed in one card and failed in the next. That variance is
+   * glassmorphism's real failure mode and it is invisible in a screenshot of the card
+   * that happens to pass.
+   *
+   * THE GRADIENTS, THE BLURS AND THE LIT EDGES USED TO BE DECLARED JUST ABOVE HERE,
+   * IN THIS SAME BLOCK, AND NONE OF THEM REACHED THE SCREEN. Fifty lines of
+   * `blur(20px) saturate(150%)`, a two-layer directional fill, a 55% alpha well and
+   * three nested comments arguing for them all sat above these ten redeclarations, so
+   * only source order decided the value and a reader had to notice the second list to
+   * know which one rendered. Of the old values, exactly one had no replacement:
+   * `--glass-fill-strong`, whose last reader was the `a.card:hover` deleted earlier -
+   * so it is gone rather than flattened.
+   *
+   * `transparent` and `none` are deliberate here, not placeholders. A rule still
+   * writes `box-shadow: 0 1px 0 0 var(--glass-highlight) inset` and still asks for
+   * `backdrop-filter: var(--glass-blur)`; resolving those to nothing is how the flat
+   * pass reaches rules it never edited.
    */
   --glass-fill: var(--surface-1);
-  --glass-fill-strong: var(--surface-2);
   --glass-raised: var(--surface-2);
   --glass-border: var(--line);
   --glass-border-lit: var(--line-strong);
@@ -525,7 +478,8 @@ h3 { font-size: var(--text-base); font-weight: 600; }
  * the same selector, per its own principle of "no blur, glow, grain or gradients",
  * so every property it declared was already being overridden. Deleting it changes
  * nothing on screen, and it was the only remaining reader of `--glass-fill-strong`
- * anywhere in the project. `--glass-border-lit` still has five.
+ * anywhere in the project - which is why that token is no longer declared either.
+ * `--glass-border-lit` still has five readers and stays.
  */
 a.card {
   display: block;
@@ -995,7 +949,7 @@ button:disabled { color: var(--text-faint); cursor: not-allowed; }
 }
 .wallet-list a { color: var(--accent); }
 /* The extension's own mark, so a row is recognisable before the name is read. */
-.wallet-list img { width: 22px; height: 22px; border-radius: var(--radius-xs, 4px); flex: none; }
+.wallet-list img { width: 22px; height: 22px; border-radius: var(--radius-xs); flex: none; }
 button.ghost { background: transparent; border: 1px solid var(--line); color: var(--text-dim); }
 /*
  * The header's connect trigger: the one action on the page, so it reads as one.
@@ -1164,9 +1118,27 @@ button.ghost { background: transparent; border: 1px solid var(--line); color: va
 /* The launch page's main chart: candles by default, the bonding curve behind a tab. */
 .chart-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); margin-bottom: var(--space-3); }
 .chart-head h2 { margin: 0; }
-.chart-tabs { display: inline-flex; gap: 2px; padding: 2px; border-radius: var(--radius-md); background: var(--surface-sunken); }
+/*
+ * A SEGMENTED CONTROL IS A WELL WITH A RAISED PILL IN IT, and the well was invisible.
+ *
+ * This asked for `--surface-sunken` and `--text-muted`, and NEITHER TOKEN IS DECLARED
+ * ANYWHERE. An undeclared `var()` with no fallback is invalid at computed-value time,
+ * which does not error and does not fall back to something sensible: `background` is not
+ * inherited so it took its initial `transparent`, and `color` is inherited so it took the
+ * card's `--text`. Measured on the running page, the track was `rgba(0, 0, 0, 0)` and the
+ * inactive tab was `rgb(236, 236, 239)` - the same colour as the active one, so the two
+ * states differed only by the pill behind the active label. The quiet half of a segmented
+ * control is what makes it read as a choice rather than as two buttons.
+ *
+ * `--bg` is the ground under the cards, so a track filled with it reads as a hole in the
+ * card with `--surface-2` raised above it, which is what the rest of the file does.
+ * `--text-faint` is what every other micro-sized label here uses, `.tf-btn` four rules
+ * down included - and that is the point: the sibling control was already correct, so
+ * these were drifting apart invisibly rather than looking wrong together.
+ */
+.chart-tabs { display: inline-flex; gap: 2px; padding: 2px; border-radius: var(--radius-md); background: var(--bg); }
 .chart-tab {
-  border: 0; background: transparent; color: var(--text-muted);
+  border: 0; background: transparent; color: var(--text-faint);
   font: inherit; font-size: var(--text-sm); line-height: 1;
   padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm); cursor: pointer;
 }
@@ -1180,7 +1152,7 @@ button.ghost { background: transparent; border: 1px solid var(--line); color: va
 .chart-bar { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
 .chart-summary { font-size: var(--text-micro); color: var(--text-faint); margin-left: auto; }
 
-.tf-row { display: inline-flex; gap: 2px; padding: 2px; border-radius: var(--radius-md); background: var(--surface-sunken); }
+.tf-row { display: inline-flex; gap: 2px; padding: 2px; border-radius: var(--radius-md); background: var(--bg); }
 .tf-btn {
   border: 0; background: transparent; color: var(--text-faint);
   font: inherit; font-size: var(--text-xs); line-height: 1;
@@ -1195,7 +1167,7 @@ button.ghost { background: transparent; border: 1px solid var(--line); color: va
 .chart-ohlc {
   display: flex; flex-wrap: wrap; align-items: baseline;
   gap: var(--space-1) var(--space-3);
-  font-size: var(--text-micro); color: var(--text-muted);
+  font-size: var(--text-micro); color: var(--text-faint);
   margin: var(--space-3) 0 var(--space-2);
 }
 .chart-ohlc strong { color: var(--text); font-size: var(--text-xs); }
@@ -1217,16 +1189,20 @@ button.ghost { background: transparent; border: 1px solid var(--line); color: va
 /* A trade row: side, amounts, the price it filled at, then the block link. */
 .trade-amount { font-size: var(--text-sm); min-width: 0; }
 .trade-who { color: var(--text-faint); }
-.trade-price { font-size: var(--text-micro); color: var(--text-muted); margin-left: auto; }
+.trade-price { font-size: var(--text-micro); color: var(--text-faint); margin-left: auto; }
 
 /* The risk page's lists: readable prose, not a dense table of bullets. */
 .risk-list { margin: var(--space-3) 0 0; padding-left: var(--space-4); }
-.risk-list li { color: var(--text-muted); font-size: var(--text-sm); line-height: 1.6; margin-bottom: var(--space-3); }
+/* `--text-dim` rather than `--text-faint` for the two blocks of running prose on the
+   site (this and `.token-about`): both asked for the undeclared `--text-muted` and so
+   rendered at full `--text`. 7.73:1 on the card, against 5.45:1 for faint - a sentence
+   somebody is expected to read gets the brighter of the two quiet steps. */
+.risk-list li { color: var(--text-dim); font-size: var(--text-sm); line-height: 1.6; margin-bottom: var(--space-3); }
 .risk-list strong { color: var(--text); }
 
 .token-about {
   margin: var(--space-4) 0 0;
-  color: var(--text-muted);
+  color: var(--text-dim);
   font-size: var(--text-sm);
   line-height: 1.6;
   white-space: pre-line;
@@ -1249,7 +1225,7 @@ button.ghost { background: transparent; border: 1px solid var(--line); color: va
   font-size: var(--text-micro);
   padding: 1px var(--space-2);
   margin-left: var(--space-2);
-  border-radius: var(--radius-xs, 4px);
+  border-radius: var(--radius-xs);
   color: var(--text-dim);
   vertical-align: middle;
 }
@@ -1444,7 +1420,12 @@ button.ghost { background: transparent; border: 1px solid var(--line); color: va
   padding: var(--space-2) var(--space-4);
   font-size: var(--text-xs);
 }
-.ticker li + li { border-top: 1px solid var(--line-soft, var(--glass-border)); }
+/* `var(--line-soft, var(--glass-border))` named two tokens to arrive at one value:
+   `--line-soft` has never been declared, and `--glass-border` is the retired glass alias
+   that now resolves to `--line`. Measured, this rendered `rgb(34, 37, 43)`, which is
+   `--line` - so say `--line`. A fallback chain that works is the hardest kind of phantom
+   token to notice, because the screen is right. */
+.ticker li + li { border-top: 1px solid var(--line); }
 .side-buy { color: var(--buy); text-transform: uppercase; font-size: var(--text-micro); letter-spacing: 0.08em; }
 .side-sell { color: var(--sell); text-transform: uppercase; font-size: var(--text-micro); letter-spacing: 0.08em; }
 .ticker-sym { font-weight: 620; color: var(--text); text-decoration: none; }
@@ -1867,7 +1848,7 @@ body { font-feature-settings: 'cv11', 'ss01'; letter-spacing: -0.006em; }
   letter-spacing: -0.01em;
 }
 
-h1 { font-size: 1.875rem; font-weight: 640; letter-spacing: -0.025em; line-height: 1.2; }
+h1 { font-size: var(--text-display); font-weight: 640; letter-spacing: -0.025em; line-height: 1.2; }
 h2 { font-size: var(--text-lg); font-weight: 600; letter-spacing: -0.015em; }
 h3 { font-weight: 600; }
 .sub { color: var(--text-dim); }
