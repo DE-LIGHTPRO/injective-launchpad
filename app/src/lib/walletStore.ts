@@ -24,10 +24,6 @@ export function setConnectedAccount(a: WalletAccount | null): void {
   for (const fn of listeners) fn(a);
 }
 
-export function getConnectedAccount(): WalletAccount | null {
-  return current;
-}
-
 export function useConnectedAccount(): WalletAccount | null {
   /*
    * Seeded with null rather than `current`, then synced in an effect. Seeding with the

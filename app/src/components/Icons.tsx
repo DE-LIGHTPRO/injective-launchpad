@@ -66,9 +66,3 @@ export const CheckIcon = (p: P) => (
     <path d="M3 8.5 6.5 12 13 4.5" />
   </Svg>
 );
-export const ShieldIcon = (p: P) => (
-  <Svg {...p}>
-    <path d="M8 1.8 13 3.6v4c0 3.1-2.1 5.4-5 6.6-2.9-1.2-5-3.5-5-6.6v-4z" />
-    <path d="M5.8 8 7.4 9.6 10.4 6.6" />
-  </Svg>
-);

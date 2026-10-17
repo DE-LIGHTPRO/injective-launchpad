@@ -6,6 +6,7 @@ import { ArrowLeftIcon } from '@/components/Icons';
 import { CopyButton } from '@/components/CopyButton';
 import { LaunchList } from '@/components/LaunchList';
 import { loadRows, toRow } from '@/lib/boardRows';
+import { UnreadableNotice } from '@/components/UnreadableNotice';
 import { compact } from '@/lib/boardMetrics';
 import { totalsByQuote } from '@/lib/analytics';
 import { addressName as nameFor } from '@/lib/addressName';
@@ -38,8 +39,13 @@ export default async function CreatorPage({ params }: { params: Promise<{ addres
   // Demo creators are not bech32 (they spell out "demo"), so the demo is let through.
   if (!ADDRESS.test(address) && !address.startsWith('inj1demo')) notFound();
 
-  const { rows, error, errorDetail } = await loadRows();
+  const { rows, error, errorDetail, unreadable } = await loadRows();
   const mine = rows.filter((r) => r.launch.creator === address);
+  /*
+   * Scoped to this creator, same predicate as `mine`. An unreadable launch of theirs
+   * is the reason the fee totals below could be short, and nobody else's is.
+   */
+  const mineUnreadable = unreadable.filter((u) => u.creator === address);
 
   /*
    * Fees GROUPED PER QUOTE, not summed and not withheld.
@@ -90,6 +96,16 @@ export default async function CreatorPage({ params }: { params: Promise<{ addres
         </a>
       </p>
 
+      {/*
+          Above the stats and the fee section, both of which are sums over `mine`: a
+          launch missing from that list makes every figure below a lower bound rather
+          than a total, and the fee figures are the ones a creator acts on.
+        */}
+      {mineUnreadable.length > 0 && (
+        <div style={{ marginTop: 'var(--space-5)' }}>
+          <UnreadableNotice unreadable={mineUnreadable} />
+        </div>
+      )}
       {error ? (
         <div className="empty" style={{ marginTop: 'var(--space-5)' }}>
           <p className="danger-text">{error}</p>

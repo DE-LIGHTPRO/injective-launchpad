@@ -5,8 +5,12 @@ import {
   getLaunchDetail,
   listQuotes,
   short,
+  mapWithConcurrency,
+  DETAIL_CONCURRENCY,
   type Quote,
 } from '@/lib/chain';
+import { UnreadableNotice } from '@/components/UnreadableNotice';
+import type { UnreadableLaunch } from '@/lib/boardRows';
 import { NETWORK } from '@/lib/config';
 import { compact } from '@/lib/boardMetrics';
 import { denomLabel } from '@/lib/chain';
@@ -37,33 +41,72 @@ export const revalidate = 30;
 export default async function AnalyticsPage() {
   let rows: AnalyticsRow[] = [];
   let failed: string | null = null;
+  /*
+   * EVERY FIGURE ON THIS PAGE IS A SUM OVER `rows`, and `rows.length` is rendered as
+   * "Launches" directly. So a launch whose curve will not answer cannot simply be
+   * dropped: it would make the count wrong and every total a lower bound presented as a
+   * total, on the page whose own heading promises these come from chain state and whose
+   * closing section lists what is not here and why. Naming the gap is the only reading
+   * consistent with that.
+   *
+   * It was a bare `Promise.all` over every launch, which failed the other way too -
+   * rejecting on the first error, so one unreadable curve showed this page as a total
+   * outage. See `DETAIL_CONCURRENCY` for why the fan-out is bounded as well.
+   */
+  let unreadable: UnreadableLaunch[] = [];
 
   try {
     const [launches, { quotes }] = await Promise.all([listLaunches(), listQuotes()]);
     const decimals: Record<string, number> = {};
     for (const q of quotes) decimals[q.denom] = q.decimals;
 
-    rows = await Promise.all(
-      launches.map(async (l) => {
-        const d = await getLaunchDetail(l.curve);
-        const quote: Quote = {
-          denom: d.quoteDenom,
-          decimals: decimals[d.quoteDenom] ?? NETWORK.quoteDecimals,
-          label: denomLabel(d.quoteDenom),
-        };
-        return {
-          quoteDenom: d.quoteDenom,
-          quote,
-          graduated: d.state.graduated,
-          raised: d.state.injCollected,
-          feesAccrued: d.creatorOwed + d.platformOwed,
-          creatorPaid: d.creatorPaid,
-          platformPaid: d.platformPaid,
-          openedAt: d.rules.openedAt ?? null,
-          creator: d.creator,
-        } satisfies AnalyticsRow;
-      }),
+    type Settled = { row: AnalyticsRow } | { gap: UnreadableLaunch };
+
+    const settled = await mapWithConcurrency<(typeof launches)[number], Settled>(
+      launches,
+      DETAIL_CONCURRENCY,
+      async (l) => {
+        try {
+          const d = await getLaunchDetail(l.curve);
+          const quote: Quote = {
+            denom: d.quoteDenom,
+            decimals: decimals[d.quoteDenom] ?? NETWORK.quoteDecimals,
+            label: denomLabel(d.quoteDenom),
+          };
+          return {
+            row: {
+              quoteDenom: d.quoteDenom,
+              quote,
+              graduated: d.state.graduated,
+              raised: d.state.injCollected,
+              feesAccrued: d.creatorOwed + d.platformOwed,
+              creatorPaid: d.creatorPaid,
+              platformPaid: d.platformPaid,
+              openedAt: d.rules.openedAt ?? null,
+              creator: d.creator,
+            } satisfies AnalyticsRow,
+          };
+        } catch (e) {
+          const err = e as Error & { detail?: string };
+          return {
+            gap: {
+              id: l.id,
+              denom: l.denom,
+              creator: l.creator,
+              // `||` not `??`: a non-Error throw gives an empty message, not an absent
+              // one, and an empty reason renders the notice with a blank for the cause.
+              reason: err?.message || 'The curve did not answer.',
+              detail: err?.detail,
+            } satisfies UnreadableLaunch,
+          };
+        }
+      },
     );
+
+    rows = settled.flatMap((r) => ('row' in r ? [r.row] : []));
+    unreadable = settled.flatMap((r) => ('gap' in r ? [r.gap] : []));
+    // Nothing readable is an outage, not a partial read - same split as `loadRows`.
+    if (rows.length === 0 && unreadable.length > 0) failed = unreadable[0].reason;
   } catch (e) {
     failed = (e as Error).message;
   }
@@ -84,6 +127,19 @@ export default async function AnalyticsPage() {
       </p>
 
       {failed && <p className="note danger-text">Could not read the chain: {failed}</p>}
+
+      {/*
+          Directly under the promise it qualifies. The line above says every figure is
+          something the chain will answer for; this is the list of launches it would not.
+
+          Guarded rather than letting the component return null: the wrapper's margin
+          would apply to an empty div and add a gap on every clean load.
+        */}
+      {unreadable.length > 0 && (
+        <div style={{ marginTop: 'var(--space-4)' }}>
+          <UnreadableNotice unreadable={unreadable} />
+        </div>
+      )}
 
       {!failed && rows.length === 0 && (
         <div className="empty" style={{ marginTop: 'var(--space-4)' }}>

@@ -101,7 +101,6 @@ test('a launch that genuinely has no trades reports zero volume, not unknown', a
 
   assert.equal(e.volume24h, 0n, 'an empty but successful trade search is a measured zero');
   assert.equal(e.trades24h, 0);
-  assert.deepEqual(e.series, []);
 });
 
 test('an unknown height leaves a traded launch\u2019s volume unknown', async () => {

@@ -2,7 +2,15 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { listLaunches, getLaunchDetail, resolveQuote, symbolOf, type Quote } from '@/lib/chain';
+import {
+  listLaunches,
+  getLaunchDetail,
+  resolveQuote,
+  symbolOf,
+  mapWithConcurrency,
+  DETAIL_CONCURRENCY,
+  type Quote,
+} from '@/lib/chain';
 import { useConnectedAccount } from '@/lib/walletStore';
 import { fmt } from '@/lib/curve';
 import { selectClaimable, type ClaimRow } from '@/lib/claimable';
@@ -62,24 +70,35 @@ export function ClaimFees() {
          * creator, and the registry already names the creator.
          */
         const mine = launches.filter((l) => l.creator === account.address);
-        const detailed = await Promise.all(
-          mine.map(async (l) => {
-            const d = await getLaunchDetail(l.curve);
-            return {
-              id: l.id,
-              curve: l.curve,
-              symbol: symbolOf(l.denom),
-              // Resolved against every launch, not just this creator's: a ticker
-              // clash with somebody else's launch is exactly the case the short
-              // slug cannot serve.
-              path: launchPath(l, launches),
-              creator: d.creator,
-              owed: d.creatorOwed,
-              quoteDenom: d.quoteDenom,
-              quote: await resolveQuote(d.quoteDenom),
-            };
-          }),
-        );
+        /*
+         * BOUNDED, like the board's. Each launch here is `getLaunchDetail` (two smart
+         * queries) plus `resolveQuote`, so a prolific creator fans out three requests
+         * per launch at once - see `DETAIL_CONCURRENCY` for what the endpoint does to a
+         * burst.
+         *
+         * STILL ALL-OR-NOTHING, unlike the board's, and that is the right answer here
+         * rather than an omission. This page is the input to ONE transaction that claims
+         * the launches it lists; a partial list would build a transaction that quietly
+         * leaves money behind, and the creator's only signal would be a total they had no
+         * reason to doubt. A board that is short a row costs a reader a reload. A claim
+         * that is short a message costs them the claim.
+         */
+        const detailed = await mapWithConcurrency(mine, DETAIL_CONCURRENCY, async (l) => {
+          const d = await getLaunchDetail(l.curve);
+          return {
+            id: l.id,
+            curve: l.curve,
+            symbol: symbolOf(l.denom),
+            // Resolved against every launch, not just this creator's: a ticker
+            // clash with somebody else's launch is exactly the case the short
+            // slug cannot serve.
+            path: launchPath(l, launches),
+            creator: d.creator,
+            owed: d.creatorOwed,
+            quoteDenom: d.quoteDenom,
+            quote: await resolveQuote(d.quoteDenom),
+          };
+        });
         if (live) setRows(detailed);
       } catch (e) {
         if (live) setError((e as Error).message);

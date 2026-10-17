@@ -1,7 +1,6 @@
 import { getLcdUrl, NETWORK } from './config.ts';
 import { isDemoMode } from './demo.ts';
 import { listTrades, currentHeight, type Trade } from './chain.ts';
-import { buildSeries } from './priceSeries.ts';
 
 /**
  * How busy a launch is, from what this chain will actually answer.
@@ -106,25 +105,15 @@ export async function activityFor(curve: string): Promise<LaunchActivity> {
   return { buys, sells, trades: buys + sells };
 }
 
-/**
- * Counts for several launches at once.
- *
- * `null` for a launch whose count could not be read, never zero. Zero is a real and
- * common answer on a new board, so a failed read rendering as "0 trades" would be
- * indistinguishable from a launch nobody has touched, and the quiet version is the
- * one that misleads.
+/*
+ * `activityForAll` LIVED HERE AND NOTHING CALLED IT. An unbounded
+ * `Promise.allSettled(curves.map(activityFor))`, so N launches fired 2N concurrent
+ * searches - and a public LCD throttles by dropping connections rather than answering
+ * 429, measured at 600 concurrent: 50 answered, 550 timed out, and the degradation
+ * outlived the burst. The board reads activity per row instead, and anything fanning out
+ * over launches goes through `mapWithConcurrency`. Removed rather than bounded: a
+ * correct-looking helper nobody calls is the thing the next person reaches for.
  */
-export async function activityForAll(
-  curves: string[],
-): Promise<Record<string, LaunchActivity | null>> {
-  const results = await Promise.allSettled(curves.map((c) => activityFor(c)));
-  const out: Record<string, LaunchActivity | null> = {};
-  curves.forEach((c, i) => {
-    const r = results[i];
-    out[c] = r.status === 'fulfilled' ? r.value : null;
-  });
-  return out;
-}
 
 /**
  * Distinct addresses that have traded on this curve.
@@ -174,21 +163,6 @@ export function volumeWithin(
 function quoteOf(t: Trade): bigint | null {
   const q = t.kind === 'buy' ? t.injIn : t.kind === 'sell' ? t.injOut : null;
   return q !== null && q > 0n ? q : null;
-}
-
-/**
- * Effective fill prices, oldest first, for a sparkline.
- *
- * DELEGATES to `priceSeries.ts`, which already owned this and owned it better: its
- * `fillPrice` takes the quote's decimals, which this did not, and that is about to
- * matter when a launch can be quoted in something other than an 18-decimal INJ.
- *
- * I wrote a second copy here before looking, which is the two-sources-for-one-fact
- * defect this project keeps finding, committed while adding a feature to find it. The
- * duplicate is gone rather than left to drift.
- */
-export function priceSeries(trades: Trade[], quoteDecimals = 18): number[] {
-  return buildSeries(trades, quoteDecimals).points.map((p) => p.price);
 }
 
 /**
@@ -314,9 +288,7 @@ export function tradesLabel(a: LaunchActivity | null | undefined): string | null
   return a.trades.toLocaleString('en-US');
 }
 
-export const QUOTE_SYMBOL = NETWORK.quoteSymbol;
-
-/** How many trades one enrichment pass reads. Bounds both the series and the sum. */
+/** How many trades one enrichment pass reads. Bounds the 24h sum and the 24h count. */
 export const ENRICH_TRADE_LIMIT = 40;
 
 export interface LaunchEnrichment {
@@ -336,19 +308,23 @@ export interface LaunchEnrichment {
    * bounded by that page the same way the volume is.
    */
   trades24h: number;
-  /** Effective prices from real fills, oldest first. Empty when nothing has traded. */
-  series: number[];
-  traders: number;
 }
 
 /**
  * Everything the board shows about a launch's activity, in one pass.
  *
  * THREE REQUESTS PER LAUNCH, AND THAT IS THE DESIGN CONSTRAINT. Two count-only tx
- * searches for the lifetime trade total, and one page of trades that serves the
- * sparkline, the 24h sum and the trader count together. Fetching trades twice, once
- * for the chart and once for volume, would have been the obvious shape and would have
- * doubled the cost of the page's main surface for no new information.
+ * searches for the lifetime trade total, and one page of trades that serves the 24h sum
+ * and the 24h count together. Fetching trades twice, once for each, would have been the
+ * obvious shape and would have doubled the cost of the page's main surface for no new
+ * information.
+ *
+ * IT ALSO CARRIED A `series` AND A `traders` FIGURE, AND NOTHING RENDERED EITHER. The
+ * board card never drew the sparkline they were computed for, and the launch page reads
+ * the same endpoint through `loadTradeView` for the chart and the trader count it does
+ * show. Two fields derived on every card of every board load, for nobody. Deriving them
+ * cost no extra request, which is exactly why it survived: the waste was invisible in
+ * the network panel and only a grep for the reader could find it.
  *
  * There is no indexer behind this, so the board is N-heavy by construction. The
  * mitigation is that this runs AFTER the board paints, and that `Promise.allSettled`
@@ -394,8 +370,6 @@ export async function enrichLaunch(
      * sensible place for a launch nobody could measure is the bottom.
      */
     trades24h: trades === null ? 0 : countWithin(trades, height, BLOCKS_PER_DAY),
-    series: trades === null ? [] : priceSeries(trades),
-    traders: trades === null ? 0 : uniqueTraders(trades),
   };
 }
 

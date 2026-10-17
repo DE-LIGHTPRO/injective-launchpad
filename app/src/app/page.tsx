@@ -14,6 +14,7 @@ import { DemoBanner } from '@/components/DemoBanner';
 import { LaunchList } from '@/components/LaunchList';
 import { Hero, type HeroStats } from '@/components/Hero';
 import { loadRows, toRow, toRows, type Row } from '@/lib/boardRows';
+import { UnreadableNotice } from '@/components/UnreadableNotice';
 import { launchPath } from '@/lib/launchPath';
 
 export const dynamic = 'force-dynamic';
@@ -93,7 +94,7 @@ export default async function Home() {
     );
   }
 
-  const { rows, error, errorDetail } = await loadRows();
+  const { rows, error, errorDetail, unreadable } = await loadRows();
   // Read alongside the rows rather than inside the ticker, so one slow call does not
   // serialise behind another.
   const height = await currentHeight();
@@ -101,6 +102,16 @@ export default async function Home() {
   return (
     <>
       <DemoBanner />
+      {/*
+          ABOVE THE HERO, deliberately, which is the one placement decision here worth
+          writing down. `heroStats` counts the rows that LOADED, so an unreadable launch
+          makes the hero say 3 where the factory lists 4. Putting the notice under the
+          hero would leave a reader working out which number to believe; putting it above
+          means the understated count is already explained by the time they reach it.
+          Same slot as the demo banner, because it is the same kind of statement: what
+          follows is not the whole thing.
+        */}
+      <UnreadableNotice unreadable={unreadable} />
 
       {/*
           Product first. This page used to open with a heading, a curve explainer, three

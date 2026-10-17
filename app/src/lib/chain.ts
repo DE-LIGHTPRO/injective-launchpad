@@ -381,6 +381,69 @@ export async function getLaunchDetail(curveAddress: string): Promise<LaunchDetai
 }
 
 /**
+ * How many launch detail reads may be in flight at once.
+ *
+ * `getLaunchDetail` is TWO smart queries, and the factory's launch list carries no
+ * curve state, so a board of N launches is 2N round trips however it is written. The
+ * three places that fan it out all used a bare `Promise.all` over every launch, which
+ * is unbounded: the request count is whatever the launchpad's success happens to be.
+ *
+ * MEASURED against `testnet.sentry.lcd.injective.network` on 16 Oct 2026, each burst a
+ * single `Promise.all` of identical smart queries from one host:
+ *
+ *     50 concurrent     all 200                                     2,640ms
+ *     200 concurrent    all 200                                     5,682ms
+ *     600 concurrent    50 ok, 550 THREW UND_ERR_CONNECT_TIMEOUT   77,873ms
+ *     1000 concurrent   105 ok, 895 threw                          83,531ms
+ *
+ * So the endpoint does not answer 429 - it drops connections, and `fetch` throws. Two
+ * things make that worse than the table looks. The degradation OUTLIVES the burst:
+ * after those two runs, a repeat of the 200 that had just succeeded failed 200/200,
+ * and a single lone query took 11.7s against the ~160ms it costs cold. And on the
+ * server every visitor's board render shares one instance's egress, so the launchpad
+ * would throttle itself out of its own front page - reported, through `smartQuery`'s
+ * catch, as "Could not reach mainnet".
+ *
+ * 16 is an order of magnitude under the observed cliff rather than a tuned figure.
+ * There is no point tuning it: it bounds the damage, it does not make the shape right.
+ * Past a few hundred launches this board needs the factory to return the state it
+ * lists, or an index; a concurrency limit only turns "fails and blames the network"
+ * into "slow". That is a better failure, not a fixed one.
+ */
+export const DETAIL_CONCURRENCY = 16;
+
+/**
+ * `items.map(fn)` with at most `limit` running at once, results in input order.
+ *
+ * Deliberately NOT a settling variant. A caller that wants to survive one item
+ * failing has to say so, in its own `fn`, by catching and returning a value that says
+ * the read failed - because what to do with a launch whose detail will not load is a
+ * decision about that screen, and the callers here answer it differently. Hiding it
+ * in here would make the rejecting case the quiet default again.
+ */
+export async function mapWithConcurrency<T, R>(
+  items: readonly T[],
+  limit: number,
+  fn: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const out = new Array<R>(items.length);
+  let next = 0;
+  const worker = async () => {
+    for (;;) {
+      const i = next;
+      next += 1;
+      if (i >= items.length) return;
+      out[i] = await fn(items[i], i);
+    }
+  };
+  // `Math.max(1, …)` so a misconfigured limit stalls nothing: zero workers would
+  // resolve immediately with an array of holes, which reads downstream as a board
+  // where every launch failed rather than as a configuration mistake.
+  await Promise.all(Array.from({ length: Math.min(Math.max(1, limit), items.length) }, worker));
+  return out;
+}
+
+/**
  * Code id and admin of a contract, from the wasm module itself rather than from
  * anything the contract says about itself. `null` when it cannot be read; demo
  * launches have no contract, so they are `null` too.
@@ -608,45 +671,29 @@ export async function listTrades(curve: string, limit = 20): Promise<Trade[]> {
   return out;
 }
 
-/**
- * Real minted supply for a denom, from the bank module.
+/*
+ * `denomSupply` LIVED HERE AND NOTHING CALLED IT, and the reason to delete rather than
+ * wire it is worth writing down, because the uncalled version looked like an honesty
+ * check the board was missing.
  *
- * Worth reading rather than trusting the launch config, because the two can
- * disagree and only one of them is what exists: the config says what the curve
- * was told to sell, and this says what was actually minted. A launch seeded with
- * the wrong amount, or a denom whose admin minted more afterwards, shows up here
- * and nowhere else on the page.
+ * It read `bank/v1beta1/supply/by_denom` to verify a launch's real minted supply against
+ * the 1B the config claims, on the theory that a denom whose admin minted more would show
+ * up there and nowhere else. BUT NO ADMIN CAN. The factory hands the tokenfactory denom
+ * admin to the launch's own curve contract (`MsgChangeAdmin`, `factory/src/lib.rs`), and
+ * the curve has no mint path and no change-admin path at all - checked, not assumed. So
+ * the supply is fixed by code the moment a launch is created, and a per-launch request
+ * verifying it could only ever confirm what the wasm already guarantees. The residual
+ * risk is a curve migration adding a mint, which is why the wasm admin is a multisig; a
+ * supply read on the board would not catch that either, since a migration can change what
+ * the launch page claims at the same time.
  *
- * `supply/by_denom` answers a tokenfactory denom correctly, unlike
- * `denom_owners` above. Verified against a live testnet factory denom on
- * 3 Oct 2026: 6000000 for factory/inj100z6…/subtoken.
- *
- * ZERO AND NONEXISTENT ARE THE SAME ANSWER HERE, and the docstring said otherwise
- * until it was checked. This endpoint returns HTTP 200 with `{"amount":"0"}` for a
- * denom that has never existed, exactly as it would for one minted and then burned
- * entirely, so the distinction cannot be recovered from this call. Callers must not
- * render 0 as "fully burned". `null` is returned only when the body is not a supply
- * at all, which is a different thing again: the network did not answer the question.
+ * Two measurements from it that are worth keeping. `supply/by_denom` does answer a
+ * tokenfactory denom correctly, unlike `denom_owners` (501 on this chain) - verified
+ * 3 Oct 2026, 6000000 for factory/inj100z6…/subtoken. And ZERO AND NONEXISTENT ARE THE
+ * SAME ANSWER: it returns 200 with `{"amount":"0"}` for a denom that has never existed,
+ * exactly as for one minted and burned entirely, so nothing may render 0 as "fully
+ * burned". Rule-45 shape, in an endpoint that looks like it distinguishes them.
  */
-export async function denomSupply(denom: string): Promise<bigint | null> {
-  const url = `${getLcdUrl()}/cosmos/bank/v1beta1/supply/by_denom?denom=${encodeURIComponent(denom)}`;
-
-  let res: Response;
-  try {
-    res = await fetch(url, { headers: { accept: 'application/json' } });
-  } catch (e) {
-    throw new ChainError(`Could not reach ${NETWORK.name} to read supply.`, (e as Error).message);
-  }
-  // Kept for other nodes: this one answers 200 with "0" instead, which is why the
-  // note above is explicit that 0 cannot be read as "burned".
-  if (res.status === 404) return null;
-  if (!res.ok) throw translateQueryError(res.status, await res.text().catch(() => ''));
-
-  const json = (await res.json()) as { amount?: { denom?: string; amount?: string } };
-  const raw = json.amount?.amount;
-  if (typeof raw !== 'string' || !/^[0-9]+$/.test(raw)) return null;
-  return BigInt(raw);
-}
 
 /**
  * The chain's current block height, or null when it could not be read.
@@ -844,13 +891,6 @@ export interface Quote {
   /** This asset's opening virtual reserve, in whole units. See `QuoteAsset`. */
   virtualWhole?: number;
 }
-
-/** The network's default quote, for surfaces that are about the platform. */
-export const DEFAULT_QUOTE: Quote = {
-  denom: NETWORK.quoteDenom,
-  decimals: NETWORK.quoteDecimals,
-  label: denomLabel(NETWORK.quoteDenom),
-};
 
 /**
  * Resolve a launch's quote, including the decimals that scale every figure shown in

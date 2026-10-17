@@ -352,6 +352,28 @@ h3 { font-size: var(--text-base); font-weight: 600; }
 .demo-banner strong { color: var(--warn); }
 .demo-banner span { color: var(--text-dim); }
 
+/*
+ * A board that is missing launches it knows about. Same weight as the demo banner on
+ * purpose: both say "what you are looking at is not the thing you think it is", and
+ * styling this one down would make an incomplete board read as a complete one.
+ */
+.read-gap {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2) var(--space-3);
+  background: linear-gradient(90deg, rgba(242, 180, 92, 0.12), transparent);
+  border: 1px solid rgba(242, 180, 92, 0.3);
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-4);
+  margin-bottom: var(--space-5);
+  font-size: var(--text-sm);
+}
+.read-gap strong { color: var(--warn); }
+/* `min-width: 0` so the ticker list wraps instead of forcing the page sideways. */
+.read-gap span { color: var(--text-dim); min-width: 0; flex: 1 1 24ch; }
+.read-gap code { flex-basis: 100%; color: var(--text-faint); font-size: var(--text-micro); }
+
 /* ----------------------------------------------------------------- cards -- */
 
 /* `min(290px, 100%)` so a track collapses on a narrow screen instead of forcing the
@@ -991,12 +1013,19 @@ button.ghost { background: transparent; border: 1px solid var(--line); color: va
  *
  * `<label class="toggle">` wraps the input, so clicking the text toggles it and
  * the hit area is the whole row rather than a 24px square. The gap keeps the box
- * off the text, and `align-items: start` stops a two-line label centring its
+ * off the text, and `align-items: flex-start` stops a two-line label centring its
  * checkbox against the middle of the paragraph.
+ *
+ * `flex-start`, not the bare `start`, which is what this said until the production
+ * build warned "start value has mixed support". In a FLEX container Safari does not
+ * honour the box-alignment keyword and falls back to stretching, which is precisely
+ * the two-line-label defect this line exists to prevent - so it would have failed in
+ * the one browser it was written for, silently, and only there. The grid uses of
+ * `start` elsewhere in this file are fine and autoprefixer flags neither.
  */
 .toggle {
   display: flex;
-  align-items: start;
+  align-items: flex-start;
   gap: var(--space-3);
   cursor: pointer;
   font-size: var(--text-sm);
@@ -1679,26 +1708,6 @@ header.top .brand { display: inline-flex; align-items: center; gap: var(--space-
   color: var(--text);
 }
 .logo-drop .note { margin: 0; }
-
-/*
- * Card sparkline.
- *
- * Sized in the component rather than here, because the SVG needs the same numbers to
- * build its path and two sources for one size is how a chart ends up clipped.
- */
-/*
- * NOT `.spark`. That name was already taken by the launch page's fills chart
- * container (above), and reusing it put a 0.9 opacity on that chart as a side effect.
- * The class guard did not catch it, because it checks that a class EXISTS in the
- * stylesheet, which `.spark` did; a collision looks identical to correct reuse.
- */
-.sparkline { display: block; flex: none; opacity: 0.9; }
-.card-spark {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  min-width: 0;
-}
 
 /*
  * The pair filter, which only appears when more than one quote is in use.

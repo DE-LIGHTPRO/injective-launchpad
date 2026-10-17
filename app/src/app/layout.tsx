@@ -44,9 +44,20 @@ export const viewport: Viewport = {
   colorScheme: 'dark',
 };
 
+/**
+ * `data-scroll-behavior` is not decoration. `globals.css` sets
+ * `html { scroll-behavior: smooth }` for in-page anchors, and today Next
+ * temporarily forces `auto` during a route change so a navigation does not
+ * animate-scroll the page. In v16 that stops being automatic: without this
+ * attribute the forcing is skipped entirely and every route change smooth
+ * scrolls the whole board. Read out of `disable-smooth-scroll.js`, which falls
+ * through to the same style manipulation whether or not the attribute is set -
+ * so this changes nothing today and keeps the current behaviour after the
+ * upgrade, which is the opposite of what the warning's wording suggests.
+ */
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`${sans.variable} ${mono.variable}`}>
+    <html lang="en" data-scroll-behavior="smooth" className={`${sans.variable} ${mono.variable}`}>
       <body>
         <a href="#main" className="skip-link">
           Skip to content
