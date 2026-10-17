@@ -1078,6 +1078,7 @@ export function CreateLaunch() {
           description={f.description}
           image={f.image}
           quoteLabel={quoteLabel}
+          quoteDecimals={quoteDecimals}
           buyFeePct={Number(built.curve.feeBps) / 100}
           sellFeePct={built.feeSellBps / 100}
           rewardRoute={f.rewardRoute as 'creator' | 'pool'}

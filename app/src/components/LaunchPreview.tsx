@@ -31,6 +31,7 @@ export function LaunchPreview({
   description,
   image,
   quoteLabel,
+  quoteDecimals,
   buyFeePct,
   sellFeePct,
   rewardRoute,
@@ -44,6 +45,19 @@ export function LaunchPreview({
   description: string;
   image: string;
   quoteLabel: string;
+  /**
+   * Decimals of that quote, which scale the opening buy.
+   *
+   * REQUIRED, and it did not exist: the opening buy was scaled by a literal 18 with
+   * `quoteLabel` printed next to it. On the 6-decimal E2EUSD pair every opening buy
+   * rendered as `0 E2EUSD` - measured at 0.5, 5, 100 and 1915 - beside a share of
+   * supply that was computed correctly, so the one row on this card that is a number
+   * the creator typed read zero while the row said they were taking 12% of the supply.
+   * Required rather than defaulted for the reason `CurveChart` records: a default of 18
+   * is the right answer for the default pair and silently wrong for every other, which
+   * is what makes it the trap rather than the convenience.
+   */
+  quoteDecimals: number;
   buyFeePct: number;
   sellFeePct: number;
   rewardRoute: RewardRoute;
@@ -127,6 +141,9 @@ export function LaunchPreview({
           */}
         <span className="k">Max per wallet</span>
         <span className="v mono">
+          {/* 18 is right here and must not be "fixed" to the quote: a cap is a count of
+              TOKENS, and every token on this launchpad is 18 decimals. The opening buy
+              below is the one in the quote asset. */}
           {rules.maxPerWallet ? fmt(BigInt(rules.maxPerWallet), 18, 0) : 'no cap'}
         </span>
       </div>
@@ -150,7 +167,7 @@ export function LaunchPreview({
         <span className="k">Your opening buy</span>
         <span className="v mono">
           {openingBuy > 0n
-            ? `${fmt(openingBuy, 18, 4)} ${quoteLabel}${
+            ? `${fmt(openingBuy, quoteDecimals, 4)} ${quoteLabel}${
                 openingBuyShare !== null ? ` · ${(openingBuyShare * 100).toFixed(1)}% of supply` : ''
               }`
             : 'none'}

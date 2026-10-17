@@ -41,6 +41,15 @@ const PER_LAUNCH = [
   'components/KingOfTheHill.tsx',
   'components/CurveChart.tsx',
   'components/PairPanels.tsx',
+  /*
+   * THE LIST WENT STALE AND THIS IS THE FILE THAT PROVED IT. `LaunchPreview` renders a
+   * creator's opening buy against the selected pair's ticker, which is a per-launch
+   * money figure by any reading, and it was never added - so none of the guards below
+   * looked at it. It would not have been caught anyway: it uses neither
+   * `NETWORK.quoteSymbol` nor a hardcoded ticker, which are the two spellings the text
+   * guards know. Only the arithmetic assertion further down binds it.
+   */
+  'components/LaunchPreview.tsx',
   'app/launch/[slug]/page.tsx',
 ];
 
@@ -219,6 +228,76 @@ test('every curve chart is handed the quote it is drawing', () => {
   // Anti-vacuity: a rename would otherwise leave this passing over nothing.
   assert.ok(sites.length >= 2, `expected the chart to be used, found ${sites.length} call sites`);
   assert.deepEqual(offenders, [], 'a curve chart is drawing a launch in the default quote');
+});
+
+test('a ticker and a scale are one prop pair, and neither is optional', () => {
+  /*
+   * THE CLASS, RATHER THAN THE TWO INSTANCES OF IT. `CurveChart` had its own test above
+   * because its axis was labelled INJ and scaled by 1e18; `LaunchPreview` then shipped
+   * the same defect in the half nobody guards, by taking `quoteLabel` and NOT taking a
+   * scale at all - so `fmt(openingBuy, 18, 4)` stood next to a dynamic ticker and every
+   * opening buy on the 6-decimal pair read `0 E2EUSD`.
+   *
+   * A component that accepts a ticker is rendering somebody's quote, so it needs the
+   * decimals of that quote in the same breath. Declaring one without the other is the
+   * omission to refuse, and both must be required: a default is right for the default
+   * pair, which is what makes it survive review.
+   */
+  const offenders: string[] = [];
+  for (const file of tsxFiles(SRC)) {
+    const src = stripComments(readFileSync(file, 'utf8'));
+    const rel = file.slice(SRC.length + 1);
+    /*
+     * Deliberately not anchored to the line start. `TradeTicker` declares both on one
+     * line inside an inline array type and `page.tsx` builds them in an object literal,
+     * so an anchored pattern skips the two files that carry a quote furthest from where
+     * it is formatted - which is the shape this is for.
+     */
+    if (!/\bquoteLabel\s*[:?]/.test(src)) continue;
+    if (!/\bquoteDecimals\s*[:?]/.test(src)) {
+      offenders.push(`${rel}: takes quoteLabel and no quoteDecimals`);
+    }
+    for (const prop of ['quoteLabel', 'quoteDecimals']) {
+      if (new RegExp(`\\b${prop}\\s*\\?\\s*:`).test(src)) offenders.push(`${rel}: ${prop} is optional`);
+      if (new RegExp(`\\b${prop}\\s*=\\s*['\`\\d]`).test(src)) offenders.push(`${rel}: ${prop} is defaulted`);
+    }
+  }
+  assert.deepEqual(offenders, [], 'a surface takes a ticker without the scale that goes with it');
+});
+
+test('the opening buy on the sign-off card is scaled by the chosen pair', () => {
+  /*
+   * WHAT THE PROP GUARD ABOVE CANNOT SEE: declaring `quoteDecimals` and then still
+   * passing 18 to `fmt` typechecks, satisfies every text assertion in this file, and
+   * leaves the card reading zero. So this binds the arithmetic at the one place it
+   * matters, the same way the `unitFor(quoteDecimals)` assertion does for the chart.
+   *
+   * It is the worst row on the worst card to have this on. The heading is "Before you
+   * sign", the copy underneath is "Every line here is fixed once the transaction
+   * lands", and the opening buy is the only figure on it the creator typed themselves -
+   * shown as 0 while the share of supply beside it, computed from the same value,
+   * was right.
+   */
+  const src = stripComments(readFileSync(join(SRC, 'components/LaunchPreview.tsx'), 'utf8'));
+  assert.match(
+    src,
+    /fmt\(\s*openingBuy\s*,\s*quoteDecimals\b/,
+    'the opening buy is scaled by a constant rather than by the chosen pair',
+  );
+
+  // And somebody has to pass it. Found by walking, so a second sign-off card is covered.
+  const sites: string[] = [];
+  const bare: string[] = [];
+  for (const file of tsxFiles(SRC)) {
+    const inner = stripComments(readFileSync(file, 'utf8'));
+    for (const m of inner.matchAll(/<LaunchPreview\b([\s\S]*?)\/>/g)) {
+      const rel = file.slice(SRC.length + 1);
+      sites.push(rel);
+      if (!/\bquoteDecimals=/.test(m[1])) bare.push(`${rel}: no quoteDecimals`);
+    }
+  }
+  assert.ok(sites.length >= 1, `expected the sign-off card to be used, found ${sites.length} call sites`);
+  assert.deepEqual(bare, [], 'a sign-off card is pricing an opening buy in the default quote');
 });
 
 test('the create form states the reserve the chosen pair actually opens at', () => {

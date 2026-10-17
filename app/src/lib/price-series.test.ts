@@ -10,6 +10,8 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
 import { fillPrice, buildSeries, changeBps } from './priceSeries.ts';
 import type { Trade } from './chain.ts';
 
@@ -152,3 +154,51 @@ test('change is measured first fill to last, in basis points', () => {
  * unreachable function is the false confidence this project keeps finding rather
  * than evidence of coverage.
  */
+
+/*
+ * ------------------------------------------------------------------------------------
+ * AND THE QUOTE'S SCALE, which both entry points default to 18.
+ *
+ * 18 is right for an INJ launch and wrong by a factor of 1e12 for a 6-decimal one, so
+ * a bare `fillPrice(t)` draws a stablecoin launch's whole chart a trillion times too
+ * low and nothing throws. Both production callers pass the launch's own decimals today;
+ * this is what stops the third one from not bothering.
+ *
+ * The defaults stay rather than being made required: fifteen assertions above are about
+ * the arithmetic and read better on an 18/18 pair, and the hazard is at the call site,
+ * which is where this looks for it. The tests themselves are excluded by walking only
+ * non-test sources.
+ * ------------------------------------------------------------------------------------
+ */
+
+test('no production caller prices a fill in the default quote', () => {
+  const SRC = join(import.meta.dirname, '..');
+  const files: string[] = [];
+  const walk = (dir: string) => {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      const p = join(dir, e.name);
+      if (e.isDirectory()) walk(p);
+      else if (/\.tsx?$/.test(e.name) && !e.name.endsWith('.test.ts')) files.push(p);
+    }
+  };
+  walk(SRC);
+
+  const sites: string[] = [];
+  const bare: string[] = [];
+  for (const file of files) {
+    const src = readFileSync(file, 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, (m) => ' '.repeat(m.length))
+      .replace(/\/\/[^\n]*/g, '');
+    const rel = file.slice(SRC.length + 1);
+    // The definitions themselves carry the defaults and are not call sites.
+    if (rel === 'lib/priceSeries.ts') continue;
+    for (const m of src.matchAll(/\b(fillPrice|buildSeries)\(([^)]*)\)/g)) {
+      sites.push(`${rel}: ${m[1]}`);
+      // Two arguments, the second of which is not a literal number.
+      if (!/,\s*[A-Za-z_$]/.test(m[2])) bare.push(`${rel}: ${m[1]}(${m[2].replace(/\s+/g, ' ')})`);
+    }
+  }
+  // Anti-vacuity: a rename would otherwise leave this passing over nothing.
+  assert.ok(sites.length >= 2, `expected the series to be built somewhere, found ${sites.length} call sites`);
+  assert.deepEqual(bare, [], 'a fill is priced at the default 18 decimals rather than the launch\u2019s quote');
+});

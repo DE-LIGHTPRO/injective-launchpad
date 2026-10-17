@@ -22,7 +22,12 @@ import { marketCapExact, type CurveConfig, type CurveState, type PoolReserves } 
  * which is why it is recorded as lifted rather than quietly deleted.
  */
 
-const ONE = 10n ** 18n;
+/*
+ * THERE WAS A `const ONE = 10n ** 18n` HERE AND NOTHING READ IT. It is deleted rather
+ * than left: this module formats quote amounts, every caller of `compact` passes the
+ * launch's own `quoteDecimals`, and an unused 18-decimal unit sitting at the top of the
+ * file is the thing somebody reaches for when they add the next figure to a card.
+ */
 
 /**
  * Market cap: spot price times the whole supply.

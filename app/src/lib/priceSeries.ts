@@ -74,9 +74,17 @@ export const EMPTY_SERIES: Series = {
  * it. That asymmetry is real: it is the spread a round trip pays, and smoothing it
  * away would draw a line nobody traded on.
  *
- * Scaled through integers before the single division, because quote and token are
- * both 18 decimals here and `Number(1e18) / Number(1e24)` loses the answer before
- * it is computed.
+ * THE QUOTE IS NOT 18 DECIMALS, and this docblock said it was. It read "quote and
+ * token are both 18 decimals here", which was true when it was written and stopped
+ * being true when the factory's allowlist grew a 6-decimal asset: both decimals became
+ * parameters and the sentence above them was left describing the old world. A stale
+ * docblock on the definition is how the next caller is talked into the default, which
+ * is the whole shape of the flat-curve defect `plotPrice` records in `curve.ts`.
+ *
+ * The defaults are right for an INJ launch and silently wrong for a stablecoin one, so
+ * both production callers pass the launch's own figures and `price-series.test.ts`
+ * refuses a bare call. The token side is 18 on every launch this launchpad creates;
+ * the quote side is whatever the creator picked.
  */
 export function fillPrice(t: Trade, quoteDecimals = 18, tokenDecimals = 18): number | null {
   const quote = t.kind === 'buy' ? t.injIn : t.kind === 'sell' ? t.injOut : null;
