@@ -13,7 +13,7 @@
  * the same contract, and the rules stop completely: like Pons's anti-snipe window, they
  * are launch-window rules and they expire.
  *
- * So the wording is fixed, and `test/launch-rules.test.ts` holds it: "on the curve",
+ * So the wording is fixed, and `launch-rules.test.ts` holds it: "on the curve",
  * "until it graduates", never "on the token" and never "every transfer".
  */
 

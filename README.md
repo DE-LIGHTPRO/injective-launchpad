@@ -106,7 +106,7 @@ Two surfaces, deliberately separate:
 - `scripts/.env.example` — what the deploy script reads, including the signing
   credential. Unprefixed, so it cannot reach the bundle.
 
-`src/lib/env-surface.test.ts` asserts both files document exactly what the code
+`app/src/lib/env-surface.test.ts` asserts both files document exactly what the code
 reads, in both directions, and that no secret-shaped variable carries the public
 prefix. A variable nothing reads advertises a switch that does nothing; one the
 code reads and nobody wrote down is a step missing on deployment day.
