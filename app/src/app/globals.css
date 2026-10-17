@@ -94,7 +94,26 @@
    */
   --text-display: 1.875rem; /* 30px */
 
-  /* Spacing, 4px base */
+  /*
+   * SPACING, 4px base, declared in `rem` on purpose: padding written in rem follows a
+   * reader who has raised their browser's default font size, and padding written in px
+   * does not. Nothing in this file sets a root font size, so at the default 16px every
+   * step is exactly its 4px multiple - measured, since the equivalence is the whole
+   * reason the substitution below was safe.
+   *
+   * Eleven declarations restated a step as a pixel literal and now name it. Seven more
+   * are left alone deliberately, because they are SHORTHANDS WITH ONE AXIS OFF SCALE -
+   * `table.board th { padding: 10px 16px }`, `.search input { padding: 0 12px 0 34px }`
+   * where the 34px is room for the icon. A shorthand is one declaration, so it takes
+   * tokens or literals and not both: `10px var(--space-4)` would read as considered
+   * while the vertical axis is still drift, which is worse than leaving it plainly
+   * untouched.
+   *
+   * The off-scale values that remain are mostly control padding - 2px, 6px, 10px, 14px -
+   * and a 4px scale cannot express them. That is a limit of the scale rather than a
+   * defect in the rules, and the alternative (a 2px scale) names so much that it names
+   * nothing.
+   */
   --space-1: 0.25rem;
   --space-2: 0.5rem;
   --space-3: 0.75rem;
@@ -1196,7 +1215,7 @@ button.ghost { background: transparent; border: 1px solid var(--line); color: va
   margin: var(--space-3) 0 var(--space-2);
 }
 .chart-ohlc strong { color: var(--text); font-size: var(--text-xs); }
-.chart-ohlc i { font-style: normal; color: var(--text-faint); margin-right: 4px; }
+.chart-ohlc i { font-style: normal; color: var(--text-faint); margin-right: var(--space-1); }
 .chart-ohlc .up { color: var(--buy); }
 .chart-ohlc .down { color: var(--danger); }
 .chart-ohlc-tf { color: var(--text-faint); }
@@ -2014,7 +2033,7 @@ header.top .chip { font-size: var(--text-micro); letter-spacing: 0.04em; padding
 
 .skip-link {
   position: absolute; left: var(--space-4); top: -48px; z-index: 20;
-  background: var(--surface-3); color: var(--text); padding: 8px 12px; border-radius: var(--radius-sm);
+  background: var(--surface-3); color: var(--text); padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm);
 }
 .skip-link:focus { top: 12px; }
 
@@ -2076,7 +2095,7 @@ header.top .chip { font-size: var(--text-micro); letter-spacing: 0.04em; padding
 .board-tab {
   display: inline-flex; align-items: center; gap: 7px;
   background: none; border: none; border-bottom: 2px solid transparent;
-  padding: 8px 12px; margin-bottom: -1px;
+  padding: var(--space-2) var(--space-3); margin-bottom: -1px;
   font: inherit; font-size: var(--text-sm); color: var(--text-dim); cursor: pointer;
 }
 .board-tab:hover { color: var(--text); }
@@ -2120,7 +2139,7 @@ table.board th {
   text-align: left; font-weight: 500; font-size: var(--text-xs); color: var(--text-faint);
   padding: 10px 16px; border-bottom: 1px solid var(--line); white-space: nowrap; background: var(--surface-1);
 }
-table.board td { padding: 12px 16px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+table.board td { padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--line); white-space: nowrap; }
 table.board tbody tr:last-child td { border-bottom: none; }
 table.board tbody tr { position: relative; transition: background 0.12s var(--ease); }
 table.board tbody tr:hover { background: var(--surface-2); }
@@ -2130,14 +2149,14 @@ table.board .strong { font-weight: 600; color: var(--text); }
 table.board .unit { color: var(--text-faint); font-weight: 400; font-size: 0.92em; }
 table.board .dim { color: var(--text-faint); }
 .c-rank { width: 40px; color: var(--text-faint); padding-right: 0 !important; }
-.tok { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.tok { display: flex; align-items: center; gap: var(--space-3); min-width: 0; }
 .tok-text { display: flex; flex-direction: column; min-width: 0; }
 .row-link { font-weight: 600; color: var(--text); }
 /* Stretched link: the whole row navigates, the table stays a table. */
 .row-link::after { content: ''; position: absolute; inset: 0; }
 .row-link:focus-visible { box-shadow: none; }
 .row-link:focus-visible::after { box-shadow: inset 0 0 0 2px var(--accent-text); border-radius: 0; }
-.tok-sub { display: inline-flex; align-items: center; gap: 8px; font-size: var(--text-xs); color: var(--text-faint); }
+.tok-sub { display: inline-flex; align-items: center; gap: var(--space-2); font-size: var(--text-xs); color: var(--text-faint); }
 /* The last fractional font size in the file. Half a pixel under the base chip is not a
    decision anyone can see, it is drift - and it is the specific thing that makes an
    interface read as unconsidered, because 10.5px is a number nobody chose twice. The
@@ -2173,7 +2192,7 @@ table.board .dim { color: var(--text-faint); }
    * The `#` cell sets `padding-right: 0`, so it contributes half.
    */
   table.board th,
-  table.board td { padding-left: 8px; padding-right: 8px; }
+  table.board td { padding-left: var(--space-2); padding-right: var(--space-2); }
 
   /*
    * The creator name is the only unbounded string in the row. `white-space: nowrap` on
@@ -2186,7 +2205,7 @@ table.board .dim { color: var(--text-faint); }
    * bounding the name bounds the column: a flex column is as wide as its widest child,
    * and the token symbol, which is the row's identity, is short and stays in full.
    */
-  .tok { gap: 8px; }
+  .tok { gap: var(--space-2); }
   .tok-creator {
     max-width: 48px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
@@ -2308,7 +2327,7 @@ table.board .dim { color: var(--text-faint); }
 
 .token-head { display: flex; align-items: center; gap: 14px; }
 .token-title { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.denom-row { display: flex; align-items: center; gap: 8px; margin-top: 4px; font-size: var(--text-xs); color: var(--text-faint); min-width: 0; }
+.denom-row { display: flex; align-items: center; gap: var(--space-2); margin-top: var(--space-1); font-size: var(--text-xs); color: var(--text-faint); min-width: 0; }
 .denom-row span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .token-head + .trust { margin-top: var(--space-4); }
 
