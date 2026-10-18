@@ -1,7 +1,8 @@
+import { cache } from 'react';
 import Link from 'next/link';
 import type { Metadata } from 'next';
 import { notFound, redirect } from 'next/navigation';
-import { getLaunch, listLaunches, listQuotes, getLaunchDetail, resolveQuote, quoteFromList, symbolOf, short, ChainError, contractFacts } from '@/lib/chain';
+import { getLaunch, listLaunches, listQuotes, getLaunchDetail, quoteFromList, symbolOf, short, ChainError, contractFacts, type Launch } from '@/lib/chain';
 import { resolveLaunchSlug, launchPath, pathForSlug, parseLaunchRef } from '@/lib/launchPath';
 import { assessCurveCode, blocksTrading, pinnedCodeIds } from '@/lib/codeCheck';
 import { CodeCheck } from '@/components/CodeCheck';
@@ -32,6 +33,50 @@ import { EMPTY_SERIES } from '@/lib/priceSeries';
 
 export const dynamic = 'force-dynamic';
 
+/* ---------------------------------------------------------------------------
+   THE SHARE CARD AND THE PAGE READ THE SAME CHAIN STATE, ONCE.
+
+   Next renders `generateMetadata` and the component for one request, and they
+   each read what they need. Counted by logging every query against the live
+   testnet, one warm request to `/launch/GHDSJS` sent NINE smart queries for
+   FOUR distinct questions:
+
+       launches {}   x3      config {}   x2
+       quotes {}     x2      state {}    x2
+
+   Volume is the smaller half of it. `launchForSlug` is a function and not
+   inline because, as the comment on it says, "a share card built from a
+   different launch than the page renders is the quietest way to mislead
+   somebody, and two separate resolutions is exactly how that happens" - and
+   the detail, the quote and the board were two separate resolutions anyway,
+   taken a few hundred milliseconds and possibly a block apart. The card
+   reports progress to one decimal place. Two reads either side of a fill
+   disagree, and the version in the preview is the one that gets cached by
+   whatever scraped it.
+
+   `cache` from React memoises for the duration of ONE request, which is the
+   unit that matters here: no state is held between visitors, and a second
+   visitor still reads the chain afresh. This is also why these wrappers live
+   in this server-only file rather than in `lib/chain.ts` - that module is
+   imported by client components, where `cache` does not apply.
+   --------------------------------------------------------------------------- */
+
+/**
+ * Every launch, once per request. Falls back to empty, as the page always has.
+ *
+ * The metadata's fallback used to be `[launch]` rather than `[]`, and the difference
+ * is nothing: `launchSlug` tests the clash list with `o.id !== launch.id`, so a list
+ * holding only this launch and an empty list both say "no clash" and both yield the
+ * bare ticker.
+ */
+const allLaunches = cache(() => listLaunches().catch((): Launch[] => []));
+
+/** One curve's config and state, once per request per curve. */
+const detailOf = cache((curve: string) => getLaunchDetail(curve));
+
+/** The factory's quote allowlist, once per request. */
+const allowlist = cache(() => listQuotes());
+
 /**
  * What a shared launch link looks like.
  *
@@ -55,7 +100,7 @@ export async function generateMetadata({
   try {
     const launch = await launchForSlug(slug);
     if (!launch) return { title: 'Launch' };
-    const detail = await getLaunchDetail(launch.curve);
+    const detail = await detailOf(launch.curve);
     const sym = symbolOf(detail.denom);
     const pct = (graduationProgress(detail.config, detail.state) * 100).toFixed(1);
     /*
@@ -63,7 +108,7 @@ export async function generateMetadata({
      * quote. This is the copy with the widest reach: it is what a link preview shows
      * in a chat, where nobody can click through to check the units.
      */
-    const q = await resolveQuote(detail.quoteDenom);
+    const q = quoteFromList(detail.quoteDenom, (await allowlist()).quotes);
     const raised = fmt(detail.pool ? detail.pool.quote : detail.state.injCollected, q.decimals, 2);
     const target = fmt(detail.config.graduationTarget, q.decimals, 0);
 
@@ -89,7 +134,7 @@ export async function generateMetadata({
        * temporary (see the page body), so this is what keeps `/launch/7` and
        * `/launch/INJINU` from competing with each other in search.
        */
-      alternates: { canonical: launchPath(launch, await listLaunches().catch(() => [launch])) },
+      alternates: { canonical: launchPath(launch, await allLaunches()) },
       openGraph: { title: `${sym} on ${BRAND_NAME}`, description, type: 'website' },
       twitter: { card: 'summary', title: `${sym} on ${BRAND_NAME}`, description },
     };
@@ -122,7 +167,7 @@ async function launchForSlug(slug: string) {
       return null;
     }
   }
-  return resolveLaunchSlug(slug, await listLaunches()).launch;
+  return resolveLaunchSlug(slug, await allLaunches()).launch;
 }
 
 
@@ -145,7 +190,7 @@ export default async function LaunchPage({ params }: { params: Promise<{ slug: s
    * of the board rather than of the launch. One read, reused for the redirect
    * decision and for the clash list.
    */
-  const board = await listLaunches().catch(() => []);
+  const board = await allLaunches();
   const { launch: resolved, candidates, canonical } = resolveLaunchSlug(slug, board);
 
   /*
@@ -204,9 +249,9 @@ export default async function LaunchPage({ params }: { params: Promise<{ slug: s
      * detail, the quote, then the trade history.
      */
     [detail, facts, { quotes }] = await Promise.all([
-      getLaunchDetail(launch.curve),
+      detailOf(launch.curve),
       contractFacts(launch.curve, launch.denom),
-      listQuotes(),
+      allowlist(),
     ]);
   } catch (e) {
     /*

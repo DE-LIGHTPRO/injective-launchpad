@@ -20,6 +20,14 @@
  *    byte-identical queries for a list identical across the board, a third of that
  *    page's requests. Nothing cached them: `smartQuery` is a bare `fetch` and the
  *    component is client-side, so Next's request dedupe never saw it.
+ *  - AND ON THE SAME PAGE, `generateMetadata` and the component each read what they
+ *    needed. Counted by logging every query, one warm request to `/launch/GHDSJS` sent
+ *    NINE queries for FOUR distinct questions: `launches` x3, `quotes` x2, `config` x2,
+ *    `state` x2. Volume was the smaller half - the share card reports progress to one
+ *    decimal place, so two reads either side of a fill disagree, and the figure a
+ *    scraper caches is the one nobody can click through to check. Four queries now.
+ *
+ * Next does NOT dedupe these: `smartQuery` is a bare `fetch`, not the patched one.
  *
  * The comments are the lesson. Three of the four sites carried prose asserting the
  * parallelism they did not have, so reading the explanation was worse than reading
@@ -103,10 +111,10 @@ test('a board-wide read is never inside a per-launch fan-out', () => {
  * "share one turn" actually means is that both calls are started before either is
  * awaited, and that is visible in the argument list whatever the binding looks like.
  */
-function startedTogether(src: string, call: RegExp, other: string): boolean {
+function startedTogether(src: string, call: RegExp, other: RegExp): boolean {
   for (const m of src.matchAll(/\bPromise\.all\s*\(/g)) {
     const args = balanced(src, src.indexOf('(', m.index + 'Promise.all'.length));
-    if (call.test(args) && new RegExp(`\\b${other}\\s*\\(`).test(args)) return true;
+    if (call.test(args) && other.test(args)) return true;
   }
   return false;
 }
@@ -121,13 +129,23 @@ function startedTogether(src: string, call: RegExp, other: string): boolean {
  * somebody deletes, so this names the four sites that were measured wrong and says why
  * it is a list.
  */
-const SHARE_A_TURN: Array<{ file: string; call: RegExp; with: string }> = [
+const SHARE_A_TURN: Array<{ file: string; call: RegExp; with: RegExp }> = [
   // The board and the block height: independent, and the height has a 4s timeout.
-  { file: 'app/page.tsx', call: /\bcurrentHeight\s*\(/, with: 'loadRows' },
+  { file: 'app/page.tsx', call: /\bcurrentHeight\s*\(/, with: /\bloadRows\s*\(/ },
   // The launches and the quote allowlist: two queries to one contract, four pages.
-  { file: 'lib/boardRows.ts', call: /\blistQuotes\s*\(/, with: 'listLaunches' },
-  // The quote allowlist rides with the detail on the page a trader lands on.
-  { file: 'app/launch/[slug]/page.tsx', call: /\blistQuotes\s*\(/, with: 'getLaunchDetail' },
+  { file: 'lib/boardRows.ts', call: /\blistQuotes\s*\(/, with: /\blistLaunches\s*\(/ },
+  /*
+   * The quote allowlist rides with the detail on the page a trader lands on. Both are
+   * named here under the raw read OR its per-request wrapper, because that page now
+   * reads through `cache()` and the first spelling of this entry failed the moment the
+   * names changed - the same anchoring mistake the comment above records, one layer up.
+   * What is being asserted is that the two are started together, not what they are called.
+   */
+  {
+    file: 'app/launch/[slug]/page.tsx',
+    call: /\b(?:listQuotes|allowlist)\s*\(/,
+    with: /\b(?:getLaunchDetail|detailOf)\s*\(/,
+  },
 ];
 
 test('two reads that need nothing from each other share one turn', () => {
@@ -135,9 +153,46 @@ test('two reads that need nothing from each other share one turn', () => {
     const src = maskComments(readFileSync(`${SRC}${file}`, 'utf8'));
     // The call must still be there at all, or this is pinning a site that has moved.
     assert.match(src, call, `${file} no longer calls ${call.source}`);
+    assert.match(src, other, `${file} no longer calls ${other.source}`);
     assert.ok(
       startedTogether(src, call, other),
-      `${file} awaits ${call.source} on its own turn instead of starting it with ${other}()`,
+      `${file} awaits ${call.source} on its own turn instead of starting it with ${other.source}`,
+    );
+  }
+});
+
+/**
+ * Questions the share card and the page both need an answer to, so each must be asked
+ * once per request rather than once per reader.
+ */
+const ASKED_ONCE = ['listLaunches', 'listQuotes', 'getLaunchDetail'];
+
+test('the share card and the page ask each question once per request', () => {
+  const file = 'app/launch/[slug]/page.tsx';
+  const src = maskComments(readFileSync(`${SRC}${file}`, 'utf8'));
+
+  const wrappers = [...src.matchAll(/\bcache\s*\(/g)].map((m) =>
+    balanced(src, src.indexOf('(', (m.index as number) + 'cache'.length)),
+  );
+  // Anti-vacuity: no wrappers found would make every assertion below unreachable.
+  assert.ok(wrappers.length >= 3, `only ${wrappers.length} cache() wrapper(s) on ${file}`);
+
+  for (const fn of ASKED_ONCE) {
+    const calls = [...src.matchAll(new RegExp(`\\b${fn}\\s*\\(`, 'g'))];
+    /*
+     * ONE call site, and it is the wrapper. A second direct call is a second round trip
+     * whoever writes it, and on this page it is also a second ANSWER: the card reports
+     * graduation progress to one decimal place, so a read either side of a fill prints a
+     * figure the page does not, and the card's copy is the one a scraper keeps.
+     */
+    assert.equal(
+      calls.length,
+      1,
+      `${file} calls ${fn}() ${calls.length} times, so generateMetadata and the component each read the chain`,
+    );
+    assert.ok(
+      wrappers.some((args) => new RegExp(`\\b${fn}\\s*\\(`).test(args)),
+      `${file} calls ${fn}() outside cache(), so the read is not shared across the request`,
     );
   }
 });
