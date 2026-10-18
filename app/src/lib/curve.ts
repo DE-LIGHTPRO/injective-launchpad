@@ -168,6 +168,68 @@ export function quoteBuy(cfg: CurveConfig, st: CurveState, injIn: bigint): BuyQu
   };
 }
 
+export interface PremiumBuyQuote extends BuyQuote {
+  /** The opening premium, taken off the top. Accrues to the pool, not to the split. */
+  earlyFeePremium: bigint;
+}
+
+/**
+ * A buy during an opening-fee window, mirroring `exec_buy` lines 210 to 222.
+ *
+ * IT LIVED IN THE PANEL AND CHARGED THE PREMIUM ON THE WRONG AMOUNT. The contract
+ * quotes once to find what the curve cannot absorb, subtracts that, and charges the
+ * premium on what is actually spent - its own comment says skimming from `inj_in`
+ * would charge the premium on quote handed straight back, and calls the case where
+ * that happens "close to impossible", which is "exactly the assumption that becomes
+ * a defect". The panel then charged it on `inj_in`.
+ *
+ * The two agree to the unit whenever the curve absorbs the whole input, which is
+ * every buy except the one that overshoots the remaining capacity. On that one the
+ * panel quoted MORE tokens than the contract delivers, and `min_tokens_out` is
+ * derived from the panel's figure, so the contract refused the trade as slippage.
+ * Measured on the deployed shape, from a fresh curve whose capacity is 2000.96
+ * quote, with a 10% opening premium and the default 1% tolerance:
+ *
+ *      in 2001.96  (1 over)   contract 778,006,042  panel 778,112,899   +0.01%  passes
+ *      in 2201.06  (10% over) contract 778,006,042  panel 797,949,296   +2.56%  REVERTS
+ *      in 4001.92  (2x over)  contract 778,006,042  panel 800,000,000   +2.82%  REVERTS
+ *
+ * At a 19% premium the 2x case is +5.96% and reverts through a 3% tolerance too.
+ * Reachable with the Max button on a large balance, and the user sees a slippage
+ * error - the price moved - for a trade where nothing moved. The refund row was
+ * wrong by the same cause: the panel showed 0 where the contract returns 200.0962.
+ *
+ * So it is here rather than in the component, where it can be exercised. The
+ * component's arithmetic was out of reach of every test, which is the same reason
+ * `stateAtRaised` was lifted out of `CurveExplorer`.
+ */
+export function quoteBuyWithPremium(
+  cfg: CurveConfig,
+  st: CurveState,
+  injIn: bigint,
+  premiumBps: bigint,
+): PremiumBuyQuote {
+  if (premiumBps <= 0n) {
+    // The common path, byte for byte the plain quote.
+    return { ...quoteBuy(cfg, st, injIn), earlyFeePremium: 0n };
+  }
+  if (premiumBps >= BPS_DENOM) throw new CurveError('opening premium of 100% or more');
+  const probe = quoteBuy(cfg, st, injIn);
+  const spent = injIn - probe.refund;
+  // `multiply_ratio` floors, so this does too. A premium rounded up would be a
+  // charge the contract does not make.
+  const premium = (spent * premiumBps) / BPS_DENOM;
+  const forCurve = spent - premium;
+  if (forCurve <= 0n) throw new CurveError('amount is too small to cover the opening fee');
+  const q = quoteBuy(cfg, st, forCurve);
+  /*
+   * The carried refund is added rather than assumed zero, exactly as the contract
+   * does it: reducing the input can only shrink the second quote's own refund, but
+   * the part the FIRST quote found unabsorbable is still owed and is still sent.
+   */
+  return { ...q, refund: q.refund + probe.refund, earlyFeePremium: premium };
+}
+
 export function quoteSell(cfg: CurveConfig, st: CurveState, tokensIn: bigint): SellQuote {
   validate(cfg);
   if (st.graduated) throw new CurveError('this launch has graduated; trading is closed');

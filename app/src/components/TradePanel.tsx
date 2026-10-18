@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   quoteBuy,
+  quoteBuyWithPremium,
   priceImpactBps,
   sellPriceImpactBps,
   IMPACT_WARN_BPS,
@@ -249,15 +250,18 @@ export function TradePanel({
             })()
           : ({ ok: true, side: 'sell', ...poolQuoteSell(pool, config.feeBps, raw) } as const);
       }
-      const premium =
-        side === 'buy' && premiumBps > 0 ? (raw * BigInt(premiumBps)) / 10_000n : 0n;
-      const forCurve = raw - premium;
       return side === 'buy'
         ? ({
             ok: true,
             side: 'buy',
-            ...quoteBuy(config, state, forCurve),
-            earlyFeePremium: premium,
+            /*
+             * The premium basis is the contract's, not this panel's. It used to skim
+             * `raw * premiumBps`, which charges the premium on quote the curve hands
+             * straight back, and overstated `tokensOut` by up to 5.96% on a buy that
+             * overshoots the remaining capacity. `min_tokens_out` comes off that
+             * figure, so the contract refused those trades as slippage.
+             */
+            ...quoteBuyWithPremium(config, state, raw, BigInt(premiumBps)),
           } as const)
         : ({ ok: true, side: 'sell', ...quoteSell(config, state, raw) } as const);
     } catch (e) {
