@@ -510,7 +510,6 @@ a.card {
 }
 a.card:focus-visible { border-color: var(--accent-deep); }
 
-.card-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
 .sym { font-size: var(--text-lg); font-weight: 650; letter-spacing: -0.01em; }
 .denom {
   color: var(--text-faint);
@@ -713,15 +712,12 @@ input.amount:focus { outline: none; border-color: var(--accent-deep); box-shadow
   font-size: var(--text-xs);
 }
 
-/* --------------------------------------------------------------- skeleton -- */
-
-@keyframes shimmer { 100% { background-position: -200% 0; } }
-.skeleton {
-  background: linear-gradient(90deg, var(--surface-2) 25%, var(--surface-3) 37%, var(--surface-2) 63%);
-  background-size: 200% 100%;
-  animation: shimmer 1.4s linear infinite;
-  border-radius: var(--radius-sm);
-}
+/*
+ * NO `.skeleton`, AND NOTHING TO HANG ONE ON. A shimmer keyframe and a loading
+ * placeholder lived here with no consumer anywhere in the repo, and there is no
+ * `loading.tsx` in any route segment for the router to render one into. A placeholder
+ * no route can reach is a loading design a reader would believe exists.
+ */
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
@@ -795,15 +791,14 @@ input.amount:focus { outline: none; border-color: var(--accent-deep); box-shadow
   }
 }
 
-/* Launch list controls: search, sort, filter. */
-.list-controls {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-3);
-  margin-bottom: var(--space-3);
-}
-.search { flex: 1 1 14rem; min-width: 0; }
+/*
+ * `.search` sits inside `.board-bar`, which is the row that replaced `.list-controls`
+ * - a flex row with the same job, still styled here under the old name and worn by
+ * nothing. Its `flex: 1 1 14rem` here was dead too: `.board-bar`'s own block
+ * redeclares `.search` at `flex: 1 1 260px`, 1,300 lines further down, so the basis a
+ * reader found at this line was 36px off the one on the screen.
+ */
+.search { min-width: 0; }
 /*
  * THE SEARCH FIELD IS STYLED BY THE SYSTEM LAYER. Its two rules here declared only
  * properties that layer redeclares, including every token in them, so a reader would
@@ -1132,7 +1127,6 @@ button.ghost { background: transparent; border: 1px solid var(--line); color: va
 
 /* Fill-price sparkline. */
 .spark { margin-bottom: var(--space-4); }
-.spark-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-3); }
 .spark-change { font-size: var(--text-sm); }
 .spark-change.up { color: var(--buy); }
 .spark-change.down { color: var(--danger); }
@@ -1470,8 +1464,6 @@ button.ghost { background: transparent; border: 1px solid var(--line); color: va
 
 /* ------------------------------------------------------------ board metrics -- */
 
-.card-by { font-size: var(--text-xs); color: var(--text-faint); margin-top: 2px; }
-.card-badges { display: inline-flex; align-items: center; gap: var(--space-2); flex: none; }
 /*
  * ONE COMPONENT HAD FOUR SIZES: `.chip` at `--text-micro`, `header.top .chip` at an
  * 11px literal that is the same 11px, `.tok-sub .chip` at 10.5px, and this at 9px.
@@ -1484,16 +1476,6 @@ button.ghost { background: transparent; border: 1px solid var(--line); color: va
  * base chip, so after this the class is distinguished by its wider tracking alone.
  */
 .chip-sm { font-size: var(--text-micro); letter-spacing: 0.08em; padding: 2px var(--space-2); }
-
-/* Market cap, given the weight a board is read by. */
-.card-mc { display: flex; align-items: baseline; gap: var(--space-2); margin-top: var(--space-4); }
-.mc-label {
-  font-size: var(--text-micro);
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--text-faint);
-}
-.mc-value { font-size: var(--text-lg); font-weight: 650; letter-spacing: -0.01em; }
 
 /* The metric strip on a launch page: the figures a token is read by at a glance. */
 .metric-strip {
@@ -1565,22 +1547,6 @@ button.ghost { background: transparent; border: 1px solid var(--line); color: va
  * would have taken and earns it by being real data.
  */
 .curve-glyph { display: block; width: 100%; }
-
-.card-curve {
-  margin-top: var(--space-4);
-  /* Its own recessed well, so the shape reads as a readout rather than as a
-     background flourish sitting loose on the card. */
-  background: var(--glass-well);
-  box-shadow: var(--glass-well-inset);
-  border: 1px solid var(--glass-border);
-  border-radius: var(--radius-sm);
-  padding: var(--space-2) var(--space-1);
-  overflow: hidden;
-}
-
-/* The progress bar survives, demoted: still worth a glance, no longer the thing that
-   distinguishes one launch from another. */
-.bar-thin { height: 3px; margin-top: var(--space-2); }
 
 /* The empty state of a live launchpad, which is currently the whole front page. */
 .empty-hero {
@@ -1662,8 +1628,6 @@ header.top .brand { display: inline-flex; align-items: center; gap: var(--space-
   color: var(--text-dim);
   box-shadow: var(--glass-well-inset);
 }
-
-.sym-row { display: flex; align-items: center; gap: var(--space-3); min-width: 0; }
 
 /* The create form's preview. It exists because an ipfs:// address that resolves to
    nothing renders as a blank box forever and nothing on chain will ever say so. */
@@ -1811,14 +1775,6 @@ header.top .brand { display: inline-flex; align-items: center; gap: var(--space-
 .logo-drop .note { margin: 0; }
 
 /*
- * The pair filter, which only appears when more than one quote is in use.
- * Wraps rather than scrolling: a pair hidden behind an unadvertised scrollbar is a
- * pair nobody discovers.
- */
-.pair-filter { flex-wrap: wrap; margin-bottom: var(--space-3); }
-.pair-filter .hint { margin-left: var(--space-1); color: var(--text-faint); }
-
-/*
  * By-pair panels. One per quote asset, because a market cap is denominated in the
  * launch's quote and a single list spanning pairs ranks numbers that cannot be
  * compared.
@@ -1876,11 +1832,11 @@ header.top .brand { display: inline-flex; align-items: center; gap: var(--space-
 
 body { font-feature-settings: 'cv11', 'ss01'; letter-spacing: -0.006em; }
 .mono { font-family: var(--face-mono); font-size: 0.92em; letter-spacing: -0.01em; }
-.num, .v, .mc-value, .totals .v, .metric-strip .v, .explorer-read .v, .stat .v,
+.num, .v, .totals .v, .metric-strip .v, .explorer-read .v, .stat .v,
 .ticker-amt, .trades, input.amount {
   font-variant-numeric: tabular-nums;
 }
-.metric-row .v.mono, .metric-strip .v.mono, .totals .v.mono, .mc-value.mono, .explorer-read .v {
+.metric-row .v.mono, .metric-strip .v.mono, .totals .v.mono, .explorer-read .v {
   font-family: var(--face-sans);
   font-size: inherit;
   letter-spacing: -0.01em;
@@ -1891,7 +1847,7 @@ h2 { font-size: var(--text-lg); font-weight: 600; letter-spacing: -0.015em; }
 h3 { font-weight: 600; }
 .sub { color: var(--text-dim); }
 .note { color: var(--text-faint); font-size: var(--text-sm); line-height: 1.55; }
-a.text-link, .note a, .sub a { color: var(--accent-text); }
+.note a, .sub a { color: var(--accent-text); }
 
 /* The `border-radius: 12px` that was here is now `--radius-lg` itself, so this rule has
    no opinion on the radius and `.card`'s own declaration above carries it. Four more
@@ -2159,6 +2115,13 @@ header.top .chip { font-size: var(--text-micro); letter-spacing: 0.04em; padding
 }
 .board-tab.is-active .board-tab-count { color: var(--accent-text); }
 .board-tab:focus-visible { outline: none; box-shadow: var(--ring); border-radius: var(--radius-sm); }
+/*
+ * The board's controls: search, and the pair select that `LaunchList` renders only
+ * when more than one quote asset is in use. `flex-wrap` rather than a scroll
+ * container, because a pair hidden behind an unadvertised scrollbar is a pair nobody
+ * discovers. That reasoning was written against a `.pair-filter` class that no
+ * element ever wore, so it described this control from a block that does not style it.
+ */
 .board-bar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin-bottom: var(--space-3); }
 .search { position: relative; flex: 1 1 260px; display: flex; align-items: center; }
 .search svg { position: absolute; left: 11px; color: var(--text-faint); pointer-events: none; }
@@ -2284,8 +2247,8 @@ table.board .dim { color: var(--text-faint); }
 .prog-track i { display: block; height: 100%; background: var(--accent); border-radius: 2px; }
 .prog span { font-size: var(--text-xs); color: var(--text-dim); width: 34px; text-align: right; font-variant-numeric: tabular-nums; }
 
-.bar, .bar-thin { height: 4px; background: var(--surface-3); }
-.bar > i, .bar-thin > i { background: var(--accent); }
+.bar { height: 4px; background: var(--surface-3); }
+.bar > i { background: var(--accent); }
 
 /* ------------------------------------------------------ token identity -- */
 .token-logo { border-radius: 50%; }
@@ -2372,7 +2335,7 @@ table.board .dim { color: var(--text-faint); }
  * template habit; professional data UIs label in plain small text and let the numbers
  * carry the weight.
  */
-.ticker-head .k, .metric-strip .k, .explorer-read .k, .totals .k, .mc-label, .hill-crown,
+.ticker-head .k, .metric-strip .k, .explorer-read .k, .totals .k, .hill-crown,
 .side-buy, .side-sell, .trade-side {
   text-transform: none;
   letter-spacing: 0;
@@ -2413,7 +2376,7 @@ table.board .dim { color: var(--text-faint); }
 /* Buy and sell take their own colours when chosen, as on every exchange. */
 .segmented[aria-label="Trade side"] button:first-child[aria-pressed="true"] { background: var(--buy); color: #04140d; }
 .segmented[aria-label="Trade side"] button:last-child[aria-pressed="true"] { background: #d42f45; color: #fff; }
-.explorer-axis, .chart-axis, svg text { font-family: var(--face-sans); }
+.explorer-axis, svg text { font-family: var(--face-sans); }
 /* Links inside running text are underlined: colour alone is not enough to tell them apart. */
 .sub a:not(.back-link), .note a:not(.back-link) { text-decoration: underline; text-underline-offset: 2px; text-decoration-thickness: 1px; }
 .token-head > div { min-width: 0; flex: 1; }
