@@ -177,6 +177,21 @@ deployment.
   never decreases (`launchpad-math` unit tests, curve integration tests).
 - After graduation the contract holds exactly `pool_quote + owed fees` in quote and
   exactly `pool_tokens` in tokens. Nothing is stranded or leaked.
-- `SimulateBuy` / `SimulateSell` equal execution in both phases.
+- `SimulateBuy` / `SimulateSell` equal execution in both phases, **including during an
+  opening-fee window**, asserted at seven points of the decay and on a buy that
+  overshoots the curve
+  (`the_simulation_promises_what_the_buy_delivers_during_the_opening_window`).
+  - This bullet was here before any test asserted it, and it was false. `query` took
+    `_env` and discarded it, so `SimulateBuy` could not know the block time and quoted
+    the base curve for the whole duration of a window, promising tokens `exec_buy`
+    would refuse to deliver. The execution side was correct and well covered; the two
+    were never compared, because the only helper that reads the simulation
+    (`quoted_tokens`) is used solely by fixtures with `early_fee: None`. A property
+    listed as verified by test, with no test, is the same defect as a status reported
+    without being checked.
 - The TypeScript port equals the Rust to the unit on curve and pool vectors generated
-  by the Rust (`npm run vectors`).
+  by the Rust (`npm run vectors`), and the opening premium's basis is asserted against
+  a transcription of `exec_buy` over 5 premiums x 8 sizes (`early-fee-basis.test.ts`).
+  The vectors alone could not cover the premium: they are generated from
+  `launchpad-math` and the premium is contract-level, so the panel's wrong basis had no
+  Rust number to disagree with.

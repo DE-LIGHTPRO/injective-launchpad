@@ -137,10 +137,22 @@ test('the premium still goes to the pool rather than the split', () => {
    * reassuring a buyer about a payment that now reaches the creator.
    */
   const curve = rust('contracts/curve/src/contract.rs');
+  /*
+   * The arguments are deliberately unpinned. This assertion was written against the
+   * spelling `effective_fee_bps(&cfg, env.block.time)` inside exec_buy, and broke the
+   * moment that line moved into the helper the query shares, where the same call reads
+   * `effective_fee_bps(cfg, now)`. The receiver and the clock are incidental; what this
+   * test is about is the two operands of the subtraction.
+   */
   assert.match(
     curve,
-    /premium_bps = effective_fee_bps\(&cfg, env\.block\.time\)\.saturating_sub\(cfg\.curve\.fee_bps\)/,
+    /premium_bps = effective_fee_bps\([^)]*\)\.saturating_sub\(cfg\.curve\.fee_bps\)/,
     'the premium is no longer the amount above the curve fee',
+  );
+  assert.match(
+    curve,
+    /let premium = spent\.multiply_ratio\(premium_bps as u128, BPS\)/,
+    'the premium charged is no longer derived from premium_bps',
   );
   assert.match(
     curve,

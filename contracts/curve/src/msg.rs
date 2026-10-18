@@ -84,6 +84,13 @@ pub struct SimulateBuyResponse {
     pub tokens_out: Uint128,
     pub fee: Uint128,
     pub refund: Uint128,
+    /// The opening premium, taken off the top before the curve is quoted.
+    ///
+    /// Reported because without it the payment does not add up: `inj_in` is the sum of
+    /// `refund`, this, `fee` and what reached the curve, and a caller given only three
+    /// of those can reconcile none of them. It is also the only part of what a buyer
+    /// pays that nobody is paid: it accrues to the pool the launch graduates into.
+    pub early_fee_premium: Uint128,
     pub graduates: bool,
 }
 

@@ -144,6 +144,54 @@ fn effective_fee_bps(cfg: &Config, now: Timestamp) -> u16 {
     ef.bps_at(cfg.curve.fee_bps, elapsed)
 }
 
+/// A buy on the curve, with the opening premium taken off the top.
+///
+/// Returns the quote, the premium, and the part of the payment the FIRST quote already
+/// found unabsorbable, which is still owed to the payer.
+///
+/// EXTRACTED BECAUSE THE SIMULATION COULD NOT SEE ANY OF IT. This lived inside
+/// `exec_buy`, and `query` discarded its `Env`, so `SimulateBuy` quoted the base curve
+/// with no way to know the block time and overstated `tokens_out` for the whole
+/// duration of an opening window. A caller sizing a trade against it set
+/// `min_tokens_out` from a figure this contract will not honour, so the simulation that
+/// exists to stop a trade reverting was the thing causing it. Nothing in the app calls
+/// `SimulateBuy`, so this reached integrators and bots rather than the panel - and a
+/// simulation is mostly FOR them.
+///
+/// One function rather than a second copy in the query, because two transcriptions of
+/// a fee basis is how the panel and the chain came to disagree in the first place.
+fn quote_buy_with_premium(
+    cfg: &Config,
+    state: &State,
+    inj_in: Uint128,
+    now: Timestamp,
+) -> Result<(launchpad_math::BuyQuote, Uint128, Uint128), ContractError> {
+    let curve: CurveConfig = (&cfg.curve).into();
+    let premium_bps = effective_fee_bps(cfg, now).saturating_sub(cfg.curve.fee_bps);
+    if premium_bps == 0 {
+        // The common path, byte for byte what it was before the rule existed.
+        return Ok((
+            quote_buy(&curve, &state.curve_state(), inj_in)?,
+            Uint128::zero(),
+            Uint128::zero(),
+        ));
+    }
+    /*
+     * CHARGED ON WHAT IS ACTUALLY SPENT. The curve refunds whatever a buy cannot
+     * absorb, so skimming the premium from `inj_in` would charge it on quote that is
+     * handed straight back. That only happens on the buy that fills the curve, which
+     * during an opening window is close to impossible, and "close to impossible" is
+     * exactly the assumption that becomes a defect. One extra quote settles it.
+     */
+    let probe = quote_buy(&curve, &state.curve_state(), inj_in)?;
+    let spent = inj_in.checked_sub(probe.refund)?;
+    let premium = spent.multiply_ratio(premium_bps as u128, BPS);
+    // Reducing the input can only reduce the refund, never grow it, so the second
+    // quote's own refund is normally zero; it is carried anyway rather than assumed.
+    let q = quote_buy(&curve, &state.curve_state(), spent.checked_sub(premium)?)?;
+    Ok((q, premium, probe.refund))
+}
+
 fn exec_buy(
     deps: DepsMut,
     env: Env,
@@ -191,8 +239,6 @@ fn exec_buy(
 
     let inj_in = cw_utils::must_pay(&info, &cfg.quote_denom)?;
 
-    let curve: CurveConfig = (&cfg.curve).into();
-
     /*
      * The opening premium is taken off the top, not folded into the curve's fee.
      *
@@ -201,25 +247,11 @@ fn exec_buy(
      * `MAX_FEE_BPS` is 1000 and an opening fee is meant to exceed that. Mutating a
      * validated config to get past its validation is the wrong shape of fix anyway.
      *
-     * CHARGED ON WHAT IS ACTUALLY SPENT. The curve refunds whatever a buy cannot
-     * absorb, so skimming the premium from `inj_in` would charge it on quote that is
-     * handed straight back. That only happens on the buy that fills the curve, which
-     * during an opening window is close to impossible, and "close to impossible" is
-     * exactly the assumption that becomes a defect. One extra quote settles it.
+     * `SimulateBuy` goes through the same function, so the figure a caller sizes
+     * against is the figure this handler will honour.
      */
-    let premium_bps = effective_fee_bps(&cfg, env.block.time).saturating_sub(cfg.curve.fee_bps);
-    let (q, premium, carried_refund) = if premium_bps == 0 {
-        // The common path, byte for byte what it was before the rule existed.
-        (quote_buy(&curve, &state.curve_state(), inj_in)?, Uint128::zero(), Uint128::zero())
-    } else {
-        let probe = quote_buy(&curve, &state.curve_state(), inj_in)?;
-        let spent = inj_in.checked_sub(probe.refund)?;
-        let premium = spent.multiply_ratio(premium_bps as u128, BPS);
-        // Reducing the input can only reduce the refund, never grow it, so the second
-        // quote's own refund is normally zero; it is carried anyway rather than assumed.
-        let q = quote_buy(&curve, &state.curve_state(), spent.checked_sub(premium)?)?;
-        (q, premium, probe.refund)
-    };
+    let (q, premium, carried_refund) =
+        quote_buy_with_premium(&cfg, &state, inj_in, env.block.time)?;
 
     if q.tokens_out < min_tokens_out {
         return Err(ContractError::Slippage {
@@ -570,7 +602,7 @@ fn exec_claim_fees(deps: DepsMut) -> Result<Response, ContractError> {
 }
 
 #[entry_point]
-pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
+pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
         QueryMsg::Config {} => to_json_binary(&CONFIG.load(deps.storage)?),
         QueryMsg::State {} => to_json_binary(&STATE.load(deps.storage)?),
@@ -584,16 +616,28 @@ pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
                     tokens_out: q.tokens_out,
                     fee: q.fee,
                     refund: Uint128::zero(),
+                    // The pool charges the base fee only: launch-window rules expire
+                    // with the curve.
+                    early_fee_premium: Uint128::zero(),
                     graduates: false,
                 });
             }
-            let curve: CurveConfig = (&cfg.curve).into();
-            let q = quote_buy(&curve, &state.curve_state(), inj_in)
-                .map_err(|e| cosmwasm_std::StdError::generic_err(e.to_string()))?;
+            /*
+             * THROUGH THE SAME FUNCTION THE HANDLER USES, including the block time it
+             * needs to know the premium. This quoted the base curve and ignored the
+             * opening fee entirely, so for the whole window it promised tokens
+             * `exec_buy` would refuse to deliver.
+             */
+            let (q, premium, carried) =
+                quote_buy_with_premium(&cfg, &state, inj_in, env.block.time)
+                    .map_err(|e| cosmwasm_std::StdError::generic_err(e.to_string()))?;
             to_json_binary(&SimulateBuyResponse {
                 tokens_out: q.tokens_out,
                 fee: q.fee,
-                refund: q.refund,
+                // Both parts, as the handler sends them: a simulation reporting only
+                // the second quote's refund leaves the payment unaccounted for.
+                refund: q.refund.checked_add(carried)?,
+                early_fee_premium: premium,
                 graduates: q.graduates,
             })
         }

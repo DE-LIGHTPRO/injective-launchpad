@@ -755,6 +755,98 @@ fn with_early_fee(start_bps: u16, secs: u64) -> LaunchRules {
     }
 }
 
+fn simulate_buy(f: &Fixture, inj: Uint128) -> SimulateBuyResponse {
+    f.app
+        .wrap()
+        .query_wasm_smart(f.addr.clone(), &QueryMsg::SimulateBuy { inj_in: inj })
+        .unwrap()
+}
+
+#[test]
+fn the_simulation_promises_what_the_buy_delivers_during_the_opening_window() {
+    /*
+     * `query` DISCARDED ITS `Env`, so `SimulateBuy` had no way to know the block time
+     * and quoted the base curve for the whole duration of an opening window. Every
+     * execution path here was tested and correct; the simulation beside it promised
+     * tokens `exec_buy` would refuse to deliver, and a caller sizing `min_tokens_out`
+     * against it got a slippage refusal from the very query that exists to prevent one.
+     *
+     * No test compared the two. `quoted_tokens` above reads the simulation and every
+     * fixture using it sets `early_fee: None`, so the one combination that mattered was
+     * the one nothing exercised. The app does not call `SimulateBuy` at all, so this was
+     * reaching integrators and bots, who are most of what a simulation is for.
+     *
+     * Asserted at several points of the decay rather than one, because a simulation that
+     * reads the clock but applies it wrongly would agree at exactly one instant.
+     */
+    for elapsed in [0u64, 1, 250, 500, 999, 1_000, 5_000] {
+        let mut f = setup_with(with_early_fee(1_100, 1_000)); // 11% opening, 1% base
+        if elapsed > 0 {
+            f.app.update_block(|b| b.time = b.time.plus_seconds(elapsed));
+        }
+        let alice = f.alice.clone();
+        let sim = simulate_buy(&f, amt(10));
+        f.buy(&alice, amt(10)).unwrap();
+        let got = f.balance(&alice, TOKEN);
+        assert_eq!(
+            got, sim.tokens_out,
+            "at {elapsed}s the simulation promised {} and the buy delivered {got}",
+            sim.tokens_out,
+        );
+        /*
+         * And the payment reconciles against the parts the response reports, so a caller
+         * can check its own arithmetic rather than trusting one figure. `inj_collected`
+         * is what reached the curve; the premium went to `lp_bonus` and the fee to the
+         * two owed balances, which is why none of them is in it.
+         */
+        let state: State = f
+            .app
+            .wrap()
+            .query_wasm_smart(f.addr.clone(), &QueryMsg::State {})
+            .unwrap();
+        assert_eq!(
+            sim.refund + sim.early_fee_premium + sim.fee + state.inj_collected,
+            amt(10),
+            "at {elapsed}s the reported parts do not account for the payment",
+        );
+        f.assert_solvent();
+    }
+}
+
+#[test]
+fn the_simulation_is_right_about_the_buy_that_overshoots_the_curve() {
+    /*
+     * The case the premium's basis exists for, and the case the PANEL got wrong in the
+     * other direction: it charged the premium on what was paid rather than on what is
+     * spent, overstated its quote by up to 5.96%, and had its own `min_tokens_out`
+     * refused as slippage.
+     *
+     * Both refunds must be reported, not just the second quote's. A simulation that
+     * reports one of two refunds understates what comes back by the larger half.
+     */
+    let mut f = setup_with(with_early_fee(1_100, 1_000));
+    let alice = f.alice.clone();
+    // Far more than the curve can absorb, so the first quote refunds most of it.
+    let huge = amt(400);
+    let sim = simulate_buy(&f, huge);
+    assert!(sim.refund > Uint128::zero(), "a buy this size refunded nothing");
+    assert!(sim.early_fee_premium > Uint128::zero(), "no premium during the window");
+
+    let before = f.balance(&alice, QUOTE);
+    f.buy(&alice, huge).unwrap();
+    assert_eq!(
+        f.balance(&alice, TOKEN),
+        sim.tokens_out,
+        "the simulation's quote was not delivered",
+    );
+    assert_eq!(
+        before - f.balance(&alice, QUOTE),
+        huge - sim.refund,
+        "the simulation's refund is not what came back",
+    );
+    f.assert_solvent();
+}
+
 #[test]
 fn an_early_buyer_pays_the_opening_fee_and_a_later_one_does_not() {
     /*
