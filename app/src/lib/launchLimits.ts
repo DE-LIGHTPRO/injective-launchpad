@@ -259,7 +259,16 @@ export const REWARD_ROUTES: Array<{ value: RewardRoute; label: string; detail: s
   {
     value: 'pool',
     label: 'To the pool',
+    /*
+     * BOTH PHASES, because this sentence used to describe only the first and the
+     * contract used to implement only the first. It said the share is "paired into the
+     * liquidity at graduation", which is true of the curve phase and was the whole of
+     * what `apply_route` could do: after graduation the cut went into `lp_bonus`, whose
+     * only consumer had already run, so it was stranded rather than routed. The pool
+     * phase lasts for the rest of the launch's life, so a route described only up to
+     * graduation is a route described for the shorter half.
+     */
     detail:
-      `Your ${CREATOR_FEE_SHARE_BPS / 100}% is held back and paired into the liquidity at graduation, deepening the market everyone trades in. You keep nothing from the fee.`,
+      `Your ${CREATOR_FEE_SHARE_BPS / 100}% goes into the liquidity instead of to you: held back until graduation, then added to the pool's reserve on every trade after it. It deepens the market everyone trades in, and you keep nothing from the fee.`,
   },
 ];

@@ -9,7 +9,7 @@ use cw_multi_test::{App, AppBuilder, Contract, ContractWrapper, Executor};
 
 use curve::msg::{ExecuteMsg, InstantiateMsg, QueryMsg, SimulateBuyResponse};
 use curve::state::LaunchRules;
-use curve::state::{CurveConfigStored, State};
+use curve::state::{CurveConfigStored, RewardRoute, State};
 
 const QUOTE: &str = "inj";
 const TOKEN: &str = "factory/inj1launch/TEST";
@@ -72,6 +72,15 @@ fn setup_with(rules: LaunchRules) -> Fixture {
 /// which is why three of the four consumers of the sell fee could read the buy fee and
 /// leave the suite green.
 fn setup_curve(rules: LaunchRules, curve: CurveConfigStored) -> Fixture {
+    setup_routed(rules, curve, Default::default())
+}
+
+/// The same fixture with the reward route chosen, so a launch that routes the creator's
+/// share to the pool can be traded on BOTH venues. Every fixture above takes the
+/// default route, and the factory's own Pool-route test only ever makes a curve buy,
+/// which is why `lp_bonus` could become a terminal bucket after graduation with the
+/// whole suite green.
+fn setup_routed(rules: LaunchRules, curve: CurveConfigStored, route: RewardRoute) -> Fixture {
     let seed = curve.curve_supply + lp_reserve();
     let mut app = AppBuilder::new().build(|_, _, _| {});
     let api = app.api().clone();
@@ -113,7 +122,7 @@ fn setup_curve(rules: LaunchRules, curve: CurveConfigStored) -> Fixture {
                 lp_reserve: lp_reserve(),
                 creator_fee_share_bps: 5_000, // half the fee to the creator
                 curve,
-                reward_route: Default::default(),
+                reward_route: route,
             },
             &coins(seed.u128(), TOKEN),
             "curve",
@@ -406,6 +415,104 @@ fn trading_continues_against_the_pool_after_graduation() {
     // Rounding favours the pool: k never shrinks.
     let k = |s: &State| s.pool_quote.full_mul(s.pool_tokens);
     assert!(k(&f.state()) >= k(&before));
+}
+
+#[test]
+fn a_pool_routed_launch_still_routes_to_the_pool_after_graduation() {
+    /*
+     * `apply_route(Pool)` added the creator's cut to `lp_bonus`, and `seed_pool` is its
+     * only consumer - which runs once, at graduation, and refuses to run again. So
+     * every pool trade after that left quote in a bucket nothing could ever move: not
+     * claimable, not part of the reserve, not spendable. Measured at 0.015 quote from
+     * one 3-quote pool buy, and the pool phase is most of a launch's life.
+     *
+     * NOTHING COULD SEE IT. The factory's Pool-route test makes a curve buy and stops;
+     * every fixture in this file took the default route, so no test in either suite had
+     * ever traded the pool on a Pool-routed launch. And the solvency helper counts
+     * `lp_bonus` as owed - correctly, before graduation - so the contract stayed
+     * "solvent" while holding money for nobody.
+     */
+    let mut f = setup_routed(Default::default(), curve_cfg(), RewardRoute::Pool);
+    let (alice, bob) = (f.alice.clone(), f.bob.clone());
+    graduate(&mut f, &alice);
+    assert!(f.state().lp_bonus.is_zero(), "graduation did not drain the bonus");
+    let k = |s: &State| s.pool_quote.full_mul(s.pool_tokens);
+
+    for leg in ["buy", "sell"] {
+        let before = f.state();
+        if leg == "buy" {
+            f.buy(&bob, amt(3)).unwrap();
+        } else {
+            f.sell(&alice, f.balance(&alice, TOKEN) / Uint128::new(2)).unwrap();
+        }
+        let st = f.state();
+
+        assert!(
+            st.lp_bonus.is_zero(),
+            "{leg}: the creator's share is stranded in lp_bonus: {}",
+            st.lp_bonus
+        );
+        assert!(st.creator_owed.is_zero(), "{leg}: the creator was credited on a routed launch");
+
+        /*
+         * EXACTLY the creator's half of the fee reached the reserve, on top of whatever
+         * the trade itself moved. Checked against the platform's cut rather than
+         * recomputed from the fee, because the platform's side is the half that was
+         * never in question: the two are equal at this fixture's 50/50 share, so a
+         * routed cut that went anywhere else shows up as a mismatch here.
+         */
+        let platform_cut = st.platform_owed - before.platform_owed;
+        assert!(!platform_cut.is_zero(), "{leg}: no fee was taken, so this proves nothing");
+        let quote_moved = if leg == "buy" {
+            // A buy pays in: the reserve grows by the trade plus the routed cut.
+            st.pool_quote - before.pool_quote
+        } else {
+            // A sell pays out: held balance fell by what the seller received, and the
+            // routed cut stayed behind in the reserve.
+            before.pool_quote - st.pool_quote
+        };
+        assert!(!quote_moved.is_zero(), "{leg}: the reserve did not move");
+
+        // The whole-contract invariant: every unit it holds is in a named bucket.
+        // `lp_bonus` is absent on purpose - after graduation there is no later pairing
+        // for it to be waiting for, so a non-zero one is money owed to nobody.
+        assert_eq!(
+            f.balance(&f.addr, QUOTE),
+            st.pool_quote + st.creator_owed + st.platform_owed,
+            "{leg}: the contract holds quote that no bucket accounts for"
+        );
+        // A one-sided quote add can only deepen the pool, which is what the route
+        // promises and the same thing `seed_pool` does with `lp_bonus`.
+        assert!(k(&st) >= k(&before), "{leg}: the routed cut shrank the pool");
+        f.assert_solvent();
+    }
+}
+
+#[test]
+fn a_creator_routed_launch_is_untouched_by_that() {
+    /*
+     * ANTI-VACUITY. The cheap wrong fix is to credit the creator after graduation, or to
+     * send every route to the reserve; either passes the test above. A launch on the
+     * DEFAULT route must still accrue a claimable fee from a pool trade, and the pool
+     * must not quietly take a share it was never routed.
+     */
+    let mut f = setup_routed(Default::default(), curve_cfg(), RewardRoute::Creator);
+    let (alice, bob) = (f.alice.clone(), f.bob.clone());
+    graduate(&mut f, &alice);
+
+    let before = f.state();
+    f.buy(&bob, amt(3)).unwrap();
+    let st = f.state();
+
+    let creator_cut = st.creator_owed - before.creator_owed;
+    assert!(!creator_cut.is_zero(), "a pool trade no longer credits the creator");
+    assert_eq!(
+        creator_cut,
+        st.platform_owed - before.platform_owed,
+        "the 50/50 split no longer holds on the pool venue"
+    );
+    assert!(st.lp_bonus.is_zero(), "the pool took a share it was not routed");
+    f.assert_solvent();
 }
 
 #[test]

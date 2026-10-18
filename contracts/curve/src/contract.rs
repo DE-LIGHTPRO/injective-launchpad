@@ -106,15 +106,35 @@ fn apply_route(state: &mut State, route: RewardRoute, creator_cut: Uint128) -> R
         }
         RewardRoute::Pool => {
             /*
-             * Into `lp_bonus`, the same place the opening-fee premium is held: quote
-             * kept out of `inj_collected` so it cannot move the curve, and paired
-             * into the liquidity at graduation.
+             * WHERE "THE POOL" IS DEPENDS ON WHETHER IT EXISTS YET, and this branch
+             * used to assume it never did.
              *
-             * Deliberately NOT added to `inj_collected`. That figure is one side of
-             * the curve's invariant, and adding quote to it without issuing tokens
-             * would move every later price.
+             * Before graduation the share waits in `lp_bonus`, the same place the
+             * opening-fee premium is held: quote kept out of `inj_collected` so it
+             * cannot move the curve, and paired into the liquidity when the pool is
+             * seeded. Deliberately NOT added to `inj_collected`, which is one side of
+             * the curve's invariant - adding quote to it without issuing tokens would
+             * move every later price.
+             *
+             * AFTER graduation there is no later pairing to wait for. `seed_pool` is
+             * `lp_bonus`'s only consumer, it runs once, and it refuses to run again, so
+             * every pool trade on a Pool-routed launch left the creator's share in a
+             * bucket nothing could ever move: not claimable, not part of the reserve,
+             * not spendable, just quote sitting in the contract's bank balance against
+             * a counter that only goes up. Measured at 0.015 quote stranded by a single
+             * 3-quote pool buy, which is most of a launch's life, not an edge of it.
+             *
+             * So it goes into the reserve directly, which is the same one-sided quote
+             * add `seed_pool` performs with `lp_bonus` - it deepens the market and
+             * raises the token's price, which is what the route promises and what the
+             * creator gave up their fee for. `k` can only grow, and the pool has no
+             * withdraw path, so this is locked exactly as the rest of it is.
              */
-            state.lp_bonus = state.lp_bonus.checked_add(creator_cut)?;
+            if state.migrated {
+                state.pool_quote = state.pool_quote.checked_add(creator_cut)?;
+            } else {
+                state.lp_bonus = state.lp_bonus.checked_add(creator_cut)?;
+            }
         }
     }
     Ok(())
