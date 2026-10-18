@@ -99,8 +99,6 @@ export interface LaunchInput {
   lpReserve: bigint;
   /** What buyers pay in. Absent means the factory's default. */
   quoteDenom?: string;
-  /** Sell fee in bps. Absent mirrors the buy fee, as the contract does. */
-  feeSellBps?: number;
   /** Where the creator's share of each fee goes. */
   rewardRoute?: 'creator' | 'pool';
   /**
@@ -339,8 +337,14 @@ export function planLaunch(input: LaunchInput): LaunchPlan {
                * common launch sends the message it always did and nothing new has to
                * be understood to read it.
                */
-              ...(input.feeSellBps !== undefined && input.feeSellBps !== Number(input.curve.feeBps)
-                ? { fee_sell_bps: input.feeSellBps }
+              /*
+               * Read off the curve, which is now the only place it lives. It was a
+               * second field on this input beside `curve.feeBps`, which is how the
+               * quote panel came to charge the buy fee on exits: two carriers for one
+               * number, and the one the maths read was never set.
+               */
+              ...(input.curve.feeSellBps !== input.curve.feeBps
+                ? { fee_sell_bps: Number(input.curve.feeSellBps) }
                 : {}),
               ...(input.rewardRoute && input.rewardRoute !== 'creator'
                 ? { reward_route: input.rewardRoute }

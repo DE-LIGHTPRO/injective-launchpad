@@ -29,6 +29,7 @@ const curve: CurveConfig = {
   curveSupply: 800_000_000n * ONE,
   graduationTarget: 85n * ONE,
   feeBps: 100n,
+  feeSellBps: 100n,
 };
 
 const input = (over: Partial<LaunchInput> = {}): LaunchInput => ({

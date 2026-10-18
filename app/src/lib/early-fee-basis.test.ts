@@ -49,6 +49,9 @@ const CFG: CurveConfig = {
   curveSupply: 800_000_000n * ONE,
   graduationTarget: (676n * ONE * 17n) / 6n,
   feeBps: 100n,
+  // The premium is a buy-side charge, so this file never reads the sell fee; it is
+  // here because the shape requires it, at the form's own symmetric default.
+  feeSellBps: 100n,
 };
 const FRESH: CurveState = { injCollected: 0n, tokensSold: 0n, graduated: false };
 

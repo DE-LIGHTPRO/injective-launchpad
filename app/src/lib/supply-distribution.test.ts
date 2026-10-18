@@ -29,6 +29,7 @@ const cfg: CurveConfig = {
   curveSupply: CURVE_SUPPLY,
   graduationTarget: 15_169n * ONE,
   feeBps: 100n,
+  feeSellBps: 100n,
 };
 
 /** The contract's own token balance after migration, measured on E2E88375. */

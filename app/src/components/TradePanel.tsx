@@ -193,6 +193,12 @@ export function TradePanel({
    * can watch it fall, which is the behaviour the rule is trying to encourage.
    */
   const baseBps = Number(config.feeBps);
+  /*
+   * The exit rate, which the opening premium never touches: the premium is a charge for
+   * taking the opening, and the contract applies it on the buy side only. It does not
+   * expire at graduation either, so it is the same number on both venues.
+   */
+  const sellBps = Number(config.feeSellBps);
   // Launch-window rules expire with the curve: the pool charges its base fee only.
   const chargedBps = inPool ? baseBps : feeBpsAt(rules, baseBps, now);
   const premiumBps = Math.max(0, chargedBps - baseBps);
@@ -248,7 +254,10 @@ export function TradePanel({
                 earlyFeePremium: 0n,
               } as const;
             })()
-          : ({ ok: true, side: 'sell', ...poolQuoteSell(pool, config.feeBps, raw) } as const);
+          // The sell fee on the pool too. It is a venue fee and not a launch-window
+          // rule, so unlike the cap, the start time and the opening premium it does
+          // not expire at graduation, and the contract charges it on both venues.
+          : ({ ok: true, side: 'sell', ...poolQuoteSell(pool, config.feeSellBps, raw) } as const);
       }
       return side === 'buy'
         ? ({
@@ -353,7 +362,7 @@ export function TradePanel({
       if (inPool && pool) {
         return quote.side === 'buy'
           ? poolBuyImpactBps(pool, config.feeBps, raw)
-          : poolSellImpactBps(pool, config.feeBps, raw);
+          : poolSellImpactBps(pool, config.feeSellBps, raw);
       }
       return quote.side === 'buy'
         ? priceImpactBps(config, state, raw)
@@ -534,7 +543,10 @@ export function TradePanel({
           </div>
           <div className="metric-row">
             <span className={premiumBps > 0 && quote.side === 'buy' ? 'k warn-text' : 'k'}>
-              Fee · {(quote.side === 'buy' ? chargedBps : baseBps) / 100}%
+              {/* An exit's rate is the sell fee. This read `baseBps`, the BUY fee, so
+                  a launch with 1% entry and 10% exit labelled the row "Fee · 1%"
+                  above a figure that was 10% of the gross. */}
+              Fee · {(quote.side === 'buy' ? chargedBps : sellBps) / 100}%
             </span>
             <span className={premiumBps > 0 && quote.side === 'buy' ? 'v mono warn-text' : 'v mono'}>
               {fmt(

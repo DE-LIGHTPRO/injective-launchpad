@@ -58,12 +58,27 @@ import {
 const ONE = 1_000_000_000_000_000_000n;
 const amt = (n: bigint) => n * ONE;
 
+/*
+ * The two fees are deliberately EQUAL here, and must stay so.
+ *
+ * This fixture drives the parity vectors in `curve-vectors.json`, which are generated
+ * by `launchpad_math` - a crate whose `CurveConfig` carries a single `fee_bps`. The
+ * generator therefore emits its sell rows skimmed at the buy rate, so these vectors
+ * structurally cannot express an asymmetric sell fee, exactly as they could not
+ * express the contract-level opening premium. An asymmetric case here would not be a
+ * stronger test, it would be a disagreement with the generator.
+ *
+ * The asymmetric case is covered where it can be: `sell-fee-basis.test.ts` on this
+ * side, and `the_sell_simulation_quotes_the_sell_fee_on_the_curve` in the contract's
+ * own integration suite.
+ */
 const CFG: CurveConfig = {
   virtualInj: amt(30n),
   virtualTokens: amt(1_073_000_000n),
   curveSupply: amt(800_000_000n),
   graduationTarget: amt(85n),
   feeBps: 100n,
+  feeSellBps: 100n,
 };
 
 const fresh = (): CurveState => ({
@@ -452,7 +467,7 @@ import {
 test('a 6-decimal launch has a real market cap and price, not zero', () => {
   // Seen live: PAIR5277 held 9.90 TUSD and showed market cap 0.00, because the
   // per-token price was floored to a whole TUSD base unit before multiplying.
-  const cfg = { ...fixedCurveFor(6), feeBps: 100n };
+  const cfg = { ...fixedCurveFor(6), feeBps: 100n, feeSellBps: 100n };
   const st = { injCollected: 0n, tokensSold: 0n, graduated: false };
   const mc = marketCapExact(cfg, st, null, FIXED_TOTAL_SUPPLY);
   /*
@@ -465,7 +480,12 @@ test('a 6-decimal launch has a real market cap and price, not zero', () => {
   const wad = spotPriceWad(cfg, st, null, ONE);
   assert.ok(wad > 0n, 'the wad price must not floor to zero');
   // Same shape as INJ: identical price once each is read at its own decimals.
-  const inj = spotPriceWad({ ...fixedCurveFor(18), feeBps: 100n }, st, null, ONE);
+  const inj = spotPriceWad(
+    { ...fixedCurveFor(18), feeBps: 100n, feeSellBps: 100n },
+    st,
+    null,
+    ONE,
+  );
   assert.equal(inj / 10n ** 12n, wad, 'the curve shape differs between 6 and 18 decimals');
   assert.ok(PRICE_WAD === 10n ** 18n);
 });

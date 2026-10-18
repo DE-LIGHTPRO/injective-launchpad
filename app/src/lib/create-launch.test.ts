@@ -66,6 +66,7 @@ const CURVE: CurveConfig = {
   curveSupply: amt(800_000_000n),
   graduationTarget: amt(85n),
   feeBps: 100n,
+  feeSellBps: 100n,
 };
 
 const LP = amt(200_000_000n);
@@ -382,7 +383,7 @@ test('a profile description is validated as prose, not as a URL', () => {
   const base = {
     creator: 'inj1' + 'q'.repeat(38),
     symbol: 'ABC',
-    curve: { ...fixedCurveFor(18), feeBps: 100n },
+    curve: { ...fixedCurveFor(18), feeBps: 100n, feeSellBps: 100n },
     lpReserve: FIXED_LP_RESERVE,
     factory: 'inj1' + 'z'.repeat(38),
   };

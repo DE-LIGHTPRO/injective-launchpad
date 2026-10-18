@@ -228,7 +228,7 @@ export function CreateLaunch() {
    * `virtual_tokens` is not, and asking for it directly is how a launch gets a
    * shape nobody intended.
    */
-  const built = useMemo((): { curve: CurveConfig; lpReserve: bigint; feeSellBps: number } | { error: string } => {
+  const built = useMemo((): { curve: CurveConfig; lpReserve: bigint } | { error: string } => {
     /*
      * The curve is POLICY, not input. It used to be derived from four numbers the
      * creator typed, and fixing the supply was supposed to make market caps
@@ -267,13 +267,13 @@ export function CreateLaunch() {
     if (typeof buy !== 'number') return buy;
     const sell = asBps(f.feeSellBps, 'sell');
     if (typeof sell !== 'number') return sell;
-    const feeBps = buy;
-    // In the chosen pair's own units, as the factory will build it.
+    // In the chosen pair's own units, as the factory will build it. Both fees live
+    // on the curve, because that is what the quote maths reads.
     const curve: CurveConfig = {
       ...fixedCurveFor({ decimals: quoteDecimals, virtualWhole: quoteVirtualWhole }),
-      feeBps: BigInt(feeBps),
+      feeBps: BigInt(buy),
+      feeSellBps: BigInt(sell),
     };
-    const feeSellBps = sell;
     try {
       // Still validated. The constants are hand-written, and a typo in one would
       // otherwise draw a chart for a curve no launch can actually have.
@@ -281,7 +281,7 @@ export function CreateLaunch() {
     } catch (e) {
       return { error: (e as Error).message };
     }
-    return { curve, lpReserve: FIXED_LP_RESERVE, feeSellBps };
+    return { curve, lpReserve: FIXED_LP_RESERVE };
   }, [f, quoteDecimals, quoteVirtualWhole]);
 
 
@@ -424,7 +424,6 @@ export function CreateLaunch() {
           curve: built.curve,
           lpReserve: built.lpReserve,
           quoteDenom: quoteDenom ?? undefined,
-          feeSellBps: built.feeSellBps,
           rewardRoute: f.rewardRoute as 'creator' | 'pool',
           factory,
         }),
@@ -1080,7 +1079,7 @@ export function CreateLaunch() {
           quoteLabel={quoteLabel}
           quoteDecimals={quoteDecimals}
           buyFeePct={Number(built.curve.feeBps) / 100}
-          sellFeePct={built.feeSellBps / 100}
+          sellFeePct={Number(built.curve.feeSellBps) / 100}
           rewardRoute={f.rewardRoute as 'creator' | 'pool'}
           rules={builtRules}
           openingBuy={devBuy}

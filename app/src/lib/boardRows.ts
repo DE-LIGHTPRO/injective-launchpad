@@ -268,6 +268,7 @@ export function toRow(r: Row, all: Row[]): LaunchRow {
       curveSupply: r.config.curveSupply.toString(),
       graduationTarget: r.config.graduationTarget.toString(),
       feeBps: r.config.feeBps.toString(),
+      feeSellBps: r.config.feeSellBps.toString(),
     },
     tokensSold: r.tokensSold.toString(),
     marketCap: r.marketCap.toString(),

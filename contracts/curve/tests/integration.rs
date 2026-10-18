@@ -64,6 +64,15 @@ fn setup() -> Fixture {
 /// academic here: on this project a validator with eight passing tests turned out never
 /// to be called, and only a test that went through `execute_contract` found it.
 fn setup_with(rules: LaunchRules) -> Fixture {
+    setup_curve(rules, curve_cfg())
+}
+
+/// The same fixture with the curve shape chosen too, so an asymmetric buy/sell fee can
+/// be exercised. Every fixture above sets `fee_bps` and `fee_sell_bps` to the same 100,
+/// which is why three of the four consumers of the sell fee could read the buy fee and
+/// leave the suite green.
+fn setup_curve(rules: LaunchRules, curve: CurveConfigStored) -> Fixture {
+    let seed = curve.curve_supply + lp_reserve();
     let mut app = AppBuilder::new().build(|_, _, _| {});
     let api = app.api().clone();
 
@@ -79,7 +88,7 @@ fn setup_with(rules: LaunchRules) -> Fixture {
             .init_balance(
                 storage,
                 &creator,
-                vec![coin((curve_cfg().curve_supply + lp_reserve()).u128(), TOKEN)],
+                vec![coin(seed.u128(), TOKEN)],
             )
             .unwrap();
         for who in [&alice, &bob] {
@@ -103,10 +112,10 @@ fn setup_with(rules: LaunchRules) -> Fixture {
                 platform: platform.to_string(),
                 lp_reserve: lp_reserve(),
                 creator_fee_share_bps: 5_000, // half the fee to the creator
-                curve: curve_cfg(),
+                curve,
                 reward_route: Default::default(),
             },
-            &coins((curve_cfg().curve_supply + lp_reserve()).u128(), TOKEN),
+            &coins(seed.u128(), TOKEN),
             "curve",
             None,
         )
@@ -843,6 +852,100 @@ fn the_simulation_is_right_about_the_buy_that_overshoots_the_curve() {
         before - f.balance(&alice, QUOTE),
         huge - sim.refund,
         "the simulation's refund is not what came back",
+    );
+    f.assert_solvent();
+}
+
+fn simulate_sell(f: &Fixture, tokens: Uint128) -> curve::msg::SimulateSellResponse {
+    f.app
+        .wrap()
+        .query_wasm_smart(f.addr.clone(), &QueryMsg::SimulateSell { tokens_in: tokens })
+        .unwrap()
+}
+
+/// Free entry, 10% exit: the two extremes the factory allows, so a consumer reading the
+/// buy fee where it should read the sell fee charges nothing at all.
+fn asymmetric_fees() -> CurveConfigStored {
+    CurveConfigStored { fee_bps: 0, fee_sell_bps: 1_000, ..curve_cfg() }
+}
+
+#[test]
+fn the_sell_simulation_quotes_the_sell_fee_on_the_curve() {
+    /*
+     * `SimulateSell` read `cfg.curve.fee_bps`, the BUY fee, on both of its branches,
+     * while `exec_sell` swapped in `fee_sell_bps`. One test covered the handler and
+     * nothing compared it to the query.
+     *
+     * It is the panel's defect too, in the same place: with 1% entry and 10% exit the
+     * quoted proceeds were 10.000% high on the deployed curve shape, and a `min_inj_out`
+     * derived from that figure reverts as slippage at every tolerance below the gap. A
+     * seller who widened their tolerance past it got 89.100000 after being shown
+     * 98.010000, which is the worse outcome of the two.
+     */
+    let mut f = setup_curve(Default::default(), asymmetric_fees());
+    let alice = f.alice.clone();
+    f.buy(&alice, amt(20)).unwrap();
+    let held = f.balance(&alice, TOKEN);
+
+    let sim = simulate_sell(&f, held);
+    assert!(!sim.fee.is_zero(), "the sell was quoted the 0 bps buy fee");
+
+    let before_quote = f.balance(&alice, QUOTE);
+    let before = f.state();
+    f.sell(&alice, held).unwrap();
+    let after = f.state();
+
+    assert_eq!(
+        f.balance(&alice, QUOTE) - before_quote,
+        sim.inj_out,
+        "the simulated proceeds are not what the sell paid",
+    );
+    assert_eq!(
+        (after.creator_owed + after.platform_owed) - (before.creator_owed + before.platform_owed),
+        sim.fee,
+        "the simulated fee is not what the sell charged",
+    );
+    f.assert_solvent();
+}
+
+#[test]
+fn the_pool_charges_the_sell_fee_the_creator_set() {
+    /*
+     * `exec_pool_sell` charged `cfg.curve.fee_bps` as well, so a creator's chosen exit
+     * fee silently stopped applying the moment the launch graduated. Nothing in the
+     * interface says it expires: `LaunchPreview` shows "Buy fee / sell fee" unqualified,
+     * and the factory caps the two sides independently because, in its own words, a
+     * creator pricing entry and exit differently is making a real choice about their own
+     * launch. The wallet cap, the start time and the opening premium are launch-window
+     * rules and do expire; a venue fee is not one.
+     *
+     * Free entry here, so a pool sell charged the buy fee would skim nothing and the
+     * assertion below is on the right side of zero rather than on an arithmetic detail.
+     */
+    let mut f = setup_curve(Default::default(), asymmetric_fees());
+    let alice = f.alice.clone();
+    graduate(&mut f, &alice);
+    assert!(f.state().migrated, "the pool was never seeded");
+
+    let before = f.state();
+    let held = f.balance(&alice, TOKEN);
+    let sell_back = held / Uint128::new(4);
+
+    let sim = simulate_sell(&f, sell_back);
+    assert!(!sim.fee.is_zero(), "the pool sell was quoted the 0 bps buy fee");
+
+    let before_quote = f.balance(&alice, QUOTE);
+    f.sell(&alice, sell_back).unwrap();
+    let after = f.state();
+
+    let charged =
+        (after.creator_owed + after.platform_owed) - (before.creator_owed + before.platform_owed);
+    assert!(!charged.is_zero(), "the pool sell was charged the 0 bps buy fee");
+    assert_eq!(charged, sim.fee, "the pool simulation's fee is not what was charged");
+    assert_eq!(
+        f.balance(&alice, QUOTE) - before_quote,
+        sim.inj_out,
+        "the pool simulation's proceeds are not what was paid",
     );
     f.assert_solvent();
 }

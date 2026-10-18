@@ -41,7 +41,20 @@ export interface CurveConfig {
   virtualTokens: bigint;
   curveSupply: bigint;
   graduationTarget: bigint;
+  /** The BUY fee, in bps, as the contract names it. */
   feeBps: bigint;
+  /**
+   * The SELL fee, in bps. The contract caps the two sides independently and a creator
+   * sets them independently in the form, so they are two numbers here as well.
+   *
+   * REQUIRED, not optional with a fallback to `feeBps`. This field did not exist and
+   * `quoteSell` charged the buy fee, so a launch with 1% entry and 10% exit had its
+   * sell proceeds quoted 10.000% high, every seller's `min_inj_out` was derived from
+   * that figure, and the contract refused the trade as slippage. An optional field
+   * would hand the same decision back to every call site; a required one makes the
+   * compiler name them.
+   */
+  feeSellBps: bigint;
 }
 
 export interface CurveState {
@@ -103,8 +116,13 @@ function reserves(cfg: CurveConfig, st: CurveState): [bigint, bigint] {
 export function validate(cfg: CurveConfig): void {
   if (cfg.virtualInj <= 0n || cfg.virtualTokens <= 0n)
     throw new CurveError('virtual reserves must be non-zero');
+  // Both sides, because the factory caps them independently and only one of them
+  // was checked here. `launchpad_math::CurveConfig` carries a single fee, so its
+  // `validate` cannot reach the sell side at all; this is the only place that can.
   if (cfg.feeBps > MAX_FEE_BPS)
     throw new CurveError(`fee ${cfg.feeBps} bps exceeds the ${MAX_FEE_BPS} bps maximum`);
+  if (cfg.feeSellBps > MAX_FEE_BPS)
+    throw new CurveError(`sell fee ${cfg.feeSellBps} bps exceeds the ${MAX_FEE_BPS} bps maximum`);
   if (cfg.curveSupply >= cfg.virtualTokens)
     throw new CurveError('curve supply must be under the virtual token reserve');
   if (cfg.graduationTarget <= 0n) throw new CurveError('graduation target must be non-zero');
@@ -244,7 +262,9 @@ export function quoteSell(cfg: CurveConfig, st: CurveState, tokensIn: bigint): S
   if (gross > st.injCollected) gross = st.injCollected;
   if (gross <= 0n) throw new CurveError('amount too small to return any INJ');
 
-  const fee = feeOn(gross, cfg.feeBps);
+  // THE SELL FEE. `exec_sell` swaps `fee_sell_bps` into the curve config before
+  // quoting; this read `feeBps` and so quoted every asymmetric launch's exit wrong.
+  const fee = feeOn(gross, cfg.feeSellBps);
   return { fee, injOut: gross - fee };
 }
 

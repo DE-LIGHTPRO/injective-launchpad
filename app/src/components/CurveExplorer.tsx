@@ -42,8 +42,10 @@ const ONE = 10n ** 18n;
 const SHAPE: CurveConfig = {
   ...fixedCurveFor(NETWORK.quoteDecimals),
   // The default a new launch starts from on the form, which the creator may change
-  // within the cap. The curve's shape is policy; the fee is not.
+  // within the cap. The curve's shape is policy; the fee is not. The form starts both
+  // sides at this default, so the page shows the symmetric launch.
   feeBps: BigInt(DEFAULT_FEE_BPS),
+  feeSellBps: BigInt(DEFAULT_FEE_BPS),
 };
 
 const W = 760;

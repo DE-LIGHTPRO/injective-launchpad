@@ -42,6 +42,7 @@ const CFG: CurveConfig = {
   curveSupply: amt(800_000_000n),
   graduationTarget: amt(85n),
   feeBps: 100n,
+  feeSellBps: 100n,
 };
 
 const SRC = join(import.meta.dirname, '..');
@@ -177,6 +178,7 @@ test('a 6-decimal quote draws a real curve, not a flat line on the baseline', ()
     curveSupply: amt(800_000_000n),
     graduationTarget: 15_169_000_000n,
     feeBps: 100n,
+    feeSellBps: 100n,
   };
   const QUOTE_ONE = 1_000_000n;
   const pts = curvePoints(USD, QUOTE_ONE, 70);

@@ -36,7 +36,11 @@ import { fixedCurveFor, DEFAULT_FEE_BPS } from './launchLimits.ts';
 const ONE = 10n ** 18n;
 
 /** The shape the component draws: the real one a new launch gets, in INJ units. */
-const SHAPE: CurveConfig = { ...fixedCurveFor(18), feeBps: BigInt(DEFAULT_FEE_BPS) };
+const SHAPE: CurveConfig = {
+  ...fixedCurveFor(18),
+  feeBps: BigInt(DEFAULT_FEE_BPS),
+  feeSellBps: BigInt(DEFAULT_FEE_BPS),
+};
 
 const whole = (v: bigint) => Number(v) / Number(ONE);
 

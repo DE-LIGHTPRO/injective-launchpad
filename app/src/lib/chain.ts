@@ -47,6 +47,12 @@ interface RawCurveConfig {
   curve_supply: string;
   graduation_target: string;
   fee_bps: number;
+  /**
+   * The sell fee. `#[serde(default)]` on the contract side, so a curve stored before
+   * the field existed answers without it and charges nothing on exit; `?? 0` reads
+   * that launch the way the chain does rather than silently substituting the buy fee.
+   */
+  fee_sell_bps?: number;
 }
 
 interface RawCurveContractConfig {
@@ -303,6 +309,7 @@ function toCurveConfig(raw: RawCurveConfig): CurveConfig {
     curveSupply: BigInt(raw.curve_supply),
     graduationTarget: BigInt(raw.graduation_target),
     feeBps: BigInt(raw.fee_bps),
+    feeSellBps: BigInt(raw.fee_sell_bps ?? 0),
   };
 }
 

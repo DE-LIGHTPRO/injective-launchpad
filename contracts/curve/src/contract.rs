@@ -144,6 +144,35 @@ fn effective_fee_bps(cfg: &Config, now: Timestamp) -> u16 {
     ef.bps_at(cfg.curve.fee_bps, elapsed)
 }
 
+/// The fee an exit pays, in bps, wherever it happens.
+///
+/// ONE SOURCE, because there were four consumers and three of them read the BUY fee.
+/// `exec_sell` was the only one that got it right. `SimulateSell` quoted the buy fee,
+/// so a caller sizing an exit against the simulation set `min_inj_out` from a figure
+/// the contract will not honour; `exec_pool_sell` charged the buy fee, so a creator's
+/// chosen exit fee silently stopped applying the moment the launch graduated, with
+/// nothing in the interface saying it expires. The factory caps the two sides
+/// independently and its own comment calls asymmetric pricing "a real choice about
+/// their own launch", so the sell fee is a property of the launch and not of the curve
+/// phase: the wallet cap, the start time and the opening premium expire at graduation
+/// (see `exec_pool_buy`), and this does not.
+///
+/// A curve stored before `fee_sell_bps` existed reads 0 through its serde default, so
+/// such a launch has free exits on both venues rather than free on one and charged on
+/// the other. Consistent either way is the property; the value is that launch's.
+fn sell_fee_bps(cfg: &Config) -> u16 {
+    cfg.curve.fee_sell_bps
+}
+
+/// The curve as a sell quote must see it: the maths crate takes one `fee_bps`, so the
+/// sell side swaps its own figure in rather than the crate growing a second field. The
+/// curve arithmetic is identical either way and only the skim differs.
+fn sell_curve(cfg: &Config) -> CurveConfig {
+    let mut sell_cfg = cfg.curve.clone();
+    sell_cfg.fee_bps = sell_fee_bps(cfg);
+    (&sell_cfg).into()
+}
+
 /// A buy on the curve, with the opening premium taken off the top.
 ///
 /// Returns the quote, the premium, and the part of the payment the FIRST quote already
@@ -381,15 +410,8 @@ fn exec_sell(
     }
 
     let tokens_in = cw_utils::must_pay(&info, &cfg.denom)?;
-    /*
-     * THE SELL FEE, not the buy fee. The maths crate takes one `fee_bps`, so the sell
-     * side swaps its own figure in rather than the crate growing a second field: the
-     * curve arithmetic is identical either way and only the skim differs.
-     */
-    let mut sell_cfg = cfg.curve.clone();
-    sell_cfg.fee_bps = cfg.curve.fee_sell_bps;
-    let curve: CurveConfig = (&sell_cfg).into();
-    let q = quote_sell(&curve, &state.curve_state(), tokens_in)?;
+    // THE SELL FEE, not the buy fee, and through the one helper `SimulateSell` uses.
+    let q = quote_sell(&sell_curve(&cfg), &state.curve_state(), tokens_in)?;
 
     if q.inj_out < min_inj_out {
         return Err(ContractError::Slippage {
@@ -537,7 +559,7 @@ fn exec_pool_sell(
     min_inj_out: Uint128,
 ) -> Result<Response, ContractError> {
     let tokens_in = cw_utils::must_pay(&info, &cfg.denom)?;
-    let q = pool_quote_sell(&state.pool(), cfg.curve.fee_bps, tokens_in)?;
+    let q = pool_quote_sell(&state.pool(), sell_fee_bps(&cfg), tokens_in)?;
     if q.inj_out < min_inj_out {
         return Err(ContractError::Slippage { got: q.inj_out, min: min_inj_out });
     }
@@ -644,13 +666,20 @@ pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
         QueryMsg::SimulateSell { tokens_in } => {
             let cfg = CONFIG.load(deps.storage)?;
             let state = STATE.load(deps.storage)?;
+            /*
+             * THE SELL FEE ON BOTH VENUES, through the same helper the handlers use.
+             * Both branches read `cfg.curve.fee_bps`, which is the BUY fee, so an exit
+             * sized against this simulation was quoted proceeds the contract will not
+             * pay: with 1% entry and 10% exit the figure was 10.000% high, and
+             * `min_inj_out` derived from it reverts as slippage at every tolerance
+             * below the gap. Measured on the deployed curve shape.
+             */
             if state.migrated {
-                let q = pool_quote_sell(&state.pool(), cfg.curve.fee_bps, tokens_in)
+                let q = pool_quote_sell(&state.pool(), sell_fee_bps(&cfg), tokens_in)
                     .map_err(|e| cosmwasm_std::StdError::generic_err(e.to_string()))?;
                 return to_json_binary(&SimulateSellResponse { inj_out: q.inj_out, fee: q.fee });
             }
-            let curve: CurveConfig = (&cfg.curve).into();
-            let q = quote_sell(&curve, &state.curve_state(), tokens_in)
+            let q = quote_sell(&sell_curve(&cfg), &state.curve_state(), tokens_in)
                 .map_err(|e| cosmwasm_std::StdError::generic_err(e.to_string()))?;
             to_json_binary(&SimulateSellResponse {
                 inj_out: q.inj_out,

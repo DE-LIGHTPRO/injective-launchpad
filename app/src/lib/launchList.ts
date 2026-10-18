@@ -108,6 +108,8 @@ export interface LaunchRow {
     curveSupply: string;
     graduationTarget: string;
     feeBps: string;
+    /** Carried because a sell quote needs it and it is not the buy fee. */
+    feeSellBps: string;
   };
   tokensSold: string;
   /** Spot price times total supply, base units as a string. The board's headline. */

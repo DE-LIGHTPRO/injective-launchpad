@@ -83,7 +83,7 @@ test('the launchpad fee and the opening buy arrive as ONE coin', () => {
   const plan = planLaunch({
     creator: 'inj1' + 'q'.repeat(38),
     symbol: 'ABC',
-    curve: { ...fixedCurveFor(18), feeBps: 100n },
+    curve: { ...fixedCurveFor(18), feeBps: 100n, feeSellBps: 100n },
     lpReserve: FIXED_LP_RESERVE,
     factory: 'inj1' + 'z'.repeat(38),
     initialBuy: 3n * ONE,
@@ -102,7 +102,7 @@ test('a launch with no launchpad fee attaches exactly what it always did', () =>
   const plan = planLaunch({
     creator: 'inj1' + 'q'.repeat(38),
     symbol: 'ABC',
-    curve: { ...fixedCurveFor(18), feeBps: 100n },
+    curve: { ...fixedCurveFor(18), feeBps: 100n, feeSellBps: 100n },
     lpReserve: FIXED_LP_RESERVE,
     factory: 'inj1' + 'z'.repeat(38),
   });

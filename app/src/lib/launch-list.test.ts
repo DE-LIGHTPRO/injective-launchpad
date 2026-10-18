@@ -46,6 +46,7 @@ const row = (
     curveSupply: '0',
     graduationTarget: '0',
     feeBps: '0',
+    feeSellBps: '0',
   },
   tokensSold: '0',
   marketCap: '0',

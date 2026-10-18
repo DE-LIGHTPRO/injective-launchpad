@@ -46,6 +46,7 @@ export function isDemoMode(): boolean {
 const BASE_CONFIG: CurveConfig = {
   ...fixedCurveFor(18),
   feeBps: BigInt(DEFAULT_FEE_BPS),
+  feeSellBps: BigInt(DEFAULT_FEE_BPS),
 };
 
 interface Seed {

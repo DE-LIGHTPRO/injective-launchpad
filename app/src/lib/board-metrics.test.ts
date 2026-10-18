@@ -14,6 +14,7 @@ const cfg: CurveConfig = {
   curveSupply: 800_000_000n * ONE,
   graduationTarget: 85n * ONE,
   feeBps: 100n,
+  feeSellBps: 100n,
 };
 const fresh: CurveState = { injCollected: 0n, tokensSold: 0n, graduated: false };
 

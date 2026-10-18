@@ -84,6 +84,7 @@ export function KingOfTheHill({ rows, nowSeconds }: { rows: LaunchRow[]; nowSeco
               curveSupply: BigInt(king.curve.curveSupply),
               graduationTarget: BigInt(king.curve.graduationTarget),
               feeBps: BigInt(king.curve.feeBps),
+              feeSellBps: BigInt(king.curve.feeSellBps),
             }}
             state={{
               injCollected: BigInt(king.raised),
