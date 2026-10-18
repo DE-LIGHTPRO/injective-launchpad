@@ -27,8 +27,22 @@ export interface WalletAccount {
   name: WalletName;
   /** bech32, `inj1…`. */
   address: string;
-  /** The label the extension shows for this account. */
-  label: string;
+  /*
+   * THE EXTENSION'S ACCOUNT NAME IS DELIBERATELY NOT CARRIED. `getKey` returns it and
+   * this interface used to hold it as `label`, which put whatever the user typed into
+   * their wallet onto the header of a public website: a real name, an employer, "cold
+   * storage", anything. They named that account for themselves, not for us, and we
+   * never asked.
+   *
+   * It bought nothing either. The address below identifies which account will sign,
+   * and the stylesheet already knew the name was the lesser of the two - it was the
+   * first thing dropped at 860px, with the comment "the address is what identifies
+   * which account will sign". Everyone else on this site is labelled by the derived
+   * `addressName()`, precisely because a label must not read as an identity.
+   *
+   * Absent from the type rather than merely unrendered, so a later component cannot
+   * reach for it.
+   */
   /**
    * The injected object this account came from.
    *
@@ -425,7 +439,9 @@ function errorText(e: unknown): string {
 
 async function finishConnect(name: WalletName, ext: InjectedWallet): Promise<WalletAccount> {
 
-  let key: { bech32Address: string; name?: string };
+  // Only the address is destructured from what the extension returns. `getKey` also
+  // carries the account's name and a pubkey; neither is ours to keep.
+  let key: { bech32Address: string };
   try {
     key = await ext.getKey(NETWORK.chainId);
   } catch {
@@ -444,7 +460,7 @@ async function finishConnect(name: WalletName, ext: InjectedWallet): Promise<Wal
     );
   }
 
-  return { name, address: key.bech32Address, label: key.name || 'Account', provider: ext };
+  return { name, address: key.bech32Address, provider: ext };
 }
 
 /**

@@ -881,8 +881,14 @@ button:disabled { color: var(--text-faint); cursor: not-allowed; }
  * a two-line account block together are wider than they look.
  *
  * It sheds in priority order instead, which is what the nav already does: the
- * balance goes first because the wallet shows it too, then the wallet's name,
- * leaving the address and the way out. Nothing wraps at any width.
+ * balance goes first because the wallet shows it too, leaving the address and the
+ * way out. Nothing wraps at any width.
+ *
+ * There were two lines here, the extension's own name for the account above the
+ * address, and the name shed at 860px under the comment "the address is what
+ * identifies which account will sign". That was the right judgement about which of
+ * the two mattered, so the name is gone at every width now and the address is a
+ * single line at the balance's size rather than a subordinate caption under it.
  */
 .wallet {
   position: relative;
@@ -892,30 +898,12 @@ button:disabled { color: var(--text-faint); cursor: not-allowed; }
   flex-wrap: nowrap;
   min-width: 0;
 }
-.wallet-acct {
-  display: inline-flex;
-  flex-direction: column;
-  line-height: 1.25;
-  min-width: 0;
-  /* So a long label cannot push the button out of the header. */
-  max-width: 15ch;
-}
-.wallet-name {
-  font-size: var(--text-sm);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.wallet-addr { font-size: var(--text-micro); color: var(--text-faint); white-space: nowrap; }
+.wallet-addr { font-size: var(--text-sm); color: var(--text-dim); white-space: nowrap; }
 .wallet-bal { font-size: var(--text-sm); color: var(--text-dim); white-space: nowrap; }
 
 @media (max-width: 1100px) {
   /* The balance is the first thing to go: the wallet itself shows it. */
   .wallet-bal { display: none; }
-}
-@media (max-width: 860px) {
-  /* Then the name. The address is what identifies which account will sign. */
-  .wallet-name { display: none; }
 }
 .wallet-menu {
   position: absolute; top: calc(100% + var(--space-2)); right: 0; z-index: 20;
@@ -1930,6 +1918,7 @@ header.top .chip { font-size: var(--text-micro); letter-spacing: 0.04em; padding
  * between them, rather than three things at the same gap as the nav items. A
  * two-line name-over-address stack sitting at the same 8px from a one-line
  * balance is what made the address and the figure read as a single run of text.
+ * The stack is gone, and the rule is what keeps the two apart now.
  */
 .wallet > button.ghost {
   height: 36px;
@@ -1943,7 +1932,6 @@ header.top .chip { font-size: var(--text-micro); letter-spacing: 0.04em; padding
 }
 .wallet > button.ghost:hover { background: var(--surface-2); border-color: #3a3f48; color: var(--text); }
 .wallet { gap: 10px; }
-.wallet-acct { line-height: 1.2; gap: 1px; }
 .wallet-bal {
   padding-left: 10px;
   border-left: 1px solid var(--line);

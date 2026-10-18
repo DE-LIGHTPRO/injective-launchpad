@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useConnectedAccount } from '@/lib/walletStore';
-import { allBalances } from '@/lib/wallet';
+import { allBalances, shortAddress } from '@/lib/wallet';
 import { symbolOf } from '@/lib/chain';
 import { fmt } from '@/lib/curve';
 import { FIXED_TOTAL_SUPPLY } from '@/lib/launchLimits';
@@ -106,7 +106,7 @@ export function Portfolio({ rows }: { rows: LaunchRow[] }) {
   if (balances === undefined) {
     return (
       <p className="note" style={{ marginTop: 'var(--space-4)' }}>
-        Reading {account.label}&rsquo;s balances&hellip;
+        Reading {shortAddress(account.address)}&rsquo;s balances&hellip;
       </p>
     );
   }

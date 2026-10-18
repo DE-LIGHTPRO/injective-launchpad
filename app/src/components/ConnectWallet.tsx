@@ -193,10 +193,10 @@ export function ConnectWallet({
   if (account) {
     return (
       <div className="wallet">
-        <span className="wallet-acct">
-          <span className="wallet-name">{account.label}</span>
-          <span className="mono wallet-addr">{shortAddress(account.address)}</span>
-        </span>
+        {/* The address alone, because it is the thing that identifies which account
+            will sign. The extension's own name for the account used to sit above it
+            and is gone: see the note on `WalletAccount`. */}
+        <span className="mono wallet-addr">{shortAddress(account.address)}</span>
         <span className="wallet-bal mono">
           {/*
               `null` is "not read", never zero. A fresh account that has never
