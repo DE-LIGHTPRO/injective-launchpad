@@ -1,4 +1,4 @@
-import { listTrades, symbolOf, type Trade } from './chain.ts';
+import { listTrades, symbolOf, quoteMoved, type Trade } from './chain.ts';
 
 /**
  * Recent trades across several launches, for the board's ticker.
@@ -81,8 +81,12 @@ export async function recentTrades(
     for (const t of trades) {
       const side = t.kind === 'buy' ? 'buy' : t.kind === 'sell' ? 'sell' : null;
       if (side === null) continue;
-      // Graduation and anything unrecognised are not trades and carry no quote.
-      const quote = side === 'buy' ? t.injIn : t.injOut;
+      /*
+       * Graduation and anything unrecognised are not trades and carry no quote, and
+       * a buy is worth what it spent rather than what it offered: this read `injIn`,
+       * so the graduating buy crossed the ticker at up to 50x its real size.
+       */
+      const quote = quoteMoved(t);
       if (quote === null || quote <= 0n) continue;
       out.push({
         side,

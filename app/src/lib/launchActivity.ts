@@ -1,6 +1,6 @@
 import { getLcdUrl, NETWORK } from './config.ts';
 import { isDemoMode } from './demo.ts';
-import { listTrades, currentHeight, type Trade } from './chain.ts';
+import { listTrades, currentHeight, quoteMoved, type Trade } from './chain.ts';
 
 /**
  * How busy a launch is, from what this chain will actually answer.
@@ -154,15 +154,9 @@ export function volumeWithin(
   let total = 0n;
   for (const t of trades) {
     if (t.height < floor) continue;
-    total += quoteOf(t) ?? 0n;
+    total += quoteMoved(t) ?? 0n;
   }
   return total;
-}
-
-/** Quote that moved in a trade, or null for anything that is not one. */
-function quoteOf(t: Trade): bigint | null {
-  const q = t.kind === 'buy' ? t.injIn : t.kind === 'sell' ? t.injOut : null;
-  return q !== null && q > 0n ? q : null;
 }
 
 /**

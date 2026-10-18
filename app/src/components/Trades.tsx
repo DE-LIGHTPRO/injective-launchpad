@@ -1,4 +1,4 @@
-import { short, type Quote } from '@/lib/chain';
+import { short, quoteMoved, type Quote } from '@/lib/chain';
 import { fmt } from '@/lib/curve';
 import { NETWORK } from '@/lib/config';
 import { compact } from '@/lib/boardMetrics';
@@ -169,9 +169,13 @@ export function Trades({ result, quote }: { result: TradeViewResult; quote: Quot
             <li key={`${t.txHash}-${i}`}>
               <span className={`trade-side ${t.kind}`}>{t.kind}</span>
               <span className="mono trade-amount">
-                {t.kind === 'buy' && t.injIn !== null && (
+                {/* What was spent, not what was offered. Printing `injIn` here beside
+                    the filled price below put two numbers in one row that do not
+                    divide into each other: on a partially filled buy the refund had
+                    already gone back to the buyer. */}
+                {t.kind === 'buy' && quoteMoved(t) !== null && (
                   <>
-                    {fmt(t.injIn, quote.decimals, 4)} {quote.label}
+                    {fmt(quoteMoved(t)!, quote.decimals, 4)} {quote.label}
                     {t.tokens !== null && <> for {fmt(t.tokens, 18, 0)} {sym}</>}
                   </>
                 )}

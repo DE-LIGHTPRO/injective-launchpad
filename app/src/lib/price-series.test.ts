@@ -23,6 +23,9 @@ const trade = (over: Partial<Trade> = {}): Trade => ({
   time: 0,
   injIn: ONE,
   injOut: null,
+  // A buy the curve absorbed whole, which is what every assertion below means by
+  // a buy. The partial-fill cases pass their own refund.
+  refund: 0n,
   tokens: 1_000n * ONE,
   fee: ONE / 100n,
   height: 100,

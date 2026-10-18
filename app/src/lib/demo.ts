@@ -215,6 +215,13 @@ export function demoTrades(curveAddress: string, limit: number): Trade[] {
       who: `inj1demo${Math.floor(next() * 1e6)}trader00000000000000000x`,
       injIn: buy ? quote : null,
       injOut: buy ? null : quote,
+      /*
+       * Zero, not null, and that is the honest demo value. These buys are all far
+       * inside the curve's capacity, so a real one would refund nothing and the
+       * contract would emit `refund: 0`. Leaving it null would exercise an event shape
+       * the contract does not produce.
+       */
+      refund: buy ? 0n : null,
       tokens: BigInt(Math.round(next() * 5_000_000 * 1e18)),
       fee: quote / 100n,
       height: base - i * (2 + Math.floor(next() * 40)),

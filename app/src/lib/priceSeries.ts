@@ -1,4 +1,4 @@
-import type { Trade } from './chain.ts';
+import { quoteMoved, type Trade } from './chain.ts';
 
 /**
  * A price series built from trades that actually happened.
@@ -87,7 +87,11 @@ export const EMPTY_SERIES: Series = {
  * the quote side is whatever the creator picked.
  */
 export function fillPrice(t: Trade, quoteDecimals = 18, tokenDecimals = 18): number | null {
-  const quote = t.kind === 'buy' ? t.injIn : t.kind === 'sell' ? t.injOut : null;
+  // THE AMOUNT THAT MOVED, which is what the docblock above always claimed and what
+  // this line did not do: it read `injIn`, the gross payment, so a partially filled
+  // buy was priced on quote the contract handed straight back. `quoteMoved` is the
+  // one resolver; its docblock carries the measurement.
+  const quote = quoteMoved(t);
   if (quote === null || t.tokens === null) return null;
   if (quote <= 0n || t.tokens <= 0n) return null;
 
@@ -144,7 +148,9 @@ export function buildSeries(trades: readonly Trade[], quoteDecimals = 18): Serie
       time: t.time,
       price,
       side: t.kind,
-      quote: (t.kind === 'buy' ? t.injIn : t.injOut) ?? 0n,
+      // The same figure the price was derived from, so a point's quote and its price
+      // cannot tell two different stories about one fill.
+      quote: quoteMoved(t) ?? 0n,
       txHash: t.txHash,
     });
   }

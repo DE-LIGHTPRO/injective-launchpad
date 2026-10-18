@@ -549,11 +549,31 @@ export interface Trade {
   kind: 'buy' | 'sell' | 'graduate' | 'other';
   /** The trader, from the contract's own attribute rather than the tx sender. */
   who: string | null;
-  /** Base units, as the contract emitted them. */
+  /**
+   * Base units, as the contract emitted them.
+   *
+   * `injIn` IS WHAT WAS PAID, NOT WHAT WAS SPENT. On a buy the curve cannot absorb
+   * whole, the handler hands part of the payment straight back and emits that as
+   * `refund`; `inj_in` stays the gross `must_pay` figure. Read `quoteMoved` rather
+   * than this field for anything that prices or totals a trade.
+   */
   injIn: bigint | null;
   injOut: bigint | null;
   tokens: bigint | null;
   fee: bigint | null;
+  /**
+   * Quote handed back on a partial fill, or null when the event carried none.
+   *
+   * THE CONTRACT HAS ALWAYS EMITTED THIS AND NOTHING READ IT. Four consumers priced
+   * or totalled a trade from `injIn` alone, and the one in `launchActivity` was named
+   * `quoteOf` with the docblock "Quote that moved in a trade" over an expression that
+   * returns the quote that was offered. See `quoteMoved` for the measurement.
+   *
+   * Null rather than zero for an event without the attribute, because a buy that
+   * refunded nothing and an event we could not read the refund from are different
+   * claims. `quoteMoved` treats null as zero deliberately and says why.
+   */
+  refund: bigint | null;
   height: number;
   /**
    * Block time in UNIX seconds, or 0 when the search did not carry one.
@@ -570,6 +590,57 @@ export interface Trade {
    */
   time: number;
   txHash: string;
+}
+
+/**
+ * The quote that actually moved in a trade, or null for anything that is not one.
+ *
+ * ONE RESOLVER, because there were four copies of `kind === 'buy' ? injIn : injOut`
+ * and every one of them was wrong on the same trade:
+ *
+ *   priceSeries.fillPrice     the price each fill is plotted at
+ *   priceSeries.buildSeries   the per-point quote the chart reports
+ *   launchActivity.quoteOf    24h volume
+ *   recentTrades              the ticker's amount
+ *
+ * `exec_buy` takes the whole payment, quotes it, and refunds whatever the curve
+ * cannot absorb - then emits `inj_in` as the GROSS payment with the refund as a
+ * separate attribute that `tradeFromAttrs` did not read. So on every partial fill,
+ * which is every graduating buy, all four numbers were the amount offered rather
+ * than the amount traded. Measured on the deployed shape (capacity 2000.962 from a
+ * fresh curve), the graduating buy's plotted price:
+ *
+ *      10% over capacity   2.751323e-6 drawn against 2.501203e-6 true    +10.000%
+ *      2x over capacity    5.002405e-6 against 2.501203e-6              +100.000%
+ *      50x over capacity   1.250601e-4 against 2.501203e-6            +4,900.000%
+ *
+ * The last is reachable with the Max button on a large balance. It is the FINAL point
+ * on every graduated launch's chart and, being a multiple of its neighbours, also
+ * becomes the series high - so the one candle a visitor reads as "where this launch
+ * graduated" was the one most able to be wrong. Volume took the same error: 100,048
+ * counted where 2,000.962 moved.
+ *
+ * THE FEE AND THE OPENING PREMIUM STAY IN. Both are spent: the fee goes to the
+ * creator and the platform, the premium into the pool at graduation. Only the refund
+ * came back, and `fillPrice`'s docblock already states the rule this enforces - "Both
+ * sides use the amount that actually moved".
+ *
+ * A missing `refund` attribute counts as zero rather than making the trade
+ * unpriceable. Every handler that can refund emits it, a sell has no refund to emit,
+ * and a buy that filled whole emits `0`, so the absent case is an event shape this
+ * contract does not produce. Refusing to price it would blank a chart over a
+ * hypothetical; subtracting zero prices it exactly as before.
+ */
+export function quoteMoved(t: Trade): bigint | null {
+  if (t.kind === 'buy') {
+    if (t.injIn === null) return null;
+    // Saturating at zero: a refund larger than the payment is not a thing the
+    // contract can emit, and a negative quote would draw a point below the axis.
+    const spent = t.injIn - (t.refund ?? 0n);
+    return spent > 0n ? spent : null;
+  }
+  if (t.kind === 'sell') return t.injOut !== null && t.injOut > 0n ? t.injOut : null;
+  return null;
 }
 
 /** An RFC 3339 block time as UNIX seconds, or 0 when there is not one to read. */
@@ -601,6 +672,7 @@ function tradeFromAttrs(attrs: Array<{ key: string; value: string }>): Trade | n
     injOut: big('inj_out'),
     tokens: big('tokens_out') ?? big('tokens_in'),
     fee: big('fee'),
+    refund: big('refund'),
     height: 0,
     time: 0,
     txHash: '',
