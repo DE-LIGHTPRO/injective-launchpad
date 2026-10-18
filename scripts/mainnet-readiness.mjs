@@ -40,9 +40,23 @@ const hm = (m, d) => {
 
 const section = (n, t) => console.log(`\n  ${n}. ${t}`);
 
-/** The platform address to check, if the operator has chosen one. */
+/*
+ * THE SAME THREE `deploy.mjs` REFUSES, read here under the same names.
+ *
+ * This read two of them and checked the existence of one. `deploy.mjs` calls
+ * `assertPayable` on all three (lines 600-609) and dies on any that has no account,
+ * and it does so in STEP 5, after step 4 has already stored both contracts on chain.
+ * So an operator ran this on the morning, saw one address flagged, funded that one,
+ * paid for two wasm stores, and died on the second address with the gas spent.
+ *
+ * Each half was locally right: this script was about the address that receives money,
+ * and the deploy script was about every address it names. Nothing errors where the
+ * error is, which is why the readiness list has to enforce what the deploy enforces
+ * rather than a sensible subset of it.
+ */
 const platform = process.env.INJ_PLATFORM_ADDRESS?.trim();
 const admin = process.env.INJ_FACTORY_ADMIN?.trim();
+const wasmAdmin = process.env.INJ_FACTORY_WASM_ADMIN?.trim();
 
 console.log('\n  Vetta mainnet readiness');
 console.log(`  mainnet LCD ${MAINNET_LCD}`);
@@ -237,52 +251,87 @@ async function accountExists(addr) {
   };
 }
 
-if (!platform) {
-  hm(
-    'No INJ_PLATFORM_ADDRESS set, so the fee recipient cannot be checked.',
-    'Re-run with INJ_PLATFORM_ADDRESS=inj1... once you have chosen it.',
-  );
-} else {
+/**
+ * One role: is it set, and does the chain know the address?
+ *
+ * `deploy.mjs` asks the auth endpoint; this asks bank, and the difference does not
+ * matter here because both answer the one question worth asking - has anybody ever
+ * put anything at this address. A well-formed address with no history is one nobody
+ * has proved they hold the key to, which is the case that actually happened: the
+ * factory was once deployed paying fees to `inj10c4q...`, an address that has never
+ * transacted, and every fee would have gone there successfully and unrecoverably.
+ */
+async function checkRole(label, addr, hint) {
+  if (!addr) {
+    hm(`No ${label} address set.`, hint);
+    return;
+  }
   try {
-    const a = await accountExists(platform);
-    if (a === null) no(`The platform address could not be read: ${platform}`);
+    const a = await accountExists(addr);
+    if (a === null) no(`The ${label} address could not be read: ${addr}`);
     else if (!a.funded) {
-      /*
-       * An address with no mainnet history is one nobody has proved they control.
-       * Fees paid to a mistyped address are gone, and the mistake is invisible until
-       * somebody goes looking for money that never arrived.
-       */
       no(
-        `${platform} has never held anything on mainnet.`,
-        'Send a small amount from it first. An address nobody has transacted from is one nobody has proved they hold the key to.',
+        `${label}: ${addr} has never held anything on mainnet.`,
+        'Send it a small amount first. deploy.mjs refuses this address, and it refuses it in step 5, after it has already paid to store both contracts.',
       );
-    } else ok(`platform ${platform} exists on mainnet (${Number(a.inj) / 1e18} INJ)`);
+    } else ok(`${label} ${addr} exists on mainnet (${Number(a.inj) / 1e18} INJ)`);
   } catch (e) {
-    no('The platform address could not be checked.', e.message);
+    no(`The ${label} address could not be checked.`, e.message);
   }
 }
 
-if (!admin) {
-  hm('No INJ_FACTORY_ADMIN set.', 'The deploy key becomes the admin if you do not set one.');
-} else if (platform && admin === platform) {
-  hm(
-    'The factory admin and the platform recipient are the same address.',
-    'Workable, but one compromised key then both redirects future fees and migrates the factory.',
-  );
-} else if (admin) {
-  ok(`factory admin ${admin} is separate from the fee recipient`);
-}
+await checkRole('platform fee recipient', platform, 'Re-run with INJ_PLATFORM_ADDRESS=inj1... once you have chosen it.');
+await checkRole('factory admin', admin, 'On mainnet deploy.mjs requires it. It does not fall back to the deploy key.');
 
 /*
  * THE UPGRADE KEY IS THE ONE WORTH ARGUING ABOUT. Curves are deployed with no wasm
  * admin and are immutable for good; the FACTORY has one, and whoever holds it can
  * migrate it. That cannot touch an existing launch's funds, but it can change where
  * future fees go and which curve code new launches run.
+ *
+ * `none` is a complete answer, not a missing one. It makes the factory immutable, and
+ * the check below must not nag about a key that will not exist.
  */
-hm(
-  'The factory will have a wasm admin (an upgrade key).',
-  'Existing launches are immutable either way. A multisig is the right holder on mainnet; a laptop key is not.',
-);
+if (wasmAdmin === 'none') {
+  ok('the factory will have NO wasm admin: immutable, and no upgrade key to hold or lose');
+} else {
+  await checkRole(
+    'factory upgrade key',
+    wasmAdmin,
+    'On mainnet deploy.mjs requires it: a multisig address, or the literal `none` to make the factory immutable.',
+  );
+  if (wasmAdmin) {
+    hm(
+      'The factory upgrade key is a plain address.',
+      'Existing launches are immutable either way. What this key can do is repoint future launches and remove the caps the contract enforces, so a multisig is the right holder and a laptop key is not.',
+    );
+  }
+}
+
+/*
+ * DISTINCTNESS, CHECKED ACROSS ALL THREE rather than between two of them.
+ * `verify-deployment.mjs` reports an overlap AFTER the deploy, which is the wrong end
+ * of the morning to learn it. One compromised key holding two roles is one key that
+ * both redirects future fees and migrates the factory.
+ */
+const roles = [
+  ['platform fee recipient', platform],
+  ['factory admin', admin],
+  ['factory upgrade key', wasmAdmin === 'none' ? undefined : wasmAdmin],
+].filter(([, a]) => a);
+for (let i = 0; i < roles.length; i += 1) {
+  for (let j = i + 1; j < roles.length; j += 1) {
+    if (roles[i][1] === roles[j][1]) {
+      hm(
+        `The ${roles[i][0]} and the ${roles[j][0]} are the same address.`,
+        'Workable, and one compromised key then holds both roles.',
+      );
+    }
+  }
+}
+if (roles.length === 3 && new Set(roles.map(([, a]) => a)).size === 3) {
+  ok('the three roles are three distinct addresses');
+}
 
 // ------------------------------------------------------------ the config --
 
