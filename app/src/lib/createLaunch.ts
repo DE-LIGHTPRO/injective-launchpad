@@ -375,9 +375,20 @@ export function planLaunch(input: LaunchInput): LaunchPlan {
             ...(input.initialBuy && input.initialBuy > 0n
               ? [
                   {
-                    // The LAUNCH's quote, not the network default: a dev buy on a
-                    // USDC-paired launch attaches USDC, and attaching INJ would be
-                    // refused by the factory's funds check as a third denom.
+                    /*
+                     * The LAUNCH's quote, not the network default: a dev buy on a
+                     * USDC-paired launch attaches USDC.
+                     *
+                     * Attaching INJ instead is refused, but NOT as a third denom, and
+                     * the difference matters to anyone reading the error. The factory
+                     * tries `denom`, then `quote`, then `fee_denom`, and only then
+                     * `UnexpectedFunds`. So with a fee configured in INJ - the
+                     * plausible shape for a USDC launch - the stray INJ lands in
+                     * `got_fee`, which then does not equal `launch_fee`, and the
+                     * refusal is `BadLaunchFee`: an error naming the launchpad's fee
+                     * for a mistake in the opening buy. `UnexpectedFunds` only comes
+                     * back when the fee is zero.
+                     */
                     denom: input.quoteDenom || NETWORK.quoteDenom,
                     amount: input.initialBuy.toString(),
                   },

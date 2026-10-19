@@ -90,6 +90,70 @@ test('gas is a separate concept from the default quote', () => {
     !/gasReserveFor\([^)]*quoteDenom\)/.test(panel),
     'the gas reserve is reading the default quote again',
   );
+
+  /*
+   * AND THE SPLIT STOPPED ONE FIELD SHORT, which is this half. `gasDenom` got its own
+   * name; `gasSymbol` and `gasDecimals` did not, so every figure in the create form's
+   * cost row - Injective's denom-creation fee, the gas reserve, the wallet's balance,
+   * all of them read in `gasDenom` - was scaled by `quoteDecimals` and labelled
+   * `quoteSymbol`. The denom being read and the scale being applied came from two
+   * different fields.
+   *
+   * Right by coincidence today, since `inj` is both. Pointing a deployment's default
+   * quote at a 6-decimal asset would have printed the denom fee off by 10^12 in the one
+   * place a creator checks what signing costs, and the guard above could not see it:
+   * `CreateLaunch` is not a per-launch surface, so `NETWORK.quote*` there is legitimate
+   * for the quote and was indistinguishable from this.
+   */
+  assert.match(cfg, /gasSymbol:\s*string/, 'the gas asset has no ticker of its own');
+  assert.match(cfg, /gasDecimals:\s*number/, 'the gas asset has no scale of its own');
+});
+
+test('a gas-denominated figure is scaled and labelled as the gas asset', () => {
+  /*
+   * The half the config assertion cannot see: declaring the fields and still passing
+   * `NETWORK.quoteDecimals` typechecks and reads correctly on Injective.
+   *
+   * Found by walking the tree rather than naming `CreateLaunch.tsx`, because a second
+   * surface stating a cost is exactly the case a named list misses - the per-launch
+   * list in this same file has already gone stale once, and says so.
+   */
+  const offenders: string[] = [];
+  for (const file of tsxFiles(SRC)) {
+    const src = stripComments(readFileSync(file, 'utf8'));
+    for (const m of src.matchAll(
+      /\b(?:cost\.\w+|gasBalance[\w ?.]*)\s*,\s*NETWORK\.quote(Symbol|Decimals)/g,
+    )) {
+      offenders.push(`${file.slice(SRC.length + 1)}: ${m[0].replace(/\s+/g, ' ')}`);
+    }
+  }
+  assert.deepEqual(offenders, [], 'a gas-asset amount is being scaled by the default quote');
+
+  /*
+   * Anti-vacuity, and the assertion that actually binds. The pattern above matches
+   * nothing once the defect is fixed, so on its own it would pass just as happily
+   * against a cost row that had been deleted. This requires the row to still be
+   * rendering the total, in the gas asset.
+   */
+  const form = stripComments(readFileSync(join(SRC, 'components/CreateLaunch.tsx'), 'utf8'));
+  const required: Array<[RegExp, string]> = [
+    [
+      /fmt\(cost\.total,\s*NETWORK\.gasDecimals[\s\S]{0,40}?NETWORK\.gasSymbol/,
+      'the create form no longer states the total cost in the gas asset, scale and ticker together',
+    ],
+    [
+      /fmt\(cost\.denomFee,\s*NETWORK\.gasDecimals/,
+      'the denom-creation fee is not scaled as the gas asset it is paid in',
+    ],
+    [
+      /fmt\(gasBalance \?\? 0n,\s*NETWORK\.gasDecimals/,
+      'the wallet balance the refusal quotes is not scaled as the gas asset it was read in',
+    ],
+  ];
+  for (const [pattern, why] of required) {
+    // Not `assert.match`: its failure dumps the whole 40KB component into the output.
+    assert.ok(pattern.test(form), why);
+  }
 });
 
 test('the per-launch list still covers the components that exist', () => {

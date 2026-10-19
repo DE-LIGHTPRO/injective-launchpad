@@ -55,6 +55,25 @@ export interface NetworkConfig {
   gasDenom: string;
   quoteSymbol: string;
   quoteDecimals: number;
+  /**
+   * How to render an amount of the GAS asset, which is a different decision from
+   * how to render a quote even when the two denoms coincide.
+   *
+   * SPLITTING `quoteDenom` FROM `gasDenom` ABOVE STOPPED ONE FIELD SHORT. Every
+   * figure in the create form's cost row - the Injective denom-creation fee, the
+   * gas reserve, the wallet's spendable balance - is denominated in `gasDenom`,
+   * and all of them were scaled by `quoteDecimals` and labelled `quoteSymbol`.
+   * The denom being read and the decimals being applied came from two different
+   * fields, which is the same collision the comment above records, one field over.
+   *
+   * It reads correctly today only because `inj` is both, so the numbers agree by
+   * coincidence rather than by construction. Pointing a deployment's quote at a
+   * 6-decimal asset would have printed the denom fee off by a factor of 10^12 in
+   * the one place the creator checks what signing costs. Named fields so each use
+   * says which asset it means, and a guard keeps the cost row on these.
+   */
+  gasSymbol: string;
+  gasDecimals: number;
 }
 
 export const NETWORKS: Record<NetworkName, NetworkConfig> = {
@@ -68,6 +87,8 @@ export const NETWORKS: Record<NetworkName, NetworkConfig> = {
     gasDenom: 'inj',
     quoteSymbol: 'INJ',
     quoteDecimals: 18,
+    gasSymbol: 'INJ',
+    gasDecimals: 18,
   },
   mainnet: {
     name: 'mainnet',
@@ -80,6 +101,8 @@ export const NETWORKS: Record<NetworkName, NetworkConfig> = {
     gasDenom: 'inj',
     quoteSymbol: 'INJ',
     quoteDecimals: 18,
+    gasSymbol: 'INJ',
+    gasDecimals: 18,
   },
 };
 

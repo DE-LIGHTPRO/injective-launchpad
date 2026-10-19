@@ -1207,30 +1207,37 @@ export function CreateLaunch() {
                 it. `affordable === false` only when a balance was actually read:
                 `null` is "not known" and must not block a launch, because an
                 unreachable LCD says nothing about whether the wallet is funded.
+
+                EVERY FIGURE HERE IS THE GAS ASSET, so every one is scaled by
+                `gasDecimals` and labelled `gasSymbol` - not the quote's, and not
+                this launch's `quoteDecimals` from line 194. `launchCost` zeroes
+                the launchpad fee and the opening buy unless they are in `gasDenom`
+                precisely so that this total is one asset and can be compared
+                against one balance.
               */}
             <div className="metric-row">
               <span className="k">
                 Costs to create{' '}
                 <span className="note">
-                  ({fmt(cost.denomFee, NETWORK.quoteDecimals, 2)} Injective denom fee
+                  ({fmt(cost.denomFee, NETWORK.gasDecimals, 2)} Injective denom fee
                   {cost.launchFee > 0n
-                    ? `, ${fmt(cost.launchFee, NETWORK.quoteDecimals, 2)} launchpad fee`
+                    ? `, ${fmt(cost.launchFee, NETWORK.gasDecimals, 2)} launchpad fee`
                     : ''}
                   {cost.openingBuy > 0n
-                    ? `, ${fmt(cost.openingBuy, NETWORK.quoteDecimals, 4)} opening buy`
+                    ? `, ${fmt(cost.openingBuy, NETWORK.gasDecimals, 4)} opening buy`
                     : ''}
                   , plus gas)
                 </span>
               </span>
               <span className="v mono">
-                {fmt(cost.total, NETWORK.quoteDecimals, 4)} {NETWORK.quoteSymbol}
+                {fmt(cost.total, NETWORK.gasDecimals, 4)} {NETWORK.gasSymbol}
               </span>
             </div>
             {affordable === false && (
               <p className="note err-text">
-                This wallet holds {fmt(gasBalance ?? 0n, NETWORK.quoteDecimals, 4)}{' '}
-                {NETWORK.quoteSymbol}. Creating a token costs{' '}
-                {fmt(cost.total, NETWORK.quoteDecimals, 4)} {NETWORK.quoteSymbol}, most of
+                This wallet holds {fmt(gasBalance ?? 0n, NETWORK.gasDecimals, 4)}{' '}
+                {NETWORK.gasSymbol}. Creating a token costs{' '}
+                {fmt(cost.total, NETWORK.gasDecimals, 4)} {NETWORK.gasSymbol}, most of
                 it Injective&rsquo;s own one-off charge for a new denom. Top the wallet up
                 and this will unlock.
               </p>
