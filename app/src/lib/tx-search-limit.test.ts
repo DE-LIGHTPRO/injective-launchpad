@@ -78,8 +78,28 @@ function queryStringsFor(path: string): Array<{ file: string; query: string }> {
   return found;
 }
 
+/**
+ * The tx SEARCH sites, told apart from the single-transaction FETCH.
+ *
+ * `/cosmos/tx/v1beta1/txs?query=...` is the search and takes `limit` and `order_by`.
+ * `/cosmos/tx/v1beta1/txs/{hash}` is a fetch by hash and takes NEITHER - it addresses
+ * one transaction, so there is no page to bound and no order to choose. The path of the
+ * second is a prefix of the first, so a guard that matches the path alone reports the
+ * poll in `txStatus.ts` as an unbounded ascending search, which is a false positive on
+ * a correct file.
+ *
+ * Discriminated on the character AFTER the path rather than by filename: excluding a
+ * file would exempt its next URL too. A `/` marks the by-hash read; anything else,
+ * including a URL assembled from a variable, is treated as a search, so an unrecognised
+ * shape is measured rather than waved through.
+ */
+function txSearchSites(): Array<{ file: string; query: string }> {
+  const PATH = '/cosmos/tx/v1beta1/txs';
+  return queryStringsFor(PATH).filter((s) => !s.query.startsWith(`${PATH}/`));
+}
+
 test('transaction search is bounded by `limit`, which is the parameter it honours', () => {
-  const sites = queryStringsFor('/cosmos/tx/v1beta1/txs');
+  const sites = txSearchSites();
   assert.ok(
     sites.length >= 2,
     `only ${sites.length} tx-search call sites found; this guard measures nothing if the endpoint moved behind a helper`,
@@ -117,7 +137,7 @@ test('transaction search asks for the NEWEST page, because the oldest is the pru
    * Asserted across every call site rather than in `launchActivity.ts`, because the
    * other site had it right and a guard that reads one file does not cover the class.
    */
-  const sites = queryStringsFor('/cosmos/tx/v1beta1/txs');
+  const sites = txSearchSites();
   assert.ok(
     sites.length >= 2,
     `only ${sites.length} tx-search call sites found; this guard measures nothing if the endpoint moved behind a helper`,

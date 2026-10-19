@@ -37,3 +37,28 @@ export const CREATE_NAV: NavItem = { href: '/create', label: 'Create a launch' }
 export const FOOTER_NAV: readonly NavItem[] = PRIMARY_NAV.flatMap((item, i) =>
   i === 0 ? [item, CREATE_NAV] : [item],
 );
+
+/**
+ * Whether a nav destination is the page currently open.
+ *
+ * ONE RESOLVER, for the same reason the list above is one list. The phone menu already
+ * wrote `pathname === item.href` inline and the header nav had nothing at all, so on
+ * every page the desktop navigation gave no sign of where the visitor was - the six
+ * links rendered identically on `/`, `/portfolio` and `/risks`. That is this file's own
+ * defect one level down: the decision existed in one of the two copies.
+ *
+ * Exact match, OR a prefix that ends on a SEGMENT BOUNDARY. A sub-route like
+ * `/portfolio/<addr>` is still Portfolio, which exact matching alone would miss, and the
+ * trailing slash is what stops `/portfolios` matching `/portfolio` as well.
+ *
+ * `/` needs no special case, and the version of this that had one is worth recording
+ * because it read as the load-bearing line. The worry is real - `/` is a prefix of every
+ * path, so a bare `startsWith` would light up Launches on all six pages - but the
+ * boundary already answers it: for `/`, the prefix tested is `//`, and no path begins
+ * with that. A mutation that deleted the special case passed every assertion, which is
+ * how a line that does nothing gets found.
+ */
+export function isNavCurrent(pathname: string | null | undefined, href: string): boolean {
+  if (!pathname) return false;
+  return pathname === href || pathname.startsWith(`${href}/`);
+}

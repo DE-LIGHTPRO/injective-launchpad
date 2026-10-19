@@ -6,6 +6,7 @@ import { fmt } from '@/lib/curve';
 import { NETWORK } from '@/lib/config';
 import { CREATOR_FEE_SHARE_BPS, PLATFORM_FEE_SHARE_BPS, type RewardRoute } from '@/lib/launchLimits';
 import { useConnectedAccount } from '@/lib/walletStore';
+import { TxDialog, useTxFlow } from './TxDialog';
 import type { Quote } from '@/lib/chain';
 
 /**
@@ -68,8 +69,7 @@ export function FeeEarnings({
   const account = useConnectedAccount();
   const router = useRouter();
   const [busy, setBusy] = useState(false);
-  const [txHash, setTxHash] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const tx = useTxFlow();
 
   const total = creatorOwed + platformOwed;
   const nothingToClaim = total === 0n;
@@ -92,18 +92,20 @@ export function FeeEarnings({
   async function claim() {
     if (!account) return;
     setBusy(true);
-    setError(null);
-    setTxHash(null);
     try {
       const { broadcastExecute, GAS } = await import('@/lib/broadcast');
-      const { txHash } = await broadcastExecute({
-        contract: curve,
-        msg: { claim_fees: {} },
-        sender: account.address,
-        wallet: account.provider,
-        gas: GAS.claim,
+      const confirmed = await tx.run({
+        title: 'Pay out fees',
+        send: (onStage) =>
+          broadcastExecute({
+            contract: curve,
+            msg: { claim_fees: {} },
+            sender: account.address,
+            wallet: account.provider,
+            gas: GAS.claim,
+            onStage,
+          }),
       });
-      setTxHash(txHash);
       /*
        * THE FIGURES ABOVE ARE SERVER-RENDERED PROPS AND NOTHING REFETCHED THEM.
        *
@@ -117,15 +119,14 @@ export function FeeEarnings({
        * the only honest source for these: an optimistic zero here would be a number
        * we invented, and the one thing this panel must not do is show a balance
        * nothing measured.
+       *
+       * ON A CONFIRMATION ONLY. Refreshing after a refusal repaints the same figures
+       * from the same chain state, which is indistinguishable from the panel having
+       * absorbed the claim - and this panel's own comment above records a creator
+       * being told three contradictory things at once. The dialog carries the
+       * refusal; the page stays as it is, because it is still correct.
        */
-      router.refresh();
-    } catch (e) {
-      /*
-       * The wallet's own sentence, through the translator the launch path uses. An
-       * untranslated chain error here would read as the claim being impossible when
-       * the usual cause is a closed prompt.
-       */
-      setError((e as Error).message);
+      if (confirmed) router.refresh();
     } finally {
       setBusy(false);
     }
@@ -292,20 +293,7 @@ export function FeeEarnings({
         </div>
       )}
 
-      {txHash && (
-        <p className="note" style={{ marginTop: 'var(--space-3)' }}>
-          Paid out.{' '}
-          <a href={`${NETWORK.explorer}/transaction/${txHash}`} target="_blank" rel="noreferrer">
-            View the transaction
-          </a>
-          . The figures above update when the page next reads the chain.
-        </p>
-      )}
-      {error && (
-        <p className="note err-text" style={{ marginTop: 'var(--space-3)' }}>
-          {error}
-        </p>
-      )}
+      <TxDialog flow={tx} />
     </div>
   );
 }

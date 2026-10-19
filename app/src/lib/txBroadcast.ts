@@ -28,7 +28,40 @@ export interface SignedTxParts {
   signatures: string[];
 }
 
-export type BroadcastResult = { txHash: string } | { error: string; detail?: string };
+/**
+ * What came back, and crucially WHETHER THE CHAIN HAS ANSWERED YET.
+ *
+ * `settled` is the whole point of this type. A transaction has three fates, not two:
+ * it landed, it was refused, or nobody knows yet - and the third is the common one,
+ * because this route gives up waiting long before the chain does (see
+ * `INCLUSION_WAIT_MS`). Collapsing the third into a refusal is how the old shape lied.
+ */
+export type BroadcastResult =
+  | { txHash: string; height: number | null; settled: true }
+  /** Broadcast accepted, inclusion not observed before we stopped waiting. */
+  | { txHash: string; height: null; settled: false }
+  | { error: string; detail?: string; settled: boolean };
+
+/**
+ * How long this route waits for the transaction to appear in a block.
+ *
+ * NOT THE SDK'S DEFAULT, WHICH IS 42 SECONDS, and that default is what made this
+ * route unsafe. `DEFAULT_BLOCK_TIMEOUT_HEIGHT` (60) times
+ * `DEFAULT_BLOCK_TIME_IN_SECONDS` (0.7) is 42,000ms of blocking inside a serverless
+ * function that has no `maxDuration` and therefore takes the platform default. The
+ * platform kills the function first, the browser gets a dead socket, and
+ * `broadcast.ts` reports "The transaction was signed but could not be sent... nothing
+ * was created." Every clause of that is false for a transaction already in the
+ * mempool: it was sent, and it probably created exactly what it was meant to.
+ *
+ * So the wait is short and bounded, and running out is reported as `settled: false`
+ * with the hash, never as a failure. The browser polls on from there, where waiting
+ * costs nothing and the user can watch it. Injective blocks are sub-second, so six
+ * seconds is roughly ten blocks: a transaction that has not appeared by then is not
+ * going to appear by second seven either, and the honest thing is to hand the caller
+ * the hash rather than keep a function warm.
+ */
+const INCLUSION_WAIT_MS = 6_000;
 
 /**
  * Validate the posted body into signed parts, or null if it is not a complete signed
@@ -57,11 +90,26 @@ export async function broadcastRawTx(parts: SignedTxParts): Promise<BroadcastRes
     authInfoBytes: fromB64(parts.authInfoBytes),
     signatures: parts.signatures.map(fromB64),
   };
+  /*
+   * The hash the NODE gave back, captured the moment the broadcast is accepted and
+   * before the inclusion wait starts.
+   *
+   * This is what separates "we do not know yet" from "it never left": holding a hash
+   * means the node took the transaction into its mempool, so the bytes are valid, the
+   * signature verified and the fee was payable. Whatever goes wrong after that is a
+   * question about a transaction that exists.
+   */
+  let acceptedHash: string | null = null;
   try {
     const api = new TxRestApi(getLcdUrl());
     // Same shape the browser passed `createTransaction`'s `txRaw` directly; rebuilt here
     // from the bytes the browser sent.
-    const result = await api.broadcast(txRaw as never);
+    const result = await api.broadcast(txRaw as never, {
+      timeout: INCLUSION_WAIT_MS,
+      onBroadcast: (hash: string) => {
+        acceptedHash = hash;
+      },
+    } as never);
     /*
      * A 200 from the node is not a landed transaction: `broadcast` carries the chain's
      * own `code`, and anything but zero is a refusal that arrived with a success status.
@@ -71,14 +119,37 @@ export async function broadcastRawTx(parts: SignedTxParts): Promise<BroadcastRes
       // while the user only ever sees the translated sentence. Temporary aid while the
       // signing path is being brought up against a live chain.
       console.error('[broadcast] chain rejected tx, code', result.code, '| rawLog:', result.rawLog);
-      return { error: describeBroadcastFailure(result.rawLog ?? ''), detail: result.rawLog };
+      return { error: describeBroadcastFailure(result.rawLog ?? ''), detail: result.rawLog, settled: true };
     }
-    return { txHash: result.txHash };
+    const height = Number(result.height);
+    return { txHash: result.txHash, height: Number.isFinite(height) && height > 0 ? height : null, settled: true };
   } catch (e) {
+    /*
+     * A REFUSAL AND A TIMEOUT ARRIVE AS THE SAME `catch`, and telling them apart is
+     * the reason this function was changed at all.
+     *
+     * The SDK throws `TransactionException` with a `contextCode` when the chain
+     * refused the transaction - at CheckTx, or in the block, since its `fetchTx`
+     * throws on a non-zero code too. It throws a plain request exception when the
+     * inclusion poll simply ran out. Those are opposite facts and both used to come
+     * back as "The chain refused the transaction."
+     *
+     * The test is the hash, not the message. Matching on the SDK's timeout wording
+     * would bind us to a string in a dependency; a hash means the node accepted the
+     * bytes, and a thrown error with no chain code against an accepted transaction
+     * means nothing was decided. That reasoning survives the SDK rewording itself.
+     */
+    const code = (e as { contextCode?: unknown }).contextCode;
+    const refusedOnChain = typeof code === 'number' || typeof code === 'string';
+    if (acceptedHash && !refusedOnChain) {
+      console.error('[broadcast] accepted but inclusion not observed:', acceptedHash, (e as Error)?.message);
+      return { txHash: acceptedHash, height: null, settled: false };
+    }
     console.error('[broadcast] threw before/while sending:', (e as Error)?.stack ?? e);
     return {
       error: describeBroadcastFailure((e as Error).message ?? ''),
       detail: (e as Error).message,
+      settled: refusedOnChain,
     };
   }
 }

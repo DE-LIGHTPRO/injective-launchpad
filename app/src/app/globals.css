@@ -155,11 +155,33 @@
   --radius-sm: 6px;
   --radius-md: 10px;
   --radius-lg: 12px;
+  /*
+   * One step above the panel radius, with exactly one reader: the transaction dialog.
+   * A step with a single reader is normally a token pretending to be a system, which is
+   * the argument written against 20px in the stats block - the difference is that this
+   * one is the largest floating surface in the app and the next modal must match it
+   * rather than pick its own corner. If a second dialog ever renders, it reads this.
+   */
+  --radius-xl: 20px;
   --radius-pill: 999px;
 
   --ring: 0 0 0 2px var(--bg), 0 0 0 4px rgba(115, 162, 255, 0.7);
-  /* No `--shadow`: nothing read it. The flat surfaces this interface settled on carry
-     their separation with the hairlines above rather than with a drop shadow. */
+  /*
+   * THE PAGE HAS NO DROP SHADOW AND A FLOATING SURFACE DOES, and the distinction is
+   * structural rather than a change of mind. A general `--shadow` was deleted here
+   * because nothing read it: cards, panels and tables sit IN the page, and separating
+   * them with a shadow instead of a hairline is the look this stylesheet rejected.
+   *
+   * A modal is the one surface that is not in the page. It sits over a scrim, above
+   * everything, and the shadow is the only cue that says so - without it the dialog
+   * reads as a card that happens to be in the middle, which is what it measured as:
+   * `box-shadow: none` on a 440px panel floating over a dimmed home page. So this is
+   * named for the job rather than called `--shadow`, and has exactly one reader.
+   *
+   * Long, soft and offset downward, at a spread that pulls the edges back in, so the
+   * dialog's own hairline still draws the boundary and the shadow only carries height.
+   */
+  --shadow-pop: 0 40px 80px -20px rgba(0, 0, 0, 0.8);
   --ease: cubic-bezier(0.2, 0.7, 0.3, 1);
 
   /*
@@ -1860,6 +1882,23 @@ header.top .brand { gap: 10px; margin-right: var(--space-4); }
   border-radius: var(--radius-sm);
 }
 .top-nav a:hover { color: var(--text); background: var(--surface-2); }
+/*
+ * THE PAGE YOU ARE ON. Measured before this: all six links resolved to the same dim
+ * colour and a transparent background on every route, so the navigation never said
+ * where the visitor was - and `aria-current` was absent, so a screen reader was not
+ * told either. The phone menu had been marking it since it was written; the header,
+ * which is the one almost everybody uses, had not.
+ *
+ * Keyed on `[aria-current=page]` rather than a class, so the state a screen reader
+ * hears and the state an eye sees are the same attribute and cannot drift apart. The
+ * accent bar is what distinguishes it from `:hover`, which already takes this fill:
+ * without it, hovering one link makes it look current.
+ */
+.top-nav a[aria-current='page'] {
+  color: var(--text);
+  background: var(--surface-2);
+  box-shadow: inset 0 -2px 0 0 var(--accent);
+}
 /* The `11px` here was `--text-micro` written as a literal, so it restated the base
    chip's size and read as an override that changes something. */
 header.top .chip { font-size: var(--text-micro); letter-spacing: 0.04em; padding: 3px 8px; border-radius: var(--radius-sm); text-transform: none; }
@@ -1887,7 +1926,15 @@ header.top .chip { font-size: var(--text-micro); letter-spacing: 0.04em; padding
 .segmented button[aria-pressed="true"] {
   background: var(--accent);
   color: #fff;
-  box-shadow: none;
+  /*
+   * The one lit control. `box-shadow: none` was here to undo a glass-era glow that sat
+   * on every button in the app, which is the thing worth refusing - a glow on all of
+   * them marks none of them. On the primary action alone it does the opposite, and it
+   * is the only shadow on the page that is not the dialog's: short, tight to the
+   * control and pulled in 10px so it never becomes a halo, in the button's own colour
+   * rather than black, so it reads as the button being lit and not as it floating.
+   */
+  box-shadow: 0 8px 24px -10px rgba(47, 107, 240, 0.7);
   filter: none;
 }
 .go {
@@ -2428,3 +2475,186 @@ table.board .dim { color: var(--text-faint); }
 .preview-head strong { display: block; font-size: var(--text-lg); }
 .preview-logo { width: 44px; height: 44px; border-radius: var(--radius-md); object-fit: cover; flex: none; }
 .preview-logo-empty { background: var(--glass-well); border: 1px dashed var(--line-strong); }
+
+/*
+ * THE TRANSACTION DIALOG.
+ *
+ * Flat, like everything else here. The temptation on a "premium" modal is a gradient
+ * header, a blurred scrim and a shimmer on the progress bar; this interface already
+ * decided against all three at the token block, for a reason that applies with extra
+ * force here - a shimmer on a bar that is reporting a chain's state reads as motion
+ * standing in for progress. Separation comes from one step of lightness and a
+ * hairline, and the only animated thing on the surface is the single dot marking the
+ * step actually running.
+ *
+ * `position: fixed` is safe because the dialog is PORTALLED to `document.body`. Inside
+ * a `.card` it would not be, for the reason recorded at the `.card` declaration.
+ */
+.tx-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: grid;
+  place-items: center;
+  padding: var(--space-4);
+  /* A scrim dims what is behind it rather than being a surface itself, so it is a
+     flat black wash and takes no blur and no lightness step from the scale. */
+  background: rgba(5, 6, 8, 0.72);
+  animation: tx-fade 140ms var(--ease);
+}
+
+@keyframes tx-fade { from { opacity: 0; } to { opacity: 1; } }
+
+.tx-dialog {
+  width: min(440px, 100%);
+  /* `min-width: 0` so a long title or hash cannot push the dialog past the viewport,
+     and a max height with its own scroll so a dev-build detail block cannot run off
+     the bottom of a phone. */
+  min-width: 0;
+  max-height: calc(100dvh - var(--space-7));
+  overflow-y: auto;
+  background: var(--surface-1);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-xl);
+  /* The one drop shadow in the interface. The argument is at `--shadow-pop`: this is
+     the only surface that is above the page rather than in it. */
+  box-shadow: var(--shadow-pop);
+  padding: var(--space-5);
+  animation: tx-rise 240ms var(--ease);
+}
+
+/*
+ * It rises AND settles, rather than only sliding up. The scale is 1.5% and lasts 240ms,
+ * which is below the threshold at which a transform reads as an animation and above the
+ * one at which it reads as nothing - it is what makes the dialog arrive instead of
+ * appear. `prefers-reduced-motion` turns the whole thing off at the end of this file.
+ */
+@keyframes tx-rise {
+  from { opacity: 0; transform: translateY(10px) scale(0.985); }
+  to { opacity: 1; transform: none; }
+}
+
+.tx-dialog:focus { outline: none; }
+
+.tx-head { display: flex; align-items: flex-start; gap: var(--space-3); margin-bottom: var(--space-4); }
+.tx-head h2 { margin: 0; font-size: var(--text-lg); line-height: 1.3; flex: 1; min-width: 0; }
+
+.tx-close {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  font-size: var(--text-lg);
+  line-height: 1;
+  color: var(--text-dim);
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.tx-close:hover:not(:disabled) { color: var(--text); border-color: var(--line-strong); }
+/* Disabled rather than hidden while in flight: a control that vanishes and returns
+   reads as a glitch, and the title attribute says why it cannot be used yet. */
+.tx-close:disabled { opacity: 0.3; cursor: not-allowed; }
+
+.tx-bar {
+  height: 3px;
+  border-radius: 2px;
+  background: var(--surface-3);
+  overflow: hidden;
+}
+.tx-bar > i {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  /* The transition is on WIDTH only, so the bar animates between two measured
+     positions. Nothing moves it except a step completing. */
+  transition: width 260ms var(--ease), background-color 160ms linear;
+}
+.tx-bar[data-state='confirmed'] > i { background: var(--buy); }
+.tx-bar[data-state='failed'] > i { background: var(--sell); }
+.tx-bar[data-state='unseen'] > i { background: var(--warn); }
+
+.tx-steps {
+  list-style: none;
+  margin: var(--space-3) 0 var(--space-4);
+  padding: 0;
+  display: flex;
+  gap: var(--space-2);
+}
+.tx-steps li {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-micro);
+  color: var(--text-faint);
+}
+.tx-step-title {
+  /* Each step keeps its own name on one line; four of them fit a 440px dialog, and
+     at 320px they wrap to two rows rather than truncating a word to nothing. */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tx-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--line-strong); }
+.tx-steps li[data-status='done'] { color: var(--text-dim); }
+.tx-steps li[data-status='done'] .tx-dot { background: var(--accent); }
+.tx-steps li[data-status='active'] { color: var(--text); }
+.tx-steps li[data-status='active'] .tx-dot { background: var(--accent); animation: tx-pulse 1.1s ease-in-out infinite; }
+
+@keyframes tx-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 var(--accent-wash); }
+  50% { box-shadow: 0 0 0 4px var(--accent-wash); }
+}
+
+.tx-say { font-size: var(--text-sm); color: var(--text-dim); line-height: 1.55; }
+.tx-say p { margin: 0; }
+.tx-good { color: var(--buy); }
+.tx-bad { color: var(--sell); }
+.tx-wait { color: var(--warn); }
+
+.tx-hash {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+  padding: var(--space-3);
+  background: var(--glass-well);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  font-size: var(--text-xs);
+}
+.tx-hash code { font-family: var(--face-mono); color: var(--text-dim); min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.tx-hash a { flex: none; color: var(--accent-text); }
+
+.tx-detail {
+  margin: var(--space-3) 0 0;
+  padding: var(--space-3);
+  background: var(--glass-well);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-micro);
+  color: var(--text-faint);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 140px;
+  overflow: auto;
+}
+/* It scrolls, so it is a tab stop (WCAG 2.1.1) and the stop has to be visible. The
+   caller sets `tabIndex={0}`: a ring on an unfocusable element never paints, and a stop
+   with no ring is a focus nobody can see. */
+.tx-detail:focus-visible { outline: 2px solid var(--accent-text); outline-offset: -2px; }
+
+.tx-foot { margin-top: var(--space-4); }
+.tx-foot .go { width: 100%; }
+
+@media (max-width: 380px) {
+  /* Four steps across a 320px screen leaves each one about 60px, which truncates
+     every label. Two rows of two is the honest fit. */
+  .tx-steps { flex-wrap: wrap; }
+  .tx-steps li { flex: 0 0 calc(50% - var(--space-2)); }
+}

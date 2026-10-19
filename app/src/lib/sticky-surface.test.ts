@@ -116,11 +116,36 @@ function pinnedSelectors(): string[] {
   return [...out];
 }
 
+/**
+ * True when this selector covers the whole viewport, which makes it a scrim.
+ *
+ * A SCRIM IS NOT THE DEFECT THIS TEST EXISTS FOR, and the difference is structural
+ * rather than a matter of taste. The header case is a surface that carries its own text
+ * while other text scrolls beneath it, so an alpha lets two layers of copy overlap and
+ * neither is readable. A full-viewport overlay carries no copy, dims the page on
+ * purpose, and sits over a body whose scroll is locked, so nothing passes under it at
+ * all - an opaque one would be a different component, not a fixed version of this one.
+ *
+ * Keyed on `position: fixed` with `inset: 0` rather than on a name, because a sticky
+ * header can never satisfy that and a name exempts the next thing someone calls a
+ * scrim. The last declaration wins here too, so a later rule that un-pins it is seen.
+ */
+function coversViewport(selector: string): boolean {
+  if (declared(selector, 'position') !== 'fixed') return false;
+  const inset = declared(selector, 'inset');
+  if (inset !== null) return /^0(?:px)?$/.test(inset.trim());
+  return ['top', 'right', 'bottom', 'left'].every((edge) => {
+    const v = declared(selector, edge);
+    return v !== null && /^0(?:px)?$/.test(v.trim());
+  });
+}
+
 test('a sticky or fixed surface is opaque, because content passes under it', () => {
   const pinned = pinnedSelectors();
   assert.ok(pinned.length > 0, 'nothing is sticky or fixed at all: the scan is not measuring');
 
   for (const selector of pinned) {
+    if (coversViewport(selector)) continue;
     const bg = declared(selector, 'background') ?? declared(selector, 'background-color');
     // No background is not a defect: `.trade-col` is sticky and shows the page through
     // itself on purpose, because there is nothing between it and the ground.

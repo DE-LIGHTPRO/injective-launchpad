@@ -47,5 +47,25 @@ export async function POST(req: Request) {
   if ('error' in result) {
     return NextResponse.json(result, { status: 502 });
   }
+  /*
+   * A 200 FOR AN UNSETTLED RESULT TOO, and deliberately.
+   *
+   * `settled: false` means the node accepted the transaction and it had not appeared
+   * in a block by the time this route stopped waiting. That is a successful broadcast
+   * with an open question attached, not an error: the browser carries on polling for
+   * it by hash. A 502 here would have the status assert a failure the body is careful
+   * not to assert, which is how a caller ends up trusting the status over the body.
+   */
   return NextResponse.json(result);
 }
+
+/**
+ * Longer than the platform default, and still far longer than the route can take.
+ *
+ * `broadcastRawTx` stops waiting at six seconds, so this is headroom for a slow LCD
+ * rather than a budget anything plans to spend. It is declared because the route
+ * previously inherited whatever the platform gave it while the SDK underneath was
+ * willing to block for 42 seconds, and nobody had compared the two numbers. The
+ * shorter wait is the actual fix; this is the guard rail behind it.
+ */
+export const maxDuration = 30;

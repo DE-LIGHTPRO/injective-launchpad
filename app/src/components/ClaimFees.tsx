@@ -13,6 +13,7 @@ import {
   type Quote,
 } from '@/lib/chain';
 import { useConnectedAccount } from '@/lib/walletStore';
+import { TxDialog, useTxFlow } from './TxDialog';
 import { fmt } from '@/lib/curve';
 import { selectClaimable, type ClaimRow } from '@/lib/claimable';
 import { launchPath } from '@/lib/launchPath';
@@ -54,7 +55,7 @@ export function ClaimFees() {
   const [rows, setRows] = useState<Claimable[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [txHash, setTxHash] = useState<string | null>(null);
+  const tx = useTxFlow();
 
   useEffect(() => {
     if (!account) {
@@ -134,22 +135,33 @@ export function ClaimFees() {
   async function claimAll() {
     if (!account || withFees.length === 0) return;
     setBusy(true);
-    setError(null);
-    setTxHash(null);
     try {
       const { broadcastExecuteMany } = await import('@/lib/broadcast');
-      const { txHash } = await broadcastExecuteMany({
-        calls: withFees.map((r) => ({ contract: r.curve, msg: { claim_fees: {} } })),
-        sender: account.address,
-        wallet: account.provider,
+      const confirmed = await tx.run({
+        title: withFees.length === 1 ? `Claim fees from ${withFees[0].symbol}` : `Claim fees from ${withFees.length} launches`,
+        send: (onStage) =>
+          broadcastExecuteMany({
+            calls: withFees.map((r) => ({ contract: r.curve, msg: { claim_fees: {} } })),
+            sender: account.address,
+            wallet: account.provider,
+            onStage,
+          }),
       });
-      setTxHash(txHash);
-      // Zeroed locally so the page reflects the claim without a refetch. The chain is
-      // the authority; this is the optimistic half and it is only ever zero, never a
-      // figure we invented.
-      setRows((prev) => (prev ?? []).map((r) => ({ ...r, owed: 0n })));
-    } catch (e) {
-      setError((e as Error).message);
+      /*
+       * ZEROED ONLY ON A CONFIRMATION, which is the difference between an optimistic
+       * figure and an invented one.
+       *
+       * This ran on any hash. A batch refused in the block - the commonest reason
+       * being a second tab having claimed the same fees already - still zeroed every
+       * row, so the page showed a creator that their money had moved on the strength
+       * of a transaction the chain threw out. The zero was never the problem; acting
+       * on "sent" rather than on "landed" was.
+       */
+      if (confirmed) {
+        // The chain is the authority; this is the optimistic half and it is only ever
+        // zero, never a figure we invented.
+        setRows((prev) => (prev ?? []).map((r) => ({ ...r, owed: 0n })));
+      }
     } finally {
       setBusy(false);
     }
@@ -235,12 +247,7 @@ export function ClaimFees() {
         </p>
       )}
 
-      {txHash && (
-        <p className="note" style={{ marginTop: 'var(--space-3)' }}>
-          Claimed. The chain is the record; this page will show the new balances on its
-          next read.
-        </p>
-      )}
+      <TxDialog flow={tx} />
     </>
   );
 }

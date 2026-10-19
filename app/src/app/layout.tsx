@@ -9,7 +9,8 @@ import { isDemoMode } from '@/lib/demo';
 import { ConnectWallet } from '@/components/ConnectWallet';
 import { MobileNav } from '@/components/MobileNav';
 import { ChainMismatchBanner } from '@/components/ChainMismatchBanner';
-import { PRIMARY_NAV, CREATE_NAV, FOOTER_NAV } from '@/lib/navItems';
+import { PrimaryNav } from '@/components/PrimaryNav';
+import { CREATE_NAV, FOOTER_NAV } from '@/lib/navItems';
 import './globals.css';
 
 /*
@@ -75,14 +76,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 One list, three navigations. This nav, the phone menu beside it and the
                 footer nav were three hand-written copies of the same six links; see
                 `navItems.ts` for why that is the shape of defect that ships.
+
+                It is its own component because marking the current page needs
+                `usePathname`, and this layout is a server component. The links still
+                come from `PRIMARY_NAV`.
               */}
-            <nav className="top-nav" aria-label="Primary">
-              {PRIMARY_NAV.map((item) => (
-                <Link key={item.href} href={item.href}>
-                  {item.label}
-                </Link>
-              ))}
-            </nav>
+            <PrimaryNav />
             {/*
                 The same destinations on a phone, where the nav above is `display: none`.
                 Before this there was nothing in its place: the six destinations were

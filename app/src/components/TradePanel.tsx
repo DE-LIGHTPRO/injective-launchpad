@@ -26,6 +26,7 @@ import { buyingOpenAt, feeBpsAt, secondsUntilBaseFee, NO_RULES, type LaunchRules
 import { useRouter } from 'next/navigation';
 import { useConnectedAccount } from '@/lib/walletStore';
 import { denomBalance } from '@/lib/wallet';
+import { TxDialog, useTxFlow } from './TxDialog';
 import type { Quote } from '@/lib/chain';
 
 type Side = 'buy' | 'sell';
@@ -158,8 +159,17 @@ export function TradePanel({
   const held = side === 'buy' ? quoteBal : tokenBal;
   const [slippagePct, setSlippagePct] = useState(1);
   const [busy, setBusy] = useState(false);
-  const [txHash, setTxHash] = useState<string | null>(null);
-  const [tradeError, setTradeError] = useState<string | null>(null);
+  /*
+   * The aftermath lives in the dialog now, not in two sentences under the button.
+   *
+   * What was here was `txHash` and `tradeError`, rendered as "Trade sent. View the
+   * transaction. Balances update when the page next reads the chain." That was the
+   * most this component could truthfully say, because it had a hash from a node that
+   * had accepted the bytes and never asked what became of them. The dialog follows
+   * the transaction into a block, so there is now a confirmation, a refusal or an
+   * explicit "not seen yet" to report instead.
+   */
+  const tx = useTxFlow();
 
   /*
    * A launch that has not opened yet gets its own state, and this was missing.
@@ -296,39 +306,60 @@ export function TradePanel({
   async function submit() {
     if (!account || !quote?.ok) return;
     setBusy(true);
-    setTradeError(null);
-    setTxHash(null);
     try {
-      const raw = parseAmount(input, inputDecimals);
       const { broadcastExecute, GAS } = await import('@/lib/broadcast');
-      const { txHash } = await broadcastExecute({
-        contract: curve,
-        msg:
-          side === 'buy'
-            ? { buy: { min_tokens_out: minOut.toString() } }
-            : { sell: { min_inj_out: minOut.toString() } },
+      const confirmed = await tx.run({
+        title: side === 'buy' ? `Buy ${symbol}` : `Sell ${symbol}`,
         /*
-         * A buy attaches quote, a sell attaches the token itself: this curve takes
-         * payment by attachment on both sides, so neither needs an allowance and
-         * neither can be spent without the trade happening in the same transaction.
+         * The amount is parsed INSIDE `send`, so a `CurveError` from it is reported
+         * through the dialog like every other refusal. Parsed outside, it would throw
+         * past the only thing on screen that reports anything and the button would
+         * simply un-press.
          */
-        funds: [{ denom: side === 'buy' ? quoteAsset.denom : denom, amount: raw.toString() }],
-        sender: account.address,
-        wallet: account.provider,
-        gas: GAS.trade,
+        send: (onStage) =>
+          broadcastExecute({
+            contract: curve,
+            msg:
+              side === 'buy'
+                ? { buy: { min_tokens_out: minOut.toString() } }
+                : { sell: { min_inj_out: minOut.toString() } },
+            /*
+             * A buy attaches quote, a sell attaches the token itself: this curve takes
+             * payment by attachment on both sides, so neither needs an allowance and
+             * neither can be spent without the trade happening in the same transaction.
+             */
+            funds: [
+              {
+                denom: side === 'buy' ? quoteAsset.denom : denom,
+                amount: parseAmount(input, inputDecimals).toString(),
+              },
+            ],
+            sender: account.address,
+            wallet: account.provider,
+            gas: GAS.trade,
+            onStage,
+          }),
       });
-      setTxHash(txHash);
-      setInput('');
       /*
-       * THE SAME DEFECT THE CLAIM PANEL HAD. Market cap, curve reserve, progress,
-       * tokens sold and the chart are all server-rendered props; nothing refetched
-       * them after a trade, so a buy that landed left every figure on the page
-       * reading as it did before. `router.refresh()` re-runs the server component
-       * against the chain, which is the only honest source for them.
+       * THE INPUT AND THE PAGE ARE CLEARED ON A CONFIRMATION, NOT ON A SEND.
+       *
+       * Both used to run the moment a hash came back. A trade refused in the block -
+       * slippage, most commonly, which is the whole reason `min_*` is on the message -
+       * emptied the field and repainted the page with figures that had not moved, so
+       * the only evidence of the refusal was a sentence the clearing made look stale.
+       * Clearing a form is the app saying the thing is done.
        */
-      router.refresh();
-    } catch (e) {
-      setTradeError((e as Error).message);
+      if (confirmed) {
+        setInput('');
+        /*
+         * THE SAME DEFECT THE CLAIM PANEL HAD. Market cap, curve reserve, progress,
+         * tokens sold and the chart are all server-rendered props; nothing refetched
+         * them after a trade, so a buy that landed left every figure on the page
+         * reading as it did before. `router.refresh()` re-runs the server component
+         * against the chain, which is the only honest source for them.
+         */
+        router.refresh();
+      }
     } finally {
       setBusy(false);
     }
@@ -678,20 +709,7 @@ export function TradePanel({
         </button>
       )}
 
-      {txHash && (
-        <p className="note" style={{ marginTop: 'var(--space-3)' }}>
-          Trade sent.{' '}
-          <a href={`${NETWORK.explorer}/transaction/${txHash}`} target="_blank" rel="noreferrer">
-            View the transaction
-          </a>
-          . Balances update when the page next reads the chain.
-        </p>
-      )}
-      {tradeError && (
-        <p className="note err-text" style={{ marginTop: 'var(--space-3)' }}>
-          {tradeError}
-        </p>
-      )}
+      <TxDialog flow={tx} />
 
       <p className="note">
         {isDemoMode()

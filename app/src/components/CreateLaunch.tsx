@@ -41,6 +41,7 @@ import {
   openingMarketCap,
 } from '@/lib/launchLimits';
 import { useConnectedAccount } from '@/lib/walletStore';
+import { TxDialog, useTxFlow } from './TxDialog';
 import { profileForChain, profileFieldError, imageSrc } from '@/lib/tokenProfile';
 import {
   launchCost,
@@ -215,8 +216,7 @@ export function CreateLaunch() {
   }, []);
   const [confirmed, setConfirmed] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [result, setResult] = useState<string | null>(null);
-  const [signError, setSignError] = useState<string | null>(null);
+  const tx = useTxFlow();
 
   const set = (k: keyof typeof DEFAULTS) => (v: string) => setF((p) => ({ ...p, [k]: v }));
 
@@ -448,15 +448,26 @@ export function CreateLaunch() {
     if (!account || busy) return;
     if (plan === null || !('plan' in plan)) return;
     setBusy(true);
-    setSignError(null);
     try {
       const { broadcastLaunch } = await import('@/lib/broadcast');
-      const { txHash } = await broadcastLaunch({
-        plan: plan.plan,
-        sender: account.address,
-        wallet: account.provider,
+      /*
+       * `landed`, not `confirmed`: this component already has a `confirmed` state for
+       * the checkbox the creator ticks, and a local of the same name shadows it for the
+       * whole block. Nothing reads it here today, so nothing is broken - but the next
+       * person to add `if (!confirmed) return` at the top of this function, meaning the
+       * checkbox, gets a ReferenceError from the temporal dead zone instead, which
+       * TypeScript cannot see and no test would catch.
+       */
+      const landed = await tx.run({
+        title: `Create ${f.symbol.trim() || 'launch'}`,
+        send: (onStage) =>
+          broadcastLaunch({
+            plan: plan.plan,
+            sender: account.address,
+            wallet: account.provider,
+            onStage,
+          }),
       });
-      setResult(txHash);
       /*
        * THE BOARD IS SERVER-RENDERED AND NOTHING REFETCHED IT. A creator launched a
        * token, the transaction landed, and the launch did not appear until they
@@ -467,15 +478,18 @@ export function CreateLaunch() {
        * `router.refresh()` re-runs the server components against the chain, which is
        * the only honest source for a board: inserting the new launch optimistically
        * would be rendering a launch nobody has read back.
+       *
+       * ON A CONFIRMATION ONLY. A launch is four messages in one transaction, so a
+       * refusal creates nothing at all - and refreshing the board after one would
+       * re-read a chain that has not changed, beside a dialog explaining why. The
+       * refresh is what makes the new launch appear, so it must follow the launch
+       * existing rather than the signature happening.
        */
-      router.refresh();
-    } catch (e) {
-      const err = e as Error & { kind?: string };
-      setSignError(err.message || 'The launch could not be signed.');
+      if (landed) router.refresh();
     } finally {
       setBusy(false);
     }
-  }, [account, busy, plan, router]);
+  }, [account, busy, plan, router, tx, f.symbol]);
 
   /*
    * What that buy actually gets, quoted from the same maths the contract runs. A
@@ -1251,20 +1265,7 @@ export function CreateLaunch() {
               {busy ? 'Waiting for your wallet…' : `Create ${f.symbol.trim() || 'launch'}`}
             </button>
 
-            {result && (
-              <p className="note">
-                Launch created.{' '}
-                <a
-                  href={`${NETWORK.explorer}/transaction/${result}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  View the transaction
-                </a>
-                .
-              </p>
-            )}
-            {signError && <p className="note err-text">{signError}</p>}
+            <TxDialog flow={tx} />
 
             {/*
                 THE HONEST LABEL, and it is not a disclaimer to delete once this looks

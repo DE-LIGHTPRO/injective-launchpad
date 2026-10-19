@@ -237,6 +237,36 @@ interface InjectedSigner {
   getKey: (chainId: string) => Promise<{ pubKey: Uint8Array }>;
 }
 
+/**
+ * Where a transaction has got to, reported as it happens.
+ *
+ * NAMED AFTER WHAT THE CODE IS DOING, not after how long it has been doing it. Each
+ * value below is entered at the line that begins that work and left at the line that
+ * finishes it, so a dialog rendering these is rendering an observation. There is no
+ * step for "almost done" because there is no line of code that means it.
+ *
+ *  - `preparing`   reading the account number and sequence from the chain.
+ *  - `signing`     the wallet prompt is open; we can see nothing inside it.
+ *  - `broadcasting` the signed bytes are on their way to the chain.
+ *  - `settling`    the node took it and has not put it in a block yet.
+ */
+export type TxStage = 'preparing' | 'signing' | 'broadcasting' | 'settling';
+
+/**
+ * What a broadcast returns once it stops pretending every send is decided.
+ *
+ * `settled: false` carries a real hash for a real transaction whose fate is simply
+ * not known yet. The caller polls on from there; see `lib/txStatus.ts`. Before this,
+ * every caller destructured `{ txHash }` and showed "sent", which was true, and then
+ * never asked again, which is where the honesty ran out.
+ */
+export interface BroadcastOutcome {
+  txHash: string;
+  /** The block it landed in, when the server saw it land. */
+  height: number | null;
+  settled: boolean;
+}
+
 /** Gas limits per operation. See `signAndBroadcast` on why these are not simulated. */
 export const GAS = {
   /** Four messages including two contract instantiates. */
@@ -267,7 +297,9 @@ async function signAndBroadcast(opts: {
   sender: string;
   wallet: unknown;
   gas: number;
-}): Promise<{ txHash: string }> {
+  onStage?: (stage: TxStage) => void;
+}): Promise<BroadcastOutcome> {
+  const stage = (s: TxStage) => opts.onStage?.(s);
   const signer = opts.wallet as InjectedSigner;
   const offline = signer.getOfflineSigner?.(NETWORK.chainId);
   if (!offline) {
@@ -284,6 +316,7 @@ async function signAndBroadcast(opts: {
   // sequence is rejected after the user has already approved the prompt.
   let account;
   try {
+    stage('preparing');
     const auth = new ChainRestAuthApi(getLcdUrl());
     account = await auth.fetchAccount(opts.sender);
   } catch (e) {
@@ -318,6 +351,7 @@ async function signAndBroadcast(opts: {
 
   let signature: string;
   try {
+    stage('signing');
     const res = await offline.signDirect(opts.sender, {
       bodyBytes: signDoc.bodyBytes,
       authInfoBytes: signDoc.authInfoBytes,
@@ -362,8 +396,9 @@ async function signAndBroadcast(opts: {
    * poll is also reliable. See lib/txBroadcast.ts.
    */
   const toB64 = (b: Uint8Array) => Buffer.from(b).toString('base64');
-  let data: { txHash?: string; error?: string; detail?: string };
+  let data: { txHash?: string; height?: number | null; settled?: boolean; error?: string; detail?: string };
   try {
+    stage('broadcasting');
     const resp = await fetch('/api/broadcast', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -392,7 +427,16 @@ async function signAndBroadcast(opts: {
   if (!data?.txHash) {
     throw new BroadcastError('broadcast', describeBroadcastFailure(''), 'the broadcast service returned no transaction hash');
   }
-  return { txHash: data.txHash };
+  /*
+   * `settled` ABSENT MEANS NOT SETTLED, which is the safe direction for a field that
+   * did not used to exist. A deployment running an older route returns `{txHash}`
+   * alone; reading that as settled would have the caller skip the poll and announce a
+   * confirmation nobody observed, which is the precise failure this whole change is
+   * about. Unsettled costs one extra chain read.
+   */
+  const settled = data.settled === true;
+  if (!settled) stage('settling');
+  return { txHash: data.txHash, height: data.height ?? null, settled };
 }
 
 /** Signs and broadcasts a launch. */
@@ -400,12 +444,14 @@ export async function broadcastLaunch(opts: {
   plan: LaunchPlan;
   sender: string;
   wallet: unknown;
-}): Promise<{ txHash: string }> {
+  onStage?: (stage: TxStage) => void;
+}): Promise<BroadcastOutcome> {
   return signAndBroadcast({
     msgs: composeMessages(opts.plan, opts.sender),
     sender: opts.sender,
     wallet: opts.wallet,
     gas: GAS.launch,
+    onStage: opts.onStage,
   });
 }
 
@@ -425,7 +471,8 @@ export async function broadcastExecute(opts: {
   sender: string;
   wallet: unknown;
   gas?: number;
-}): Promise<{ txHash: string }> {
+  onStage?: (stage: TxStage) => void;
+}): Promise<BroadcastOutcome> {
   return signAndBroadcast({
     msgs: composeMessages(
       {
@@ -441,6 +488,7 @@ export async function broadcastExecute(opts: {
     sender: opts.sender,
     wallet: opts.wallet,
     gas: opts.gas ?? GAS.trade,
+    onStage: opts.onStage,
   });
 }
 
@@ -470,7 +518,8 @@ export async function broadcastExecuteMany(opts: {
   sender: string;
   wallet: unknown;
   gasPerCall?: number;
-}): Promise<{ txHash: string }> {
+  onStage?: (stage: TxStage) => void;
+}): Promise<BroadcastOutcome> {
   if (opts.calls.length === 0) throw new BroadcastError('simulate', 'Nothing to send.');
   const perCall = opts.gasPerCall ?? GAS.claim;
   return signAndBroadcast({
@@ -487,5 +536,6 @@ export async function broadcastExecuteMany(opts: {
     wallet: opts.wallet,
     // A base for the transaction itself plus room per message.
     gas: 150_000 + perCall * opts.calls.length,
+    onStage: opts.onStage,
   });
 }

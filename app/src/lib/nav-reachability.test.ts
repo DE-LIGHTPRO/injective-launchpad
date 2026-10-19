@@ -21,9 +21,9 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { PRIMARY_NAV, CREATE_NAV, FOOTER_NAV } from './navItems.ts';
+import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { join, relative } from 'node:path';
+import { PRIMARY_NAV, CREATE_NAV, FOOTER_NAV, isNavCurrent } from './navItems.ts';
 import { maskComments } from './testing/maskComments.ts';
 
 const SRC = join(import.meta.dirname, '..');
@@ -37,6 +37,46 @@ const mobileNav = readFileSync(join(SRC, 'components', 'MobileNav.tsx'), 'utf8')
  * for that to be relearned.
  */
 const code = maskComments;
+
+/**
+ * Every file that renders a `<nav>`, found rather than named.
+ *
+ * THIS USED TO BE TWO FILENAMES, `layout.tsx` and `MobileNav.tsx`, and moving the header
+ * nav into its own component to mark the current page broke four assertions at once -
+ * not because anything regressed, but because the guard was pointed at a location
+ * instead of at the thing. A guard that has to be edited every time correct code moves
+ * is one somebody eventually edits in the wrong direction.
+ *
+ * Keyed on the element, so a fourth navigation added anywhere under `src/` is measured
+ * by default rather than by remembering. Comments are masked first: the prose in this
+ * project quotes markup verbatim, so an unmasked scan reads an explanation as a nav.
+ */
+function navSources(): Array<{ rel: string; src: string }> {
+  const out: Array<{ rel: string; src: string }> = [];
+  const walk = (dir: string) => {
+    for (const entry of readdirSync(dir)) {
+      const full = join(dir, entry);
+      if (statSync(full).isDirectory()) walk(full);
+      else if (/\.tsx$/.test(entry)) {
+        const src = code(readFileSync(full, 'utf8'));
+        if (/<nav[\s>]/.test(src)) out.push({ rel: relative(SRC, full), src });
+      }
+    }
+  };
+  walk(SRC);
+  assert.ok(out.length >= 3, `only ${out.length} files render a nav: the scan is not measuring`);
+  return out;
+}
+
+const NAV_SOURCES = navSources();
+
+/** The one file rendering `<nav className="...name...">`, which must be exactly one. */
+function navNamed(name: string): { rel: string; src: string } {
+  const re = new RegExp(`<nav[^>]*className="[^"]*\\b${name}\\b`);
+  const found = NAV_SOURCES.filter((f) => re.test(f.src));
+  assert.equal(found.length, 1, `${name} is rendered in ${found.length} files: ${found.map((f) => f.rel).join(', ')}`);
+  return found[0];
+}
 
 /** The body of the block whose opening brace is at `open`, braces matched. */
 function braceMatched(open: number): string {
@@ -146,9 +186,47 @@ test('the three navigations read from one list', () => {
     'these destinations are hand-written in the layout as well as declared in navItems',
   );
 
-  assert.match(code(layout), /PRIMARY_NAV\.map/, 'the header nav does not render PRIMARY_NAV');
-  assert.match(code(layout), /FOOTER_NAV\.map/, 'the footer nav does not render FOOTER_NAV');
-  assert.match(code(mobileNav), /PRIMARY_NAV\.map/, 'the phone menu does not render PRIMARY_NAV');
+  // Asserted against whichever file renders each nav, so the three can live wherever
+  // they need to - the header's moved out of the layout to get `usePathname`.
+  assert.match(navNamed('top-nav').src, /PRIMARY_NAV\.map/, 'the header nav does not render PRIMARY_NAV');
+  assert.match(navNamed('footer-nav').src, /FOOTER_NAV\.map/, 'the footer nav does not render FOOTER_NAV');
+  assert.match(navNamed('mobile-nav-menu').src, /PRIMARY_NAV\.map/, 'the phone menu does not render PRIMARY_NAV');
+});
+
+test('every navigation says which page you are on, through one resolver', () => {
+  /*
+   * MEASURED ON THE RUNNING APP before this: on `/`, all six header links resolved to
+   * `rgb(161,166,176)` on `rgba(0,0,0,0)` and not one carried `aria-current`. The page
+   * the visitor was reading looked exactly like the five they were not, on every route,
+   * and a screen reader was told there was no current destination at all.
+   *
+   * The phone menu had been marking it since the day it was written - with its own
+   * inline `pathname === item.href`. So this is the shape of defect `navItems.ts` was
+   * created for, one level down: the decision existed, in one of the copies, as an
+   * expression rather than as a function. Both now call `isNavCurrent`, and a third nav
+   * is caught by the loop rather than by review.
+   */
+  for (const name of ['top-nav', 'mobile-nav-menu']) {
+    const { rel, src } = navNamed(name);
+    assert.match(src, /aria-current=\{/, `${rel} never marks a current page`);
+    assert.match(src, /isNavCurrent\(/, `${rel} decides the current page itself instead of calling isNavCurrent`);
+  }
+
+  // And the resolver itself, because the prefix half is the part that is easy to get
+  // wrong in the direction nobody sees: `/` is a prefix of every path.
+  assert.equal(isNavCurrent('/', '/'), true);
+  assert.equal(isNavCurrent('/risks', '/'), false, 'Launches lights up on every page');
+  assert.equal(isNavCurrent('/risks', '/risks'), true);
+  assert.equal(isNavCurrent('/portfolio/inj1abc', '/portfolio'), true, 'a sub-route is not its own section');
+  assert.equal(isNavCurrent('/portfolios', '/portfolio'), false, 'a longer name matched as a prefix');
+  assert.equal(isNavCurrent(null, '/risks'), false);
+
+  // The visible state and the announced one are the same attribute, so they cannot drift.
+  assert.match(
+    css,
+    /\.top-nav a\[aria-current=['"]page['"]\]\s*\{/,
+    'the header nav has no style for the current page, so the attribute is announced and invisible',
+  );
 });
 
 test('the footer carries every primary destination, plus Create', () => {
@@ -220,7 +298,7 @@ test('a navigation added later has to say how its targets are sized', () => {
    */
   const known = new Set(['top-nav', 'footer-nav', 'mobile-nav-menu']);
   const found = new Set<string>();
-  for (const src of [code(layout), code(mobileNav)]) {
+  for (const { src } of NAV_SOURCES) {
     for (const m of src.matchAll(/<nav\s[^>]*className="([^"]+)"/g)) found.add(m[1].trim());
   }
   assert.ok(found.size >= 3, `only ${found.size} navs found: the scan is not measuring`);

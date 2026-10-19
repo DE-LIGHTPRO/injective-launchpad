@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useId, useRef, useState } from 'react';
-import { PRIMARY_NAV } from '@/lib/navItems';
+import { PRIMARY_NAV, isNavCurrent } from '@/lib/navItems';
 import { useDismissOnEscape } from '@/lib/useDismissOnEscape';
 
 /**
@@ -117,7 +117,7 @@ export function MobileNav() {
               key={item.href}
               href={item.href}
               ref={i === 0 ? firstLinkRef : undefined}
-              aria-current={pathname === item.href ? 'page' : undefined}
+              aria-current={isNavCurrent(pathname, item.href) ? 'page' : undefined}
             >
               {item.label}
             </Link>
