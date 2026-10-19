@@ -23,9 +23,18 @@ export function TrustBadges({
     'Fixed supply',
     'No upgrade key',
     migrated ? 'Liquidity locked' : 'Liquidity locks at graduation',
-    // "Verified", never "audited": this compares the deployed code id against the one
-    // this launchpad published. No third party has reviewed it. See `CodeCheck`.
-    ...(status.kind === 'verified' ? [`Verified code ${status.codeId}`] : []),
+    /*
+     * "Verified", never "audited": this compares the deployed code against what this
+     * launchpad published. No third party has reviewed it. See `CodeCheck`.
+     *
+     * And the two pins get two badges, because only one of them is reproducible. A
+     * hash match is a statement about the bytes that anyone can rebuild and check; an
+     * id match is a statement about a number only the operator can vouch for. Giving
+     * both the same badge would lend the weaker check the stronger one's credit.
+     */
+    ...(status.kind === 'verified'
+      ? [status.pin === 'hash' ? `Code hash verified (${status.codeId})` : `Pinned code ${status.codeId}`]
+      : []),
   ];
   return (
     <ul className="trust" aria-label="Verified on chain">

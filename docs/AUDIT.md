@@ -125,7 +125,8 @@ deployment.
 | # | Sev | Finding | Fix |
 |---|---|---|---|
 | 10 | Critical | The creator stayed **admin of their tokenfactory denom**, which mints without limit. After graduation they could mint any amount and sell it into the locked pool until it was empty, and before that they could dump into the curve reserve. The create page already promised "nothing can mint more afterwards"; it was not true. | The launch tx now hands denom admin to the factory (`MsgChangeAdmin`), and the factory's reply hands it to the new curve, which has no mint code and no wasm admin. If the creator skips the handover, the factory's message is refused and the whole launch reverts. Tests: `the_mint_key_ends_with_the_curve_where_nothing_can_use_it`, `a_creator_who_keeps_the_mint_key_cannot_launch` (simulated tokenfactory enforcing the admin rule; mutation-checked). |
-| 11 | High | Nothing stopped the UI offering trades on a curve built from code the admin had repointed to, or one with an upgrade key or a live mint key. | `lib/codeCheck.ts`: the launch page reads code id, wasm admin and denom authority from the chain, compares them against `NEXT_PUBLIC_CURVE_CODE_IDS`, and disables trading with an explanation on any mismatch. |
+| 11 | High | Nothing stopped the UI offering trades on a curve built from code the admin had repointed to, or one with an upgrade key or a live mint key. | `lib/codeCheck.ts`: the launch page reads code id, code hash, wasm admin and denom authority from the chain and disables trading with an explanation on any mismatch. |
+| 11a | High | The code check compared a **code id**, which nobody outside can verify. "39974" is a pointer only whoever uploaded it can vouch for, so "runs this launchpad's published contract" rested on our word. Code ids are append-only on CosmWasm, so the id check was not *forgeable*; it was *unverifiable*, and a code id also means a different contract on a different chain. Raised as F-01 in the 19 Oct 2026 external audit. | `NEXT_PUBLIC_CURVE_CODE_HASHES` pins the sha256 of the released wasm and decides the verdict on its own where it is set. `codeHashOf` reads `code_info.data_hash` from the chain, streamed so the 400 KB module in the same response is never downloaded (hash in the first 2,530 bytes of 409,840, measured). The status carries **which** pin passed, so an id-only build says the weaker thing it can honestly say instead of the stronger thing it cannot. Reproducible: `shasum -a 256 target/wasm32-unknown-unknown/release/curve.wasm` equals the chain's hash for code 39974 (`3196401753e1…53d9db`, both measured 19 Oct 2026). All three states driven end to end against testnet; 15 mutations, 15 caught. |
 | 12 | Medium | The upload limit was per instance. | `allowUploadShared` uses Upstash Redis when `UPSTASH_REDIS_REST_URL`/`_TOKEN` are set, and falls back to the in-memory limit (never unlimited) on outage. |
 | 13 | Medium | Factory config admin was always the deploy key. | `INJ_FACTORY_ADMIN` (required on mainnet; multisig contract addresses work). |
 | 14 | Info | Accounting was asserted on hand-picked sequences only. | 36 seeded random runs across graduation assert exact books and conservation of every unit after each step (mutation-checked). `docs/AUDIT_SCOPE.md` written for the external auditor. |
@@ -162,7 +163,9 @@ deployment.
    factory has the custodial graduation and creator mint keys and must not be used.
 2. **Third-party audit** before mainnet. Send `docs/AUDIT_SCOPE.md`.
 3. Set `UPSTASH_REDIS_REST_URL`/`_TOKEN` (or Vercel Firewall) in production. *(code done)*
-4. Set `NEXT_PUBLIC_CURVE_CODE_IDS` in production to the audited code id. *(code done)*
+4. Set `NEXT_PUBLIC_CURVE_CODE_HASHES` in production to the sha256 of the released
+   `curve.wasm`, which `deploy.mjs` prints. Prefer it to `NEXT_PUBLIC_CURVE_CODE_IDS`:
+   it is the only pin a reader can reproduce from this repository. *(code done)*
 5. Create the multisig and pass it as `INJ_FACTORY_ADMIN` and `INJ_FACTORY_WASM_ADMIN`
    on mainnet. *(code done)*
 6. **Holders panel** needs an indexer over bank events (`denom_owners` returns 501 for

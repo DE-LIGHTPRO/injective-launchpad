@@ -567,9 +567,70 @@ export async function mapWithConcurrency<T, R>(
 }
 
 /**
- * Code id and admin of a contract, from the wasm module itself rather than from
- * anything the contract says about itself. `null` when it cannot be read; demo
+ * Code ids are append-only on CosmWasm: nothing can replace the bytes stored under an
+ * id, so a hash read once is right forever and caching it for the process is not a
+ * staleness risk but the correct model of the chain.
+ */
+const codeHashCache = new Map<string, string>();
+
+/**
+ * The sha256 of the wasm stored under a code id, lowercase hex, or `null` when unread.
+ *
+ * WHY IT IS STREAMED. `/cosmwasm/wasm/v1/code/{id}` is the only route that carries the
+ * hash - Injective's LCD answers 501 Not Implemented for `/codes` and for every
+ * code-info-only path - and it ships the whole wasm base64 encoded in the same body:
+ * 409,840 bytes for the curve. `data_hash` sits at byte 88, before `data`, so reading
+ * the first chunk and cancelling takes the hash out of the FIRST 2,530 BYTES, measured,
+ * which is 0.6% of the response. Buffering the body to call `.json()` would make an
+ * honest check expensive enough that somebody would later remove it.
+ *
+ * Matched with a regex rather than parsed, deliberately: the point is to stop reading
+ * before the body is complete, and there is no valid JSON to parse at that moment. The
+ * 64-hex shape is the whole validation, and anything else lands on `null`.
+ */
+export async function codeHashOf(codeId: string): Promise<string | null> {
+  if (isDemoMode()) return null;
+  const cached = codeHashCache.get(codeId);
+  if (cached) return cached;
+  try {
+    const res = await fetch(`${getLcdUrl()}/cosmwasm/wasm/v1/code/${encodeURIComponent(codeId)}`, {
+      headers: { accept: 'application/json' },
+    });
+    if (!res.ok || !res.body) return null;
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let head = '';
+    try {
+      // Bounded, so a body that never carries the field cannot be read to its end.
+      while (head.length < 4096) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        head += decoder.decode(value, { stream: true });
+        const m = /"data_hash"\s*:\s*"([0-9a-fA-F]{64})"/.exec(head);
+        if (m) {
+          const hash = m[1].toLowerCase();
+          codeHashCache.set(codeId, hash);
+          return hash;
+        }
+      }
+    } finally {
+      // Releases the connection instead of leaving 400 KB in flight behind us.
+      await reader.cancel().catch(() => {});
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Code id, code hash and admin of a contract, from the wasm module itself rather than
+ * from anything the contract says about itself. `null` when it cannot be read; demo
  * launches have no contract, so they are `null` too.
+ *
+ * The hash needs the code id first, so it is one serial hop after the other two rather
+ * than a third member of the group. It is cached per code id and every launch on this
+ * board runs the same one, so the cost is paid once per process, not once per launch.
  */
 export async function contractFacts(address: string, denom?: string): Promise<ContractFacts | null> {
   if (isDemoMode()) return null;
@@ -584,7 +645,8 @@ export async function contractFacts(address: string, denom?: string): Promise<Co
     const json = (await res.json()) as { contract_info?: { code_id?: string; admin?: string } };
     const info = json.contract_info;
     if (!info?.code_id) return null;
-    return { codeId: String(info.code_id), admin: info.admin ?? '', denomAdmin };
+    const codeId = String(info.code_id);
+    return { codeId, codeHash: await codeHashOf(codeId), admin: info.admin ?? '', denomAdmin };
   } catch {
     return null;
   }

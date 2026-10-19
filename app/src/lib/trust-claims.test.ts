@@ -151,14 +151,33 @@ test('the internal review still says it is not an audit', () => {
   );
 });
 
-test('the verified badge names verification, not an audit', () => {
+test('the verified badge names which check passed, not an audit', () => {
   const badges = userFacingText(
     readFileSync(join(SRC, 'components/TrustBadges.tsx'), 'utf8'),
   );
+  /*
+   * TWO PINS, TWO BADGES, and the stronger wording belongs only to the stronger one.
+   * A hash match is reproducible from this repository; a code id match rests on the
+   * operator's word about what that number contains. This asserted one literal before
+   * the hash pin existed, so it would have passed happily while both pins rendered
+   * "Verified code N" and lent the weaker check the stronger one's credit.
+   */
   assert.match(
     badges,
-    /Verified code \$\{status\.codeId\}/,
-    'the badge for a matching code id must say what it checked',
+    /Code hash verified \(\$\{status\.codeId\}\)/,
+    'the hash-pinned badge must say it was the hash that was checked',
+  );
+  assert.match(
+    badges,
+    /Pinned code \$\{status\.codeId\}/,
+    'the id-pinned badge must claim a pin and not a byte-level check',
+  );
+  // The id badge must not borrow the hash badge's language. "Verified" unqualified is
+  // what the audit's F-01 objects to: it reads as a statement about the code.
+  assert.doesNotMatch(
+    badges,
+    /Verified code/,
+    'an id match is a pin, not a verification of the code; see codeCheck.ts',
   );
 });
 

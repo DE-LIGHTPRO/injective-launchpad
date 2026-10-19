@@ -200,7 +200,10 @@ Notes that cost time if they are learned on the day:
   reports only `INVALID_ARGUMENT`, naming neither gas nor size.
 - `INJ_CURVE_CODE_ID` / `INJ_FACTORY_CODE_ID` **reuse an existing code id after
   verifying its hash**, which is the right move when only one contract changed.
-- Keep the printed `NEXT_PUBLIC_FACTORY_ADDRESS` and `NEXT_PUBLIC_CURVE_CODE_IDS`.
+- Keep the printed `NEXT_PUBLIC_FACTORY_ADDRESS`, `NEXT_PUBLIC_CURVE_CODE_IDS` and
+  `NEXT_PUBLIC_CURVE_CODE_HASHES`. The hash is the pin to carry forward: it is the one
+  anybody can reproduce with `shasum -a 256` against the built wasm, and the one that
+  still means the same thing on a chain where the id does not.
 
 ### 8. Point the app at it, then REDEPLOY
 
@@ -222,6 +225,7 @@ The full list the deployed app reads, so none of it is discovered later:
 |---|---|---|
 | `NEXT_PUBLIC_FACTORY_ADDRESS` | the printed factory | nothing can be read from chain |
 | `NEXT_PUBLIC_CURVE_CODE_IDS` | the printed curve code id | curves are unpinned, so the launch page cannot vouch for the code a launch runs |
+| `NEXT_PUBLIC_CURVE_CODE_HASHES` | `shasum -a 256 target/wasm32-unknown-unknown/release/curve.wasm`, which `deploy.mjs` prints | the page falls back to the id pin and says the weaker thing: a number only you can vouch for, rather than bytes anyone can rebuild from the repository |
 | `NEXT_PUBLIC_NETWORK` | `mainnet` | **falls back to testnet**, silently, which is the right default and the wrong answer here |
 | `NEXT_PUBLIC_LCD_URL` | the archival endpoint from step 3 | falls back to the public sentry, and `isLcdConfigured()` reports false |
 | `NEXT_PUBLIC_SITE_URL` | the domain from step 4 | canonical links, the sitemap and every social preview keep saying `injpad.vercel.app` |

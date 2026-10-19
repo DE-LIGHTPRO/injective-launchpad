@@ -4,7 +4,7 @@ import type { Metadata } from 'next';
 import { notFound, redirect } from 'next/navigation';
 import { getLaunch, listLaunches, listQuotes, getLaunchDetail, quoteFromList, symbolOf, short, ChainError, contractFacts, type Launch } from '@/lib/chain';
 import { resolveLaunchSlug, launchPath, pathForSlug, parseLaunchRef } from '@/lib/launchPath';
-import { assessCurveCode, blocksTrading, pinnedCodeIds } from '@/lib/codeCheck';
+import { assessCurveCode, blocksTrading, pinnedCodeIds, pinnedCodeHashes } from '@/lib/codeCheck';
 import { CodeCheck } from '@/components/CodeCheck';
 import { TrustBadges } from '@/components/TrustBadges';
 import { ShareRow } from '@/components/ShareRow';
@@ -22,7 +22,13 @@ import { CreatorPosition } from '@/components/CreatorPosition';
 import { FeeEarnings } from '@/components/FeeEarnings';
 import { CopyButton } from '@/components/CopyButton';
 import { graduationProgress, fmt, spotPriceWad, maxCollectable, tokenDistribution } from '@/lib/curve';
-import { NETWORK, isDeployed, isDevBuild, getPinnedCurveCodeIdsRaw } from '@/lib/config';
+import {
+  NETWORK,
+  isDeployed,
+  isDevBuild,
+  getPinnedCurveCodeIdsRaw,
+  getPinnedCurveCodeHashesRaw,
+} from '@/lib/config';
 import { isDemoMode } from '@/lib/demo';
 import { PriceChart } from '@/components/PriceChart';
 import { DemoBanner } from '@/components/DemoBanner';
@@ -277,7 +283,10 @@ export default async function LaunchPage({ params }: { params: Promise<{ slug: s
 
   const codeStatus = assessCurveCode(
     facts ?? null,
-    pinnedCodeIds(getPinnedCurveCodeIdsRaw()),
+    {
+      ids: pinnedCodeIds(getPinnedCurveCodeIdsRaw()),
+      hashes: pinnedCodeHashes(getPinnedCurveCodeHashesRaw()),
+    },
     launch.curve,
   );
   const symbol = symbolOf(detail.denom);

@@ -21,6 +21,13 @@ import type { CodeStatus } from '@/lib/codeCheck';
  * the code id matches the one this launchpad published, the contract has no upgrade
  * key, and the launch contract holds the denom's mint key. Those are three facts read
  * off the chain at page load. "Audited" was a fourth claim, read off nothing.
+ *
+ * AND "PUBLISHED" IS TWO DIFFERENT CLAIMS, so it is now two different sentences.
+ * `pin: 'hash'` means the running bytes are the bytes in this repository, which anyone
+ * can rebuild and check. `pin: 'code-id'` means only that the id is one this build
+ * names, which nobody outside can check against anything. The second was rendering the
+ * first's wording. Both are real checks and only one of them is reproducible, and the
+ * difference belongs on the screen rather than in the operator's head.
  */
 export function CodeCheck({ status, curve }: { status: CodeStatus; curve: string }) {
   const link = (
@@ -32,7 +39,9 @@ export function CodeCheck({ status, curve }: { status: CodeStatus; curve: string
     case 'verified':
       return (
         <p className="note">
-          Runs this launchpad&rsquo;s published contract (code {status.codeId}), with no
+          {status.pin === 'hash'
+            ? `Runs this launchpad's published contract byte for byte (code ${status.codeId}, hash checked against the release), with no`
+            : `Runs code ${status.codeId}, the version this launchpad pins, with no`}{' '}
           upgrade key, and the launch contract holds the only mint key: the supply is
           fixed and the liquidity cannot be moved by anyone. {link}
         </p>
@@ -43,8 +52,8 @@ export function CodeCheck({ status, curve }: { status: CodeStatus; curve: string
       // ignore the warning that matters.
       return isDevBuild() ? (
         <p className="note">
-          Code {status.codeId}, no upgrade key. Set NEXT_PUBLIC_CURVE_CODE_IDS to pin the
-          published code id.
+          Code {status.codeId}, no upgrade key. Set NEXT_PUBLIC_CURVE_CODE_HASHES to pin the
+          published code by hash, which is the pin a reader can reproduce from the repository.
         </p>
       ) : null;
     case 'unexpected-code':
@@ -54,6 +63,24 @@ export function CodeCheck({ status, curve }: { status: CodeStatus; curve: string
           <p className="note">
             This launch runs code {status.codeId}, which is not a version this launchpad
             published ({status.expected.join(', ')}). Trading is disabled here. {link}
+          </p>
+        </div>
+      );
+    case 'unexpected-hash':
+      /*
+       * Worded harder than `unexpected-code` on purpose. An unexpected id can be an
+       * upgrade the operator published and forgot to add to the list. An unexpected
+       * hash cannot: it is the chain reporting that the code holding this reserve is
+       * not the code that was released, under an id that was meant to be it.
+       */
+      return (
+        <div className="card" role="alert">
+          <h2 className="danger-text">This is not the published contract</h2>
+          <p className="note">
+            The code holding this launch&rsquo;s reserve (code {status.codeId}) does not match
+            any release this launchpad published. Its hash is {status.hash.slice(0, 16)}… and
+            the published ones are {status.expected.map((h) => `${h.slice(0, 16)}…`).join(', ')}.
+            Trading is disabled here. {link}
           </p>
         </div>
       );

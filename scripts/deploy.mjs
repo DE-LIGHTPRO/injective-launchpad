@@ -636,10 +636,22 @@ console.log(`     factory → ${factoryAddress}  (${instRes.txHash})`);
  */
 const explorer = netName === 'mainnet' ? 'https://injscan.com' : 'https://testnet.injscan.com';
 
+/*
+ * Printed because the app pins it and nothing else surfaces it.
+ *
+ * Computed from the bytes just stored, so it is the same number `assertCodeMatches`
+ * compares against the chain on the reuse path, and the same number a reader gets from
+ * `shasum -a 256` of the artifact. That reproducibility is the entire reason the app
+ * prefers this pin to a code id: anybody can rebuild and check it, where "39974" is a
+ * pointer only whoever uploaded it can vouch for.
+ */
+const curveHash = createHash('sha256').update(curveWasm).digest('hex');
+
 console.log(`
   Done.
 
   curve code id    ${curveCodeId}
+  curve code hash  ${curveHash}
   factory code id  ${factoryCodeId}
   factory address  ${factoryAddress}
   ${explorer}/contract/${factoryAddress}
@@ -649,6 +661,7 @@ console.log(`
     NEXT_PUBLIC_NETWORK=${netName}
     NEXT_PUBLIC_FACTORY_ADDRESS=${factoryAddress}
     NEXT_PUBLIC_CURVE_CODE_IDS=${curveCodeId}
+    NEXT_PUBLIC_CURVE_CODE_HASHES=${curveHash}
     NEXT_PUBLIC_LCD_URL=${endpoints.rest}
 
   Put them in app/.env.local, then restart the dev server.

@@ -160,6 +160,17 @@ export function getPinnedCurveCodeIdsRaw(): string {
   return process.env.NEXT_PUBLIC_CURVE_CODE_IDS?.trim() ?? '';
 }
 
+/**
+ * Curve code HASHES the operator vouches for, comma separated hex. The stronger pin and
+ * the one to prefer: a hash can be rebuilt from this repository and compared, where a
+ * code id can only be taken on the operator's word, and a hash means the same thing on
+ * every chain where a code id does not. When this is set it decides the verdict and the
+ * id list is not consulted. See `codeCheck.ts`.
+ */
+export function getPinnedCurveCodeHashesRaw(): string {
+  return process.env.NEXT_PUBLIC_CURVE_CODE_HASHES?.trim() ?? '';
+}
+
 /** The single resolver for the factory address. */
 export function getFactoryAddress(): string {
   return process.env.NEXT_PUBLIC_FACTORY_ADDRESS?.trim() ?? '';
