@@ -246,26 +246,43 @@ pub fn fixed_curve(fee_bps: u16, fee_sell_bps: u16, spec: &QuoteSpec) -> CurveCo
 /// their curve, not of ours, so copying it literally would have put a cap on the
 /// screen that bore no relation to what an opening buy on this shape costs.
 ///
-/// Re-derived from the constants above on 17 Oct 2026, so these move when the shape
-/// moves rather than being a measurement of a shape that has since been replaced:
+/// Re-derived from the constants above on 18 Oct 2026, so these move when the shape
+/// moves rather than being a measurement of a shape that has since been replaced.
+///
+/// BOTH DENOMINATORS, because this cap is compared against one of them and the create
+/// form displays the other, and they differ by the 80/20 split:
 ///
 /// ```text
-///   5 INJ ->  0.79%       35 INJ ->  5.28%      200 INJ -> 24.50%
-///  10 INJ ->  1.56%       70 INJ -> 10.07%      400 INJ -> 39.89%
-///  20 INJ ->  3.08%      100 INJ -> 13.83%
+///                 % of CURVE     % of TOTAL
+///                 (this cap)     (what the form shows a buyer)
+///    5 INJ ->        0.97%          0.78%
+///   10 INJ ->        1.94%          1.55%
+///   20 INJ ->        3.82%          3.05%
+///   35 INJ ->        6.54%          5.23%
+///   70 INJ ->       12.47%          9.98%
+///  100 INJ ->       17.13%         13.71%
+///  200 INJ ->       30.39%         24.31%
+///  400 INJ ->       49.55%         39.64%
 /// ```
 ///
 /// So the thing worth refusing is the controlling share, not the opening position: a
 /// creator holding a tenth of the curve is ordinary and is published on the launch
 /// page anyway, and one holding three quarters of it before anyone else has seen the
-/// token is the failure this cap exists for. 10% lands at roughly 69.5 INJ here, or
-/// 3.6% of the 1915 INJ graduation target.
+/// token is the failure this cap exists for. 10% of the curve lands at **55.0 INJ**
+/// here, or 2.9% of the 1915 INJ graduation target.
 ///
-/// These figures were measured against the 30 INJ curve and left behind by two
-/// rescalings, which understated the cost of the cap by a factor of about 28 and made
-/// the argument for choosing 10% read as though 2.45 INJ could buy a controlling
-/// share. The CHOICE was still right, because it is a share of supply; the evidence
-/// offered for it had stopped being evidence about this curve.
+/// TWICE WRONG IN THE SAME PLACE, and the second time is the instructive one. The
+/// figures were first measured against the 30 INJ curve and left behind by two
+/// rescalings, understating the cost of the cap by about 28x. The re-derivation that
+/// replaced them was taken against TOTAL supply while the cap compares against CURVE
+/// supply, so "10% lands at roughly 69.5 INJ" was the figure for a different limit:
+/// 69.5 INJ is 12.4% of the curve and this cap refuses it. That is the exact confusion
+/// `initial_buy_ceiling`'s own docblock in `app/src/lib/launchLimits.ts` warns about,
+/// made while writing the evidence for the constant it warns about.
+///
+/// The CHOICE has survived both, because it is a share of supply and does not depend
+/// on the INJ figures at all. Only the evidence offered for it has been wrong, which is
+/// why the basis is now named in the table rather than left to be inferred.
 ///
 /// The GUARANTEE is a share of supply, so it holds whatever curve a creator picks. The
 /// INJ figures above are a property of the default shape and move with it, which is

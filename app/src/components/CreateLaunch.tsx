@@ -52,6 +52,7 @@ import {
   rulesForChain,
   earlyFeeForChain,
   validateRules,
+  openingBuyOverCap,
   describeRules,
   hasAnyRule,
   MAX_EARLY_FEE_BPS,
@@ -500,11 +501,21 @@ export function CreateLaunch() {
         share: Number(q.tokensOut) / Number(total),
         overCap: q.tokensOut > ceiling,
         ceiling,
+        /*
+         * The creator's own cap, which binds the creator. The factory buys with them as
+         * recipient on a fresh curve, so it checks the opening buy against
+         * `max_per_wallet` and returns `InitialBuyOverCap`. Both fields are optional and
+         * setting both is natural, and the combination reverted the launch after signing:
+         * the ceiling above only binds past 55 INJ, while a cap of a few million tokens
+         * is passed by an opening buy of a few INJ.
+         */
+        overWalletCap: openingBuyOverCap(builtRules, q.tokensOut),
+        walletCap: builtRules.maxPerWallet,
       };
     } catch {
       return null;
     }
-  }, [devBuy, built]);
+  }, [devBuy, built, builtRules]);
 
   const fresh: CurveState = { injCollected: 0n, tokensSold: 0n, graduated: false };
   // A rule problem blocks the plan as firmly as a bad curve does. Both are permanent
@@ -514,7 +525,11 @@ export function CreateLaunch() {
   // which is the create-form-as-guarantee failure: the only thing stopping a creator
   // taking three quarters of their own curve was a paragraph.
   const ok =
-    plan !== null && 'plan' in plan && ruleProblems.length === 0 && !devBuyPreview?.overCap;
+    plan !== null &&
+    'plan' in plan &&
+    ruleProblems.length === 0 &&
+    !devBuyPreview?.overCap &&
+    !devBuyPreview?.overWalletCap;
 
   return (
     <>
@@ -1009,7 +1024,11 @@ export function CreateLaunch() {
                 launch page will show every visitor, so showing it here is showing
                 them what everyone else will see.
               */
-            <p className={`note ${devBuyPreview.overCap ? 'err-text' : ''}`}>
+            <p
+              className={`note ${
+                devBuyPreview.overCap || devBuyPreview.overWalletCap ? 'err-text' : ''
+              }`}
+            >
               That buys about {fmt(devBuyPreview.tokens, 18, 0)}{' '}
               {f.symbol.trim() || 'tokens'}, roughly{' '}
               <strong>{(devBuyPreview.share * 100).toFixed(1)}% of the supply</strong>, in
@@ -1021,6 +1040,22 @@ export function CreateLaunch() {
                   {MAX_INITIAL_BUY_BPS / 100}% of the curve, which is about{' '}
                   {fmt(devBuyPreview.ceiling, 18, 0)} {f.symbol.trim() || 'tokens'}.
                   Reduce the amount.
+                </>
+              )}
+              {/*
+                  The creator's own cap refuses the creator, which is the half nothing
+                  said. Named separately from the ceiling above because they are
+                  different limits with different remedies: the ceiling is ours and
+                  fixed, this one the creator set a few fields up and can lower or
+                  raise. Both are stated rather than one standing in for the other.
+                */}
+              {devBuyPreview.overWalletCap && devBuyPreview.walletCap !== null && (
+                <>
+                  {' '}
+                  Your own wallet cap refuses it: you capped every buyer at{' '}
+                  {fmt(devBuyPreview.walletCap, 18, 0)} {f.symbol.trim() || 'tokens'}, and
+                  that cap counts against you too, so the launch would fail after you
+                  signed. Lower the opening buy or raise the cap.
                 </>
               )}
             </p>

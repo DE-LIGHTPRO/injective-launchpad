@@ -224,6 +224,28 @@ export function validateRules(
   return out;
 }
 
+/**
+ * Whether the creator's own opening buy would break the cap the creator just set.
+ *
+ * THE RULE BINDS ITS AUTHOR, and that is the part the form did not say. The factory
+ * buys with the creator as recipient on a curve nobody has touched, so it checks
+ * `would_exceed_cap(0, tokens_out)` and returns `InitialBuyOverCap`. Two optional
+ * fields in one form, both reasonable to set together - "cap each wallet, and I will
+ * take an opening position" - and the combination reverts the whole launch after the
+ * creator has signed and paid gas.
+ *
+ * It is reachable at ordinary numbers rather than at extremes. Measured against the
+ * default shape on 18 Oct 2026: 1 INJ buys 1.569M tokens and 5 INJ buys 7.800M, so any
+ * cap in the single-digit millions is exceeded by an opening buy of a few INJ. The 10%
+ * ceiling the form already checks does not help, because it only binds past 55 INJ.
+ *
+ * Mirrors `would_exceed_cap` in `contracts/curve/src/state.rs`, including the strict
+ * `>`: a buy landing exactly on the cap is allowed, there and here.
+ */
+export function openingBuyOverCap(rules: LaunchRules, tokensOut: bigint): boolean {
+  return rules.maxPerWallet !== null && tokensOut > rules.maxPerWallet;
+}
+
 /** Whether buying is open, matching the contract's inclusive boundary. */
 export function buyingOpenAt(rules: LaunchRules, nowSeconds: number): boolean {
   return rules.tradeStart === null || nowSeconds >= rules.tradeStart;

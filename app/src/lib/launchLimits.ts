@@ -67,8 +67,15 @@ export const PLATFORM_FEE_SHARE_BPS = 10_000 - CREATOR_FEE_SHARE_BPS;
  * The most of the CURVE's supply a creator may take in their own opening buy, in bps.
  *
  * Mirrors `MAX_INITIAL_BUY_BPS` in `contracts/factory/src/lib.rs`, where the reasoning
- * for 10% rather than nearly.trade's 4% is recorded: measured on this curve, 4% of
- * supply costs under 1 INJ, so their figure would refuse almost every real opening buy.
+ * for 10% rather than nearly.trade's 4% is recorded along with the cost of both, at both
+ * denominators.
+ *
+ * This used to say 4% of supply "costs under 1 INJ, so their figure would refuse almost
+ * every real opening buy". Measured on 18 Oct 2026 it costs **20.989 INJ**, which is a
+ * substantial opening buy rather than a negligible one, so the sentence argued the
+ * opposite of what it claimed. The reason to prefer 10% is the one the Rust comment
+ * gives - a controlling share is the thing worth refusing, and their 4% is a property of
+ * their curve, not ours - and it never rested on this figure.
  */
 export const MAX_INITIAL_BUY_BPS = 1_000;
 
