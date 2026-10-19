@@ -60,8 +60,15 @@ export class BroadcastError extends Error {
   }
 }
 
-/** 18-decimal base units as a readable amount, trimmed. */
-function formatInj(raw: string): string {
+/**
+ * 18-decimal base units as a readable amount, trimmed.
+ *
+ * Named for the scale rather than for INJ, because the launched token is 18 decimals
+ * too and the curve's refusals quote token quantities. The QUOTE asset is the one that
+ * may be something else, so anything read out of a quote-denominated figure has to
+ * carry its own decimals and must not come through here.
+ */
+function format18(raw: string): string {
   try {
     const v = BigInt(raw);
     const whole = v / 10n ** 18n;
@@ -93,8 +100,8 @@ export function describeBroadcastFailure(raw: string): string {
      */
     const pair = /spendable balance (\d+)([a-z0-9/._-]+) is smaller than (\d+)/i.exec(raw);
     if (pair) {
-      const held = formatInj(pair[1]);
-      const need = formatInj(pair[3]);
+      const held = format18(pair[1]);
+      const need = format18(pair[3]);
       return `This needs ${need} ${denomLabelFor(pair[2])} and the wallet holds ${held}. Creating a token costs a one-off 1 INJ to Injective itself, on top of gas.`;
     }
     return 'Not enough INJ to cover the transaction fee.';
@@ -111,11 +118,56 @@ export function describeBroadcastFailure(raw: string): string {
     return 'There is nothing left to claim: these fees have already been paid out.';
   }
   /*
-   * The curve refusing a trade on its own terms, rather than the chain refusing the
-   * transaction. "Refused" over a correct, deliberate contract rule reads as a bug.
+   * THE CURVE REFUSING A TRADE ON ITS OWN TERMS, rather than the chain refusing the
+   * transaction. "Refused" over a correct, deliberate contract rule reads as a bug, and
+   * every one of these was falling through to that sentence.
+   *
+   * Matched on the contract's own wording, which
+   * `app/src/lib/wallet-cap-before-signing.test.ts` reads out of
+   * `contracts/curve/src/error.rs` so a reworded error fails there instead of silently
+   * going generic here.
+   *
+   * THE SLIPPAGE BRANCH WAS DEAD and had been since it was written. It looked for the
+   * word "slippage"; `ContractError::Slippage` renders as
+   *
+   *     would receive 123 but asked for at least 456
+   *
+   * which never contains it. The contracts' own integration test records making exactly
+   * this mistake and was fixed to assert "asked for at least" instead - the lesson
+   * stayed in the Rust and never crossed over, so the one refusal a trader is most
+   * likely to hit read as the chain rejecting their transaction. The word is still
+   * accepted below in case a node or a wrapper adds it, but it is no longer the test.
    */
-  if (s.includes('slippage')) {
+  if (s.includes('asked for at least') || s.includes('slippage')) {
     return 'The price moved past your slippage tolerance before this landed. Try again.';
+  }
+  /*
+   * The wallet cap, named with its three numbers. The contract gives all of them and
+   * they are what makes the refusal actionable: "over the cap" without saying how much
+   * is left leaves a buyer guessing at amounts until one is accepted. Formatted at 18
+   * decimals, which is the launched token's scale on every launch.
+   */
+  const cap = /caps a wallet at (\d+) tokens.*you hold (\d+) and this buy would add (\d+)/i.exec(
+    raw,
+  );
+  if (cap) {
+    const left = (() => {
+      try {
+        const remaining = BigInt(cap[1]) - BigInt(cap[2]);
+        return remaining > 0n ? format18(remaining.toString()) : '0';
+      } catch {
+        return null;
+      }
+    })();
+    return `This launch caps one address at ${format18(cap[1])} tokens bought from the curve and this wallet holds ${format18(cap[2])}, so a buy of ${format18(cap[3])} is over it${
+      left === null ? '' : `. You can buy at most ${left} more`
+    }. Selling frees the allowance again.`;
+  }
+  if (s.includes('trading opens at')) {
+    return 'Buying is not open on this launch yet. The curve gates on block time, so try again once the start time has passed.';
+  }
+  if (s.includes('already in the locked pool')) {
+    return 'This launch graduated while the trade was in flight. Reload the page to trade against the locked pool instead.';
   }
   if (s.includes('denom') && s.includes('exists')) {
     return 'That ticker is already taken on this chain. Choose another.';

@@ -222,6 +222,92 @@ export async function smartQuery<T>(contract: string, query: unknown): Promise<T
   return json.data;
 }
 
+/**
+ * The cw-storage-plus key for one entry of `Map::new(namespace)` under a string key.
+ *
+ * A `Map` stores each entry at `len(namespace) as u16 big-endian || namespace || key`,
+ * and an `Addr` key is its bech32 TEXT, not decoded bytes. Verified against the live
+ * testnet rather than derived from the library: the contract's whole key space is
+ * listable at `/state`, and on the capped launch at
+ * `inj1wawzh9dupwdafpwrxnrxdke9l5k8jpgzfzwgcg` the entry sits at the hex key
+ * `0009` + `purchased` + `inj1fhq…742p`, which is this function's output exactly.
+ */
+function mapEntryKey(namespace: string, key: string): Uint8Array {
+  const ns = new TextEncoder().encode(namespace);
+  const k = new TextEncoder().encode(key);
+  const out = new Uint8Array(2 + ns.length + k.length);
+  out[0] = (ns.length >> 8) & 0xff;
+  out[1] = ns.length & 0xff;
+  out.set(ns, 2);
+  out.set(k, 2 + ns.length);
+  return out;
+}
+
+/** Base64 for the LCD's `query_data` path segment, which takes bytes. */
+function base64Bytes(bytes: Uint8Array): string {
+  let s = '';
+  for (const b of bytes) s += String.fromCharCode(b);
+  return btoa(s);
+}
+
+/**
+ * How much of this curve one address is already holding against the wallet cap.
+ *
+ * WHY A RAW STATE READ. The allowance lives in `PURCHASED: Map<&Addr, Uint128>` and the
+ * curve's `QueryMsg` has no entry point for it - only `Config`, `State`, `SimulateBuy`,
+ * `SimulateSell` and `SpotPrice`. The value is still public, because every contract's
+ * storage is: `/cosmwasm/wasm/v1/contract/{addr}/raw/{key}` returns it without the
+ * contract's cooperation. Adding a query would be the tidier answer and would also mean
+ * every already-deployed curve could not answer, including the four on testnet.
+ *
+ * IT IS NOT A TOKEN BALANCE and the panel must not substitute one. This counts buys
+ * minus sells THROUGH THE CURVE, so tokens received as a transfer are not counted
+ * against the cap and tokens sold free the allowance again. A wallet holding none of
+ * the token can still be at its cap, and one holding plenty can be at zero.
+ *
+ * `null` MEANS NOT READ, never zero - the distinction the caller's whole behaviour turns
+ * on. `{"data": null}` at a 200 is the chain saying there is no entry, which is a real
+ * zero (the contract reads it with `unwrap_or_default`). A fetch that threw, a 500, or a
+ * body that is not what this expects is an absence of information, and reporting it as
+ * "you have bought nothing" would re-create the defect this exists to fix from the other
+ * side: a full allowance shown to someone who has none left.
+ */
+export async function purchasedFromCurve(
+  curve: string,
+  address: string,
+): Promise<bigint | null> {
+  if (isDemoMode()) return null;
+  const key = base64Bytes(mapEntryKey('purchased', address));
+  const url = `${getLcdUrl()}/cosmwasm/wasm/v1/contract/${curve}/raw/${encodeURIComponent(key)}`;
+  try {
+    const res = await fetch(url, { headers: { accept: 'application/json' } });
+    if (!res.ok) return null;
+    const json = (await res.json()) as { data?: unknown };
+    /*
+     * `{"data": null}` is the chain answering that it holds no entry for this address,
+     * which the contract itself reads with `unwrap_or_default`: a measured zero.
+     *
+     * An ABSENT field is not that. The LCD sends `data` explicitly, so a body without it
+     * is a body this code does not recognise, and recognising it as zero is how a 200
+     * carrying the wrong thing becomes a full allowance. Distinguished rather than
+     * collapsed with `== null`, which reads as the same test and is not.
+     */
+    if (json.data === null) return 0n;
+    if (typeof json.data !== 'string') return null;
+    /*
+     * Base64 of the stored JSON, and a `Uint128` is stored as a QUOTED decimal string:
+     * the bytes are `"78564513397317799953997"` including the quotes. Stripping them
+     * with a regex rather than `JSON.parse` so a value of an unexpected shape lands on
+     * the `null` path instead of throwing or, worse, parsing as a lossy number.
+     */
+    const text = atob(json.data);
+    const digits = /^"?([0-9]+)"?$/.exec(text.trim());
+    return digits ? BigInt(digits[1]) : null;
+  } catch {
+    return null;
+  }
+}
+
 /** The factory clamps `limit` to 100, so asking for more wastes nothing and gains nothing. */
 const LAUNCH_PAGE = 100;
 

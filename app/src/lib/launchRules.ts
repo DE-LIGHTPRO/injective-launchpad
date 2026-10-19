@@ -225,6 +225,39 @@ export function validateRules(
 }
 
 /**
+ * Whether a buy would put this address over the wallet cap.
+ *
+ * Mirrors `would_exceed_cap` in `contracts/curve/src/state.rs`, including the strict
+ * `>`: a buy landing exactly on the cap is allowed, there and here. The Rust uses
+ * `saturating_add` because a `Uint128` can overflow and "absurdly large" should read as
+ * over the cap rather than as an arithmetic error; a `bigint` cannot overflow, so plain
+ * addition is the faithful translation and not a looser one.
+ *
+ * ONE RESOLVER, because this decision had been made in one place and needed in two.
+ * `openingBuyOverCap` below checked the creator's own first buy; the trade panel checked
+ * nothing at all, so a buyer part-way to the cap got a live quote, an enabled button and
+ * a refusal inside the block. Reproduced on testnet before writing this: on AUDCAP8
+ * (cap 100,000, that address already holding 78,564.513) the contract quotes 0.03 INJ at
+ * 47,133.186 tokens, which is 125,697.699 against a 100,000 cap. The quote is correct,
+ * the curve is right to refuse it, and the user pays gas to find out.
+ */
+export function buyOverCap(rules: LaunchRules, held: bigint, tokensOut: bigint): boolean {
+  return rules.maxPerWallet !== null && held + tokensOut > rules.maxPerWallet;
+}
+
+/**
+ * How much more this address may still buy, or `null` when the launch has no cap.
+ *
+ * Floored at zero rather than going negative. A cap can be exceeded on paper - a creator
+ * may set one lower than an existing holder already has - and a negative allowance would
+ * render as a minus sign in front of a number somebody has to act on.
+ */
+export function remainingAllowance(rules: LaunchRules, held: bigint): bigint | null {
+  if (rules.maxPerWallet === null) return null;
+  return rules.maxPerWallet > held ? rules.maxPerWallet - held : 0n;
+}
+
+/**
  * Whether the creator's own opening buy would break the cap the creator just set.
  *
  * THE RULE BINDS ITS AUTHOR, and that is the part the form did not say. The factory
@@ -239,11 +272,11 @@ export function validateRules(
  * cap in the single-digit millions is exceeded by an opening buy of a few INJ. The 10%
  * ceiling the form already checks does not help, because it only binds past 55 INJ.
  *
- * Mirrors `would_exceed_cap` in `contracts/curve/src/state.rs`, including the strict
- * `>`: a buy landing exactly on the cap is allowed, there and here.
+ * The curve it buys on has never been touched, so the held figure is zero and this is
+ * `buyOverCap` at that one input rather than a second copy of the comparison.
  */
 export function openingBuyOverCap(rules: LaunchRules, tokensOut: bigint): boolean {
-  return rules.maxPerWallet !== null && tokensOut > rules.maxPerWallet;
+  return buyOverCap(rules, 0n, tokensOut);
 }
 
 /** Whether buying is open, matching the contract's inclusive boundary. */

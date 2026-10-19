@@ -22,12 +22,20 @@ import {
 } from '@/lib/curve';
 import { NETWORK } from '@/lib/config';
 import { isDemoMode } from '@/lib/demo';
-import { buyingOpenAt, feeBpsAt, secondsUntilBaseFee, NO_RULES, type LaunchRules } from '@/lib/launchRules';
+import {
+  buyingOpenAt,
+  buyOverCap,
+  remainingAllowance,
+  feeBpsAt,
+  secondsUntilBaseFee,
+  NO_RULES,
+  type LaunchRules,
+} from '@/lib/launchRules';
 import { useRouter } from 'next/navigation';
 import { useConnectedAccount } from '@/lib/walletStore';
 import { denomBalance } from '@/lib/wallet';
 import { TxDialog, useTxFlow } from './TxDialog';
-import type { Quote } from '@/lib/chain';
+import { purchasedFromCurve, type Quote } from '@/lib/chain';
 
 type Side = 'buy' | 'sell';
 
@@ -133,6 +141,43 @@ export function TradePanel({
   const [quoteBal, setQuoteBal] = useState<bigint | null>(null);
   const [tokenBal, setTokenBal] = useState<bigint | null>(null);
 
+  /*
+   * Bumped when a trade confirms, so the two reads below run again.
+   *
+   * Both figures move with every trade and `router.refresh()` does not touch them -
+   * they are read in this client component, not server-rendered - so without this the
+   * allowance a buyer sees after buying is the one from before they bought, and the
+   * second buy of a pair that together exceed the cap would be allowed through.
+   */
+  const [settled, setSettled] = useState(0);
+
+  /*
+   * The wallet cap, read from the curve's own storage rather than inferred.
+   *
+   * `null` is NOT READ and never zero, for the same reason the balances above are. Here
+   * the direction is the dangerous one: zero reads as a full allowance, so an unreachable
+   * node would re-enable exactly the buy this is here to stop.
+   *
+   * Only read when there is a cap to check, and never on the pool: the rule expires at
+   * graduation, so a graduated launch would be paying for a request whose answer cannot
+   * change anything.
+   */
+  const capped = rules.maxPerWallet !== null && !inPool;
+  const [purchased, setPurchased] = useState<bigint | null>(null);
+  useEffect(() => {
+    if (!account || !capped) {
+      setPurchased(null);
+      return;
+    }
+    let live = true;
+    void purchasedFromCurve(curve, account.address).then((v) => {
+      if (live) setPurchased(v);
+    });
+    return () => {
+      live = false;
+    };
+  }, [account, capped, curve, settled]);
+
   useEffect(() => {
     if (!account) {
       setQuoteBal(null);
@@ -154,7 +199,7 @@ export function TradePanel({
     return () => {
       live = false;
     };
-  }, [account, denom, quoteAsset.denom]);
+  }, [account, denom, quoteAsset.denom, settled]);
 
   const held = side === 'buy' ? quoteBal : tokenBal;
   const [slippagePct, setSlippagePct] = useState(1);
@@ -351,6 +396,9 @@ export function TradePanel({
        */
       if (confirmed) {
         setInput('');
+        // Re-reads the balances and the wallet allowance, neither of which is a
+        // server-rendered prop, so `router.refresh()` below cannot reach them.
+        setSettled((n) => n + 1);
         /*
          * THE SAME DEFECT THE CLAIM PANEL HAD. Market cap, curve reserve, progress,
          * tokens sold and the chart are all server-rendered props; nothing refetched
@@ -364,6 +412,29 @@ export function TradePanel({
       setBusy(false);
     }
   }
+
+  /*
+   * Whether the chain will refuse this buy on the wallet cap, decided before the wallet
+   * opens rather than after.
+   *
+   * THREE OUTCOMES, not two. `null` is "cannot say", which is what an unread allowance
+   * honestly is, and it does not disable the button: refusing a legitimate trade because
+   * our own read failed is its own defect, and the contract is the authority at signing
+   * either way. The note below says which of the three it is.
+   *
+   * Sells are never capped. The cap binds what an address may HOLD from the curve, and
+   * selling is the thing that frees it.
+   */
+  const overCap =
+    !capped || side !== 'buy' || !quote?.ok || quote.side !== 'buy'
+      ? false
+      : purchased === null
+        ? null
+        : buyOverCap(rules, purchased, quote.tokensOut);
+
+  /** What is left of this address's allowance, or `null` when there is nothing to say. */
+  const allowanceLeft =
+    capped && purchased !== null ? remainingAllowance(rules, purchased) : null;
 
   /** Worst acceptable fill, sent as the contract's min_* guard. */
   const minOut = useMemo(() => {
@@ -667,6 +738,58 @@ export function TradePanel({
         </p>
       )}
 
+      {/*
+          THE WALLET CAP, BEFORE THE WALLET OPENS.
+
+          This panel had no cap check at all, so a capped launch priced a buy the curve was
+          certain to refuse, enabled the button, and let the refusal arrive inside the block
+          with the gas already spent. Reproduced on testnet at ordinary numbers, not at
+          extremes: an address 78.5% of the way to its cap was quoted 47,133 tokens for
+          0.03 INJ, which is 125,698 against a 100,000 cap.
+
+          Each branch says a different thing, in the order the user needs it. A read that
+          failed is the middle case and it says so rather than going quiet, because the rule
+          is still live on the chain whatever this page managed to read.
+        */}
+      {/*
+          `account` gates the whole block. Without a connected wallet there is no
+          allowance to read, and the middle branch would otherwise tell a visitor their
+          allowance could not be read when nothing had been asked for - a false alarm in
+          the one place this panel is trying to be trusted about a refusal.
+        */}
+      {account && capped && side === 'buy' && rules.maxPerWallet !== null && (
+        <>
+          {overCap === true && (
+            <p className="note err-text">
+              Over this launch&rsquo;s wallet cap. One address can buy at most{' '}
+              {fmt(rules.maxPerWallet, 18, 2)} {symbol} from the curve, and this wallet has{' '}
+              {fmt(purchased ?? 0n, 18, 2)} of that, so{' '}
+              <strong>{fmt(allowanceLeft ?? 0n, 18, 2)} {symbol}</strong> is the most this buy
+              can deliver. Spend less, or sell some to free the allowance.
+            </p>
+          )}
+          {overCap !== true && purchased === null && (
+            <p className="note warn-text">
+              This launch caps what one address can buy from the curve and your remaining
+              allowance could not be read. The curve enforces it either way, so a buy over the
+              cap would be refused in the block.
+            </p>
+          )}
+          {overCap !== true && allowanceLeft === 0n && (
+            <p className="note err-text">
+              This wallet is at the launch&rsquo;s cap of {fmt(rules.maxPerWallet, 18, 2)}{' '}
+              {symbol} from the curve. Selling frees the allowance again.
+            </p>
+          )}
+          {overCap !== true && allowanceLeft !== null && allowanceLeft > 0n && (
+            <p className="note">
+              Wallet cap: you can buy {fmt(allowanceLeft, 18, 2)} more {symbol} from the curve.
+              Selling frees the allowance again.
+            </p>
+          )}
+        </>
+      )}
+
       <div className="field">
         <span className="lbl">
           <span>Slippage tolerance</span>
@@ -698,14 +821,21 @@ export function TradePanel({
            * that failed, trading not open, or a signature already in flight. It is
            * never disabled while a valid trade is sitting there unsigned, which is
            * what the previous unconditional `disabled` amounted to.
+           *
+           * `overCap === true` is the same test, one step earlier: the trade is not
+           * valid, the chain has already decided so, and the only thing signing it
+           * achieves is a gas fee. `null` is not `true`, deliberately - a read this
+           * page could not make is not a reason to stop someone trading.
            */
-          disabled={busy || tradingClosed || !quote?.ok || minOut <= 0n}
+          disabled={busy || tradingClosed || !quote?.ok || minOut <= 0n || overCap === true}
         >
           {busy
             ? 'Waiting for your wallet…'
-            : side === 'buy'
-              ? `Buy ${symbol}`
-              : `Sell ${symbol}`}
+            : overCap === true
+              ? 'Over the wallet cap'
+              : side === 'buy'
+                ? `Buy ${symbol}`
+                : `Sell ${symbol}`}
         </button>
       )}
 
