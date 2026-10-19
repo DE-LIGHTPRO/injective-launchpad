@@ -637,6 +637,7 @@ export default async function LaunchPage({ params }: { params: Promise<{ slug: s
           creatorPaid={detail.creatorPaid}
           platformPaid={detail.platformPaid}
           feeBps={detail.config.feeBps}
+          rewardRoute={detail.rewardRoute}
           quote={quote}
         />
       </div>

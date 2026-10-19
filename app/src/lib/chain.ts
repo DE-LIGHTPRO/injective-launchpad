@@ -10,6 +10,7 @@
 
 import { parseProfile, type TokenProfile } from './tokenProfile.ts';
 import { parseRules, type LaunchRules } from './launchRules.ts';
+import type { RewardRoute } from './launchLimits.ts';
 
 /** Nanoseconds as a string, as CosmWasm sends a `Timestamp`, to whole seconds. */
 function openedAtSeconds(raw: unknown): number | null {
@@ -62,6 +63,15 @@ interface RawCurveContractConfig {
   platform: string;
   lp_reserve: string;
   creator_fee_share_bps: number;
+  /**
+   * Where the creator's share of each fee goes. `#[serde(default)]` on the contract
+   * side, so a curve created before the field existed answers without it.
+   *
+   * Typed as a loose string rather than the union, because this is the wire and the
+   * wire is allowed to carry a variant this build has never heard of. Narrowing
+   * happens in `parseRewardRoute`, which refuses rather than guesses.
+   */
+  reward_route?: string;
   curve: RawCurveConfig;
 }
 
@@ -313,11 +323,30 @@ function toCurveConfig(raw: RawCurveConfig): CurveConfig {
   };
 }
 
+/**
+ * Where the creator's share of each fee goes, as the chain reports it.
+ *
+ * `null` is "this build does not recognise what the contract answered", and it is a
+ * third case rather than a fallback on purpose. An absent field IS `creator`, because
+ * the contract's own `#[serde(default)]` says so, which is a measured fact about the
+ * stored launch. An unrecognised variant is not: resolving it to `creator` would tell
+ * a creator their share is accruing and claimable on a launch whose fees go somewhere
+ * this build cannot name. The one value that must never be invented is the one the
+ * panel turns into a promise.
+ */
+export function parseRewardRoute(raw: unknown): RewardRoute | null {
+  if (raw === undefined || raw === null) return 'creator';
+  if (raw === 'creator' || raw === 'pool') return raw;
+  return null;
+}
+
 export interface LaunchDetail {
   denom: string;
   quoteDenom: string;
   creator: string;
   lpReserve: bigint;
+  /** Where the creator's fee share goes; `null` when the chain named a route this build does not know. */
+  rewardRoute: RewardRoute | null;
   config: CurveConfig;
   state: CurveState;
   migrated: boolean;
@@ -352,6 +381,7 @@ export async function getLaunchDetail(curveAddress: string): Promise<LaunchDetai
     quoteDenom: cfg.quote_denom,
     creator: cfg.creator,
     lpReserve: BigInt(cfg.lp_reserve),
+    rewardRoute: parseRewardRoute(cfg.reward_route),
     config: toCurveConfig(cfg.curve),
     state: {
       injCollected: BigInt(st.inj_collected),

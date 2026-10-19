@@ -89,16 +89,19 @@ pub struct CurveConfigStored {
 /// before claiming, claim a share earned by other people's trades, sell. There is no
 /// honest version of it on this chain without an indexer and a snapshot.
 ///
-/// `Pool` is the closest thing that IS honest. It holds the creator's share back and
-/// pairs it into the liquidity at graduation, which benefits everyone still holding
-/// rather than whoever happened to be holding at a snapshot.
+/// `Pool` is the closest thing that IS honest. It puts the creator's share into the
+/// liquidity, which benefits everyone still holding rather than whoever happened to be
+/// holding at a snapshot.
 #[cw_serde]
 #[derive(Default, Copy)]
 pub enum RewardRoute {
     /// The creator claims it. The default, and what every launch did before this.
     #[default]
     Creator,
-    /// Held for the pool and paired in at graduation.
+    /// Into the liquidity, wherever that is at the time: held in `lp_bonus` and paired
+    /// in at graduation while the curve runs, added straight to the pool's reserve once
+    /// it exists. `apply_route` is the one place that decides, and this comment used to
+    /// name only the first half, which is also all the code did.
     Pool,
 }
 

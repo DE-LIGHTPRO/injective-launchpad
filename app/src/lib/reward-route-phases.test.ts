@@ -44,6 +44,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { REWARD_ROUTES, CREATOR_FEE_SHARE_BPS } from './launchLimits.ts';
+import { parseRewardRoute } from './chain.ts';
 import { maskComments } from './testing/maskComments.ts';
 
 const SRC = join(import.meta.dirname, '..');
@@ -135,6 +136,71 @@ test('the pool route is described for both phases, not just graduation', () => {
     maskComments(readFileSync(join(SRC, 'lib', 'launchLimits.ts'), 'utf8')),
     /value: 'pool',[\s\S]*?\$\{CREATOR_FEE_SHARE_BPS \/ 100\}%/,
     'the pool route types its share as a figure instead of reading the constant',
+  );
+});
+
+test('an absent route is the default, an unknown one is not', () => {
+  /*
+   * The contract carries `#[serde(default)]` on `reward_route`, so a launch created
+   * before the field existed answers without it and really is Creator-routed. That is
+   * a fact about the stored launch, not a guess, which is why absent resolves.
+   *
+   * A variant this build has never heard of is the opposite. Resolving it to
+   * `creator` would tell that launch's creator their share is accruing and claimable
+   * when the fees are going somewhere this build cannot name, and "the field was
+   * missing so assume the one that promises money" is how a default becomes a claim.
+   */
+  assert.equal(parseRewardRoute(undefined), 'creator', 'an old launch no longer reads as Creator-routed');
+  assert.equal(parseRewardRoute(null), 'creator');
+  assert.equal(parseRewardRoute('creator'), 'creator');
+  assert.equal(parseRewardRoute('pool'), 'pool');
+
+  for (const unknown of ['holders', 'burn', 'Pool', '', 0, {}, []]) {
+    assert.equal(
+      parseRewardRoute(unknown),
+      null,
+      `${JSON.stringify(unknown)} was resolved to a route instead of refused`,
+    );
+  }
+});
+
+test('the fees panel reads the route rather than assuming the creator is paid', () => {
+  /*
+   * THE DISCLOSURE HALF. On a Pool-routed launch `creator_owed` is zero for the life
+   * of the launch, and this panel told every reader "70% of it is the creator's",
+   * rendered a "Creator's share, unclaimed" row of 0.000000, and offered its creator
+   * a button whose copy read "This sends your 0.000000 INJ to this wallet". The route
+   * was not read from the contract config at all, so the app could not have known.
+   */
+  const src = maskComments(readFileSync(join(SRC, 'components', 'FeeEarnings.tsx'), 'utf8'));
+
+  assert.match(src, /rewardRoute: RewardRoute \| null;/, 'the panel no longer requires a route');
+  assert.doesNotMatch(src, /rewardRoute\?:/, 'the route is optional, so a caller can omit it into the default');
+  assert.match(src, /const toPool = rewardRoute === 'pool'/, 'the panel no longer distinguishes a pool route');
+  assert.match(src, /const routeUnknown = rewardRoute === null/, 'an unrecognised route is treated as a known one');
+
+  /*
+   * The claim copy is gated on the BALANCE as well as the route, so a real owed
+   * figure is still named as the creator's whatever the route says. Pinned because
+   * gating on the route alone is the plausible simplification, and it hides money.
+   */
+  assert.match(
+    src,
+    /isCreator && creatorOwed > 0n/,
+    'the creator claim copy no longer checks there is anything to send',
+  );
+
+  // And the route actually reaches it, which is the half rule 52 is about.
+  const page = maskComments(
+    readFileSync(join(SRC, 'app', 'launch', '[slug]', 'page.tsx'), 'utf8'),
+  );
+  assert.match(page, /rewardRoute=\{detail\.rewardRoute\}/, 'the launch page does not pass the route it read');
+
+  const chain = maskComments(readFileSync(join(SRC, 'lib', 'chain.ts'), 'utf8'));
+  assert.match(
+    chain,
+    /rewardRoute: parseRewardRoute\(cfg\.reward_route\)/,
+    'the chain mapper no longer reads reward_route off the contract config',
   );
 });
 

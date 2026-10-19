@@ -116,6 +116,14 @@ export function demoDetail(id: number): LaunchDetail | null {
     creator: seed.creator,
     lpReserve: amt(200_000_000n),
     /*
+     * NOCTIS routes its creator's share to the pool, for the same reason KAIJU carries
+     * a cap: the fees panel says something materially different on a Pool-routed launch
+     * - no claimable creator share, and no Claim button offering one - and a demo where
+     * every launch takes the default route leaves that half of the panel visible only
+     * in a test.
+     */
+    rewardRoute: seed.symbol === 'NOCTIS' ? 'pool' : 'creator',
+    /*
      * KAIJU carries a cap so the rules panel is exercised in the demo; the rest are
      * open. A demo where every launch looks identical hides the half of the UI that
      * only appears when a rule exists, which is how an unstyled or unwired panel

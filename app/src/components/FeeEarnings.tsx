@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { fmt } from '@/lib/curve';
 import { NETWORK } from '@/lib/config';
-import { CREATOR_FEE_SHARE_BPS, PLATFORM_FEE_SHARE_BPS } from '@/lib/launchLimits';
+import { CREATOR_FEE_SHARE_BPS, PLATFORM_FEE_SHARE_BPS, type RewardRoute } from '@/lib/launchLimits';
 import { useConnectedAccount } from '@/lib/walletStore';
 import type { Quote } from '@/lib/chain';
 
@@ -34,12 +34,23 @@ export function FeeEarnings({
   creatorPaid,
   platformPaid,
   feeBps,
+  rewardRoute,
   quote,
 }: {
   curve: string;
   creator: string;
   creatorOwed: bigint;
   platformOwed: bigint;
+  /**
+   * Where this launch sends the creator's share. `null` when the chain named a route
+   * this build does not recognise, which is NOT the same as the default.
+   *
+   * Required rather than optional. This panel's whole job is saying who gets paid,
+   * and an optional field is a fallback decision handed to every caller: a page that
+   * forgot to pass it would silently describe a Pool-routed launch as paying its
+   * creator, which is the defect this prop exists to end.
+   */
+  rewardRoute: RewardRoute | null;
   /** Lifetime totals already paid out. Zero on a curve too old to have counted. */
   creatorPaid: bigint;
   platformPaid: bigint;
@@ -64,6 +75,19 @@ export function FeeEarnings({
   const nothingToClaim = total === 0n;
   const paid = creatorPaid + platformPaid;
   const isCreator = account !== null && account.address === creator;
+
+  /*
+   * THE ROUTE DECIDES WHETHER ANY OF THIS IS THE CREATOR'S, and this panel used to
+   * assume it always was. On a Pool-routed launch `apply_route` never touches
+   * `creator_owed`, so it is zero for the life of the launch, while the panel said
+   * "70% of it is the creator's" and offered a Claim button for it.
+   *
+   * `creatorOwed > 0n` is still what decides whether a figure is rendered, rather
+   * than the route alone. The route is read from the chain and so is the balance; if
+   * the two ever disagree, a real owed balance must not be hidden by a label.
+   */
+  const toPool = rewardRoute === 'pool';
+  const routeUnknown = rewardRoute === null;
 
   async function claim() {
     if (!account) return;
@@ -118,20 +142,53 @@ export function FeeEarnings({
         * true in both windows without plumbing the rules in to say so; the quote on
         * the trade panel is where the fee in force is shown.
         */}
-      <p className="note">
-        This launch&rsquo;s own fee is {Number(feeBps) / 100}% in {quote.label}, and{' '}
-        {CREATOR_FEE_SHARE_BPS / 100}% of it is the creator&rsquo;s while{' '}
-        {PLATFORM_FEE_SHARE_BPS / 100}% runs this launchpad. The split was set when the
-        launch was created and cannot be changed.
-      </p>
+      {routeUnknown ? (
+        <p className="note">
+          This launch&rsquo;s own fee is {Number(feeBps) / 100}% in {quote.label}. It sends
+          the creator&rsquo;s share somewhere this version of the site does not recognise,
+          so where that share goes is not stated here. The figures below are what the
+          contract reports.
+        </p>
+      ) : toPool ? (
+        <p className="note">
+          This launch&rsquo;s own fee is {Number(feeBps) / 100}% in {quote.label}. The creator
+          chose to put their {CREATOR_FEE_SHARE_BPS / 100}% into this launch&rsquo;s
+          liquidity rather than keep it, so only the {PLATFORM_FEE_SHARE_BPS / 100}% that
+          runs this launchpad is claimable here. That choice was made when the launch was
+          created and cannot be changed.
+        </p>
+      ) : (
+        <p className="note">
+          This launch&rsquo;s own fee is {Number(feeBps) / 100}% in {quote.label}, and{' '}
+          {CREATOR_FEE_SHARE_BPS / 100}% of it is the creator&rsquo;s while{' '}
+          {PLATFORM_FEE_SHARE_BPS / 100}% runs this launchpad. The split was set when the
+          launch was created and cannot be changed.
+        </p>
+      )}
 
       <div style={{ marginTop: 'var(--space-4)' }}>
-        <div className="metric-row">
-          <span className="k">Creator&rsquo;s share, unclaimed</span>
-          <span className="v mono">
-            {fmt(creatorOwed, quote.decimals, 6)} {quote.label}
-          </span>
-        </div>
+        {toPool && creatorOwed === 0n ? (
+          /*
+            * NO FIGURE, because there is none to show. The contract keeps no running
+            * total of what a Pool route has sent to the liquidity: before graduation
+            * it is inside `lp_bonus` mixed with the opening-fee premium, and after
+            * graduation it is inside `pool_quote` mixed with the whole reserve.
+            * Rendering `creator_owed` here would print a structural zero under a
+            * label that reads as an unpaid balance, and inventing a total from the
+            * buckets it was merged into would be a number nothing measured.
+            */
+          <div className="metric-row">
+            <span className="k">Creator&rsquo;s share</span>
+            <span className="v">Added to this launch&rsquo;s liquidity</span>
+          </div>
+        ) : (
+          <div className="metric-row">
+            <span className="k">Creator&rsquo;s share, unclaimed</span>
+            <span className="v mono">
+              {fmt(creatorOwed, quote.decimals, 6)} {quote.label}
+            </span>
+          </div>
+        )}
         <div className="metric-row">
           <span className="k">Launchpad&rsquo;s share, unclaimed</span>
           <span className="v mono">
@@ -220,9 +277,17 @@ export function FeeEarnings({
             {busy ? 'Waiting for your wallet…' : 'Pay out fees'}
           </button>
           <p className="note">
-            {isCreator
+            {/*
+                A Pool-routed launch has nothing here for its own creator, and this
+                sentence told them it was sending "your 0.000000 INJ to this wallet".
+                `creatorOwed > 0n` rather than the route alone, so a real owed balance
+                is still named as theirs whatever the route says.
+              */}
+            {isCreator && creatorOwed > 0n
               ? `This sends your ${fmt(creatorOwed, quote.decimals, 6)} ${quote.label} to this wallet, and the launchpad's share to the launchpad.`
-              : 'This pays the creator and the launchpad, not you. You are paying the gas for it.'}
+              : isCreator && toPool
+                ? "This pays the launchpad's share. Your share of this launch's fees goes into its liquidity, so there is nothing here to send you."
+                : 'This pays the creator and the launchpad, not you. You are paying the gas for it.'}
           </p>
         </div>
       )}
