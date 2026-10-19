@@ -1381,6 +1381,22 @@ fn assert_books(f: &Fixture, seed: u64, step: usize, quote_total: Uint128) {
         st.inj_collected + st.lp_bonus + st.pool_quote + st.creator_owed + st.platform_owed;
     assert_eq!(held_q, books_q, "seed {seed} step {step}: quote held != books");
 
+    /*
+     * The quote side is phase-aware too, which the sum above cannot be. `lp_bonus` is a
+     * term in it, so a unit added to that bucket after graduation balances perfectly and
+     * is still owed to nobody: `seed_pool` is its only consumer and refuses to run twice.
+     * That is precisely how `apply_route(Pool)` stranded the creator's share on every
+     * post-graduation trade with this campaign green. The token side has always branched
+     * on `migrated`; this is the matching half.
+     */
+    if st.migrated {
+        assert!(
+            st.lp_bonus.is_zero(),
+            "seed {seed} step {step}: {} stranded in lp_bonus after graduation",
+            st.lp_bonus
+        );
+    }
+
     let held_t = f.balance(&f.addr, TOKEN);
     let books_t = if st.migrated {
         st.pool_tokens
@@ -1399,7 +1415,11 @@ fn assert_books(f: &Fixture, seed: u64, step: usize, quote_total: Uint128) {
 }
 
 fn random_run(seed: u64, rules: LaunchRules) -> bool {
-    let mut f = setup_with(rules);
+    random_run_routed(seed, rules, Default::default())
+}
+
+fn random_run_routed(seed: u64, rules: LaunchRules, route: RewardRoute) -> bool {
+    let mut f = setup_routed(rules, curve_cfg(), route);
     let mut rng = Lcg(seed);
     let traders = [f.alice.clone(), f.bob.clone()];
     let quote_total = amt(2_000);
@@ -1473,4 +1493,26 @@ fn random_trading_with_an_opening_fee_keeps_exact_books() {
         }
     }
     assert!(graduated >= 3, "only {graduated} of 12 runs graduated");
+}
+
+/*
+ * The same campaign on the OTHER reward route, which is the gap that let the stranding
+ * bug through. Both randomized runs above take the default route, so eighty random trades
+ * across graduation, twenty-four times over, never once reached `RewardRoute::Pool`. A
+ * fuzz campaign only covers the branches its fixture can reach, and this one had a
+ * fixture that could reach exactly one of two.
+ *
+ * `creator_owed` stays zero here for the life of the launch, so `assert_books` is really
+ * checking that the creator's cut landed in `lp_bonus` before graduation and in
+ * `pool_quote` after, with nothing left in the bucket either side.
+ */
+#[test]
+fn random_trading_on_a_pool_routed_launch_keeps_exact_books() {
+    let mut graduated = 0;
+    for seed in 201..=224u64 {
+        if random_run_routed(seed, Default::default(), RewardRoute::Pool) {
+            graduated += 1;
+        }
+    }
+    assert!(graduated >= 6, "only {graduated} of 24 pool-routed runs graduated");
 }
