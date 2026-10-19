@@ -46,10 +46,20 @@ import { listTrades, currentHeight, quoteMoved, type Trade } from './chain.ts';
  * claim and is labelled as one.
  */
 
+/**
+ * NOT LIFETIME FIGURES, which these three fields were documented as being.
+ *
+ * The count is the answering node's index match count, and a public hostname balances
+ * across nodes indexed to different depths: one mainnet contract answered total 72,
+ * 265 and 874 within seconds on 18 Oct 2026. So the honest reading is "at least this
+ * many", and the only count these support as exact is ZERO - an empty total needs no
+ * block fetched and no index depth, which is what `volumeIn` below derives from and
+ * all it derives from.
+ */
 export interface LaunchActivity {
-  /** Executed buys, lifetime. */
+  /** Executed buys the answering node still indexes. A floor, not a total. */
   buys: number;
-  /** Executed sells, lifetime. */
+  /** Executed sells the answering node still indexes. A floor, not a total. */
   sells: number;
   /** Both, which is the figure a card shows. */
   trades: number;
@@ -60,11 +70,57 @@ export interface LaunchActivity {
  *
  * `limit`, never `pagination.limit` - see the header. The wrong one is not an error,
  * it is a 294x payload with the right answer in it.
+ *
+ * `order_by=ORDER_BY_DESC` IS LOAD-BEARING, AND IT IS SO BECAUSE THE INDEX OUTLIVES
+ * BLOCK RETENTION. An unspecified order means ASCENDING, so `limit=1` asked the node
+ * to load the OLDEST transaction on the contract - which, the index reaching further
+ * back than the blocks do, is precisely the one most likely to be pruned. The body is
+ * then discarded unread: this function wants one integer and was fetching the single
+ * least retrievable transaction to get it.
+ *
+ * Measured against live mainnet on 18 Oct 2026, four contracts discovered from recent
+ * wasm activity, four probes each at head 187,972,700 with the block floor at
+ * 187,936,701:
+ *
+ *     no order_by     200 on  4/16   (identical heights and totals to ASC)
+ *     ORDER_BY_ASC    200 on  4/16
+ *     ORDER_BY_DESC   200 on 16/16
+ *
+ * The failures are `500 height N is not available, lowest height is M`, naming heights
+ * up to 686,114 blocks below the floor - the index found the entry and the node could
+ * not fetch its block. So a launch with history rendered a trade count on roughly one
+ * render in four and a dim unavailable dot on the rest, flickering between them on
+ * reload, while a launch that had never traded worked perfectly: there is no body to
+ * load when the total is zero. The defect arrives with use, like the `pagination.limit`
+ * one above it, and for the same underlying reason.
+ *
+ * Ordering does not change `total`, which is what is read. The totals do vary between
+ * requests - 72, 265 and 874 for one contract within seconds - but that is the
+ * answering node's index depth, not the ordering, and it is why the fields below are
+ * not documented as lifetime figures.
+ *
+ * THE TESTNET BOARD LOOKS IDENTICAL BEFORE AND AFTER THIS, so do not conclude from it
+ * that the parameter does nothing and take it back out. Measured on testnet the same
+ * day, head 144,479,214 against a floor of 144,379,212:
+ *
+ *   - `inj1sfsy…` asked for height 143,413,011 unspecified and 143,413,037 with DESC,
+ *     which is the ordering demonstrably taking effect - a different transaction was
+ *     selected - and both 500, because its NEWEST buy is 966,175 blocks below the
+ *     floor. Every buy that curve ever had is pruned, and no ordering reaches a
+ *     transaction that is gone.
+ *   - `inj13hx…` and `inj1k2m8…` answer `total 0` either way: nothing to buy, nothing
+ *     to fetch, nothing for the parameter to do.
+ *
+ * So the parameter helps exactly the launch with activity inside the retention window,
+ * which is every launch anybody is watching, and testnet's are months dormant against
+ * a 14-hour window. A launch whose whole history precedes the floor still reads as
+ * unavailable, correctly: that is a figure this endpoint cannot produce, not a figure
+ * to guess at.
  */
 async function countTxs(query: string): Promise<number> {
   const url = `${getLcdUrl()}/cosmos/tx/v1beta1/txs?query=${encodeURIComponent(
     query,
-  )}&limit=1`;
+  )}&limit=1&order_by=ORDER_BY_DESC`;
   const res = await fetch(url, { headers: { accept: 'application/json' } });
   if (!res.ok) throw new Error(`tx search ${res.status}`);
   const body = (await res.json()) as { total?: unknown };

@@ -98,6 +98,39 @@ test('transaction search is bounded by `limit`, which is the parameter it honour
   }
 });
 
+test('transaction search asks for the NEWEST page, because the oldest is the pruned one', () => {
+  /*
+   * A SECOND PARAMETER WHOSE DEFAULT IS WRONG HERE, and wrong for the same reason the
+   * one above is: nothing rejects it, the `total` is correct either way, and it fails
+   * only once a launch has history.
+   *
+   * An unspecified `order_by` means ASCENDING, so `limit=1` asks the node to load the
+   * OLDEST matching transaction. The tx index reaches further back than block
+   * retention does (see `volumeIn`), so that is precisely the transaction the node
+   * cannot fetch, and it answers `500 height N is not available, lowest height is M`.
+   *
+   * Measured on live mainnet, 18 Oct 2026, four contracts discovered from recent wasm
+   * activity, four probes each: unspecified 4/16 and ORDER_BY_ASC 4/16 succeeded, with
+   * identical heights and totals, against ORDER_BY_DESC 16/16. `countTxs` discards the
+   * body it fetches, so the parameter costs nothing and buys the whole difference.
+   *
+   * Asserted across every call site rather than in `launchActivity.ts`, because the
+   * other site had it right and a guard that reads one file does not cover the class.
+   */
+  const sites = queryStringsFor('/cosmos/tx/v1beta1/txs');
+  assert.ok(
+    sites.length >= 2,
+    `only ${sites.length} tx-search call sites found; this guard measures nothing if the endpoint moved behind a helper`,
+  );
+  for (const { file, query } of sites) {
+    assert.match(
+      query,
+      /order_by=ORDER_BY_DESC/,
+      `${file} leaves the tx-search order unspecified, which means ascending: it asks the node for the oldest matching transaction, and the index outlives block retention so that is the one it cannot fetch`,
+    );
+  }
+});
+
 test('bank balances are bounded by `pagination.limit`, which is the opposite', () => {
   /*
    * `by_denom` returns a single balance and needs no limit, so only the plural query
