@@ -1,5 +1,4 @@
 import Link from 'next/link';
-import { NETWORK } from '@/lib/config';
 
 export interface HeroStats {
   launches: number;
@@ -31,11 +30,16 @@ export interface HeroStats {
  * graduation, a supply nobody can add to. Those are this launchpad's reasons to exist
  * against Pons and nearly.trade, so they are the headline rather than a footnote.
  * The stats are the board's own rows, summed, never a second data source.
+ *
+ * There is no eyebrow pill above the headline. It read "Injective testnet", which is
+ * the single least useful thing to put in the largest empty space on the page: the
+ * network is already named in the header chip, in `ChainStatus`, and at length on
+ * /risks, so the pill disclosed nothing and spent the first line of the first screen
+ * announcing the chain instead of what this is for.
  */
 export function Hero({ stats }: { stats: HeroStats | null }) {
   return (
     <section className="hero" aria-labelledby="hero-title">
-      <span className="hero-eyebrow">Injective {NETWORK.name}</span>
       <h1 id="hero-title">Fair token launches, with liquidity locked at graduation.</h1>
       <p className="sub">
         Fixed supply and one bonding curve for every token. At graduation the liquidity

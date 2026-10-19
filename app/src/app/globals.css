@@ -2044,7 +2044,6 @@ header.top .chip { font-size: var(--text-micro); letter-spacing: 0.04em; padding
 
 /* ------------------------------------------------------------------ hero -- */
 .hero { padding: var(--space-6) 0 var(--space-5); border-bottom: 1px solid var(--line); margin-bottom: var(--space-6); }
-.hero-eyebrow { font-size: var(--text-xs); font-weight: 550; color: var(--text-faint); letter-spacing: 0.02em; margin-bottom: var(--space-3); display: block; }
 .hero h1 { font-size: clamp(2rem, 4.2vw, 2.875rem); line-height: 1.08; letter-spacing: -0.035em; max-width: 20ch; font-weight: 650; }
 /* `1.0625rem` in both this and `.wordmark` was `--text-lg` spelled out, so the scale
    looked unused at exactly the two places the eye lands first. */
