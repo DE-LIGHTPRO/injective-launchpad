@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { launchPath, launchSlug, parseLaunchRef, resolveLaunchSlug } from './launchPath.ts';
+import { maskComments } from './testing/maskComments.ts';
 import { EMPTY_PROFILE } from './tokenProfile.ts';
 import type { Launch } from './chain.ts';
 
@@ -15,6 +16,16 @@ import type { Launch } from './chain.ts';
  * Sending somebody to a different token than the one they were linked to is the worst
  * thing a launchpad can do with a URL, and it would look like it worked, so the
  * ambiguous cases are the ones worth most of the assertions here.
+ *
+ * THE RULE CHANGED, AND SO DID THREE TESTS IN THIS FILE. Audit F-17. A plain ticker
+ * used to be taken away from both launches the moment a second one copied it, and
+ * resolved to a chooser. The tests below now pin the opposite, because a plain link
+ * can only ever have been minted while the ticker was unique and so can only ever
+ * have meant the lowest id: letting a copy break it is griefing any creator can buy,
+ * and the chooser offered two identical names and let the copy win half the clicks.
+ * The reasoning is on `launchPath.ts` in full. Noting it here too because the three
+ * tests that changed were not weak, they were correct about a policy that was wrong,
+ * and a test that encodes a claim is only as good as the claim.
  */
 
 const launch = (id: number, symbol: string, creator = `inj1creator${id}`): Launch => ({
@@ -31,13 +42,43 @@ test('a unique ticker is the whole slug', () => {
   assert.equal(launchPath(board[1], board), '/launch/VETTA');
 });
 
-test('a shared ticker carries the id, on both launches', () => {
+test('a copied ticker suffixes the copy and leaves the original alone', () => {
   const board = [launch(1, 'INJINU'), launch(7, 'INJINU'), launch(2, 'VETTA')];
-  assert.equal(launchPath(board[0], board), '/launch/INJINU-1');
+  assert.equal(
+    launchPath(board[0], board),
+    '/launch/INJINU',
+    'the first launch keeps the link it has already been shared under',
+  );
   assert.equal(launchPath(board[1], board), '/launch/INJINU-7');
   // The uninvolved launch keeps the short form: a clash is between two tickers, not
   // a property of the board.
   assert.equal(launchPath(board[2], board), '/launch/VETTA');
+});
+
+test('the original keeps its link however many copies arrive', () => {
+  /*
+   * The griefing case. One copy is an accident; five is somebody trying to take a
+   * URL, and the answer has to be the same either way.
+   */
+  const board = [
+    launch(4, 'INJINU'),
+    launch(9, 'INJINU'),
+    launch(11, 'INJINU'),
+    launch(40, 'INJINU'),
+  ];
+  assert.equal(launchPath(board[0], board), '/launch/INJINU');
+  assert.deepEqual(
+    board.slice(1).map((l) => launchPath(l, board)),
+    ['/launch/INJINU-9', '/launch/INJINU-11', '/launch/INJINU-40'],
+  );
+});
+
+test('board order does not decide who is first; the id does', () => {
+  // The contract pages ascending, but nothing here may depend on that.
+  const board = [launch(40, 'INJINU'), launch(4, 'INJINU')];
+  assert.equal(launchPath(board[1], board), '/launch/INJINU');
+  assert.equal(launchPath(board[0], board), '/launch/INJINU-40');
+  assert.equal(resolveLaunchSlug('INJINU', board).launch?.id, 4);
 });
 
 test('without the board the slug is always the unambiguous form', () => {
@@ -53,10 +94,12 @@ test('a clash is detected regardless of case, and the slug is the displayed tick
   /*
    * `symbolOf` uppercases, so `injinu` and `INJINU` are ONE ticker as far as anything
    * a reader sees is concerned. The slug follows what is on screen rather than what
-   * is in the denom, which is why both clash and both carry an id.
+   * is in the denom, which is why the lowercase copy is displaced by the uppercase
+   * original: a reader cannot tell the two denoms apart from the ticker, so neither
+   * may the URL.
    */
   const board = [launch(1, 'INJINU'), launch(2, 'injinu')];
-  assert.equal(launchPath(board[0], board), '/launch/INJINU-1');
+  assert.equal(launchPath(board[0], board), '/launch/INJINU');
   assert.equal(launchPath(board[1], board), '/launch/INJINU-2');
 });
 
@@ -79,20 +122,69 @@ test('a ticker in the wrong case resolves and redirects', () => {
   assert.equal(r.canonical, 'INJINU');
 });
 
-test('an ambiguous ticker resolves to nobody and lists the candidates', () => {
+test('a copied ticker still resolves, to the launch the link has always named', () => {
+  /*
+   * The F-17 inversion. This asserted `launch === null` and a candidate list, which
+   * meant a copy could break every link already shared for the original. A plain
+   * ticker is only ever handed out while it is unique, so the lowest id is not a
+   * guess at what the reader wanted: it is the only launch that URL has named.
+   */
   const board = [launch(1, 'INJINU'), launch(7, 'INJINU')];
   const r = resolveLaunchSlug('INJINU', board);
-  assert.equal(r.launch, null, 'picking one would send someone to the wrong token');
+  assert.equal(r.launch?.id, 1);
+  assert.equal(r.canonical, null, 'the plain form IS canonical for the original');
   assert.deepEqual(
-    r.candidates.map((c) => c.id),
-    [1, 7],
+    r.sameTicker.map((c) => c.id),
+    [7],
+    'the page still has to say the ticker is not unique',
   );
+});
+
+test('the copy is told it is the copy, by whichever route reaches it', () => {
+  /*
+   * The warning has to travel with the launch rather than with the entry point: the
+   * two URLs that land on a copy, its suffixed slug and its bare id, never pass
+   * through the ambiguous plain name at all, and that reader is the one at risk.
+   */
+  const board = [launch(1, 'INJINU'), launch(7, 'INJINU')];
+  for (const slug of ['INJINU-7', '7']) {
+    const r = resolveLaunchSlug(slug, board);
+    assert.equal(r.launch?.id, 7, slug);
+    assert.deepEqual(
+      r.sameTicker.map((c) => c.id),
+      [1],
+      slug,
+    );
+  }
+});
+
+test('an unshared ticker reports nobody else using it', () => {
+  const board = [launch(1, 'INJINU'), launch(2, 'VETTA')];
+  assert.deepEqual(resolveLaunchSlug('INJINU', board).sameTicker, []);
+  assert.deepEqual(resolveLaunchSlug('2', board).sameTicker, []);
+});
+
+test("the copy's bare id redirects to the suffixed form, not to the plain one", () => {
+  /*
+   * `/launch/7` must not canonicalise to `/launch/INJINU`, which is launch 1. Two
+   * launches claiming one canonical URL is how a copy inherits an audience.
+   */
+  const board = [launch(1, 'INJINU'), launch(7, 'INJINU')];
+  assert.equal(resolveLaunchSlug('7', board).canonical, 'INJINU-7');
+  assert.equal(resolveLaunchSlug('1', board).canonical, 'INJINU');
 });
 
 test('the suffixed form picks one out of a clash', () => {
   const board = [launch(1, 'INJINU'), launch(7, 'INJINU')];
   assert.equal(resolveLaunchSlug('INJINU-7', board).launch?.id, 7);
-  assert.equal(resolveLaunchSlug('INJINU-1', board).launch?.id, 1);
+  /*
+   * The original's own suffixed form keeps resolving, because links were shared
+   * under it while the old rule was live. It redirects to the plain one rather than
+   * serving a second URL.
+   */
+  const first = resolveLaunchSlug('INJINU-1', board);
+  assert.equal(first.launch?.id, 1);
+  assert.equal(first.canonical, 'INJINU');
 });
 
 test('a ticker that itself ends in a dash and digits wins its own name', () => {
@@ -120,7 +212,7 @@ test('an unknown ticker resolves to nothing rather than to the first launch', ()
   const board = [launch(1, 'INJINU')];
   const r = resolveLaunchSlug('NOPE', board);
   assert.equal(r.launch, null);
-  assert.deepEqual(r.candidates, []);
+  assert.deepEqual(r.sameTicker, []);
 });
 
 test('an empty or absent segment is refused', () => {
@@ -138,6 +230,40 @@ test('an id beyond safe integers is refused rather than rounded', () => {
   // `Number('9007199254740993')` silently becomes ...992, which would resolve to a
   // different launch than the one named.
   assert.equal(parseLaunchRef('9007199254740993'), null);
+});
+
+/**
+ * The resolver can only tell the page the ticker is shared; the page has to say it.
+ *
+ * A source guard because the thing being protected is a sentence, and `sameTicker`
+ * compiles and type-checks perfectly well while being destructured and ignored. That
+ * is exactly how the old chooser's one real contribution would have been lost in
+ * replacing it: resolving the plain link to the original is only safe if the reader
+ * on either page is told the name is not an identity.
+ */
+test('the launch page warns when a ticker is shared, and no longer asks the reader to pick', () => {
+  const src = maskComments(
+    readFileSync(join(import.meta.dirname, '..', 'app/launch/[slug]/page.tsx'), 'utf8'),
+  );
+  assert.match(src, /sameTicker,\s*canonical\s*\}\s*=\s*resolveLaunchSlug/, 'must be read');
+  assert.match(src, /\{sameTicker\.length > 0 && \(/, 'must be rendered, not just read');
+  assert.match(src, /sameTicker\.map\(/, 'the other launches must be reachable from here');
+  assert.match(
+    src,
+    /firstOfTicker\s*=\s*!sameTicker\.some\(\(o\) => o\.id < launch\.id\)/,
+    'which one came first must come from the same list the links do',
+  );
+  assert.match(src, /This is not the first token called \$\{symbol\}/, 'the copy says so');
+  assert.match(src, /Another token is also called \$\{symbol\}/, 'the original says so too');
+  assert.match(
+    src,
+    /the name is not\s+an identity/,
+    'the reason has to be on the screen, not only in the heading',
+  );
+  // The chooser, and the only sentence it had. Its return rendered a 200 with no
+  // launch on it, which `notFound()` now handles as the 404 it always was.
+  assert.ok(!/pick the one you meant/.test(src), 'the blind chooser must not come back');
+  assert.ok(!/\bcandidates\b/.test(src), 'the old field name must not linger');
 });
 
 /**

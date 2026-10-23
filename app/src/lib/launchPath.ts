@@ -33,6 +33,33 @@ export interface Linkable {
  * stops being unique the moment someone copies it, so `launchPath` takes the other
  * launches it is competing with. A caller that does not have them says so by passing
  * nothing, and gets the always-unambiguous form.
+ *
+ * THE PLAIN LINK BELONGS TO THE FIRST LAUNCH THAT USED THE TICKER, AND CANNOT BE
+ * TAKEN AWAY FROM IT. Audit F-17. Both halves of this file used to treat a clash as
+ * symmetrical: every launch sharing a ticker got the suffix, and a plain `/launch/
+ * INJINU` resolved to nobody and rendered a chooser. The reasoning written here was
+ * that "picking the oldest would quietly send someone to a different token than the
+ * one they were linked to, which on a launchpad is the worst available outcome", and
+ * it had the direction exactly backwards:
+ *
+ *  - A PLAIN LINK CAN ONLY EVER HAVE BEEN MINTED FOR THE EARLIEST LAUNCH. It is
+ *    handed out while the ticker is unique, and ids are assigned in order, so the
+ *    launch it meant at the moment it was shared is the one with the lowest id. The
+ *    oldest is not a guess at what the reader wanted; it is the only thing that link
+ *    has ever pointed at. Resolving it to the oldest is what keeps a promise.
+ *  - SO THE CHOOSER BROKE EVERY LINK ALREADY SHARED, and anyone could do it to
+ *    anyone, for the price of one launch. Post a copy of a popular ticker and every
+ *    link that creator has ever posted stops arriving.
+ *  - AND THE CHOOSER WAS NOT THE SAFE OPTION IT LOOKED LIKE. It offered two entries
+ *    with the same ticker and nothing else to tell them apart, which is a coin flip
+ *    presented as a choice, and a coin flip the copycat gets to enter. It converted
+ *    griefing into roughly half the traffic.
+ *
+ * What the chooser was genuinely carrying is the warning, not the choice, and the
+ * warning is better where it costs nothing: `Resolution.sameTicker` reports the other
+ * launches using this ticker whichever one resolved, so the page can say so on the
+ * original AND on the copy. Telling a reader on `/launch/INJINU-40` that this is not
+ * the first token called INJINU is the protection; making them pick blindly was not.
  */
 
 /** A subdenom is `[a-zA-Z0-9._-]`, all of which survive a URL path segment as is. */
@@ -57,10 +84,16 @@ export function pathForSlug(slug: string): string {
 export function launchSlug(launch: Linkable, others?: Linkable[]): string {
   const symbol = symbolOf(launch.denom);
   if (!others) return `${symbol}-${launch.id}`;
-  const clashes = others.some(
-    (o) => o.id !== launch.id && symbolOf(o.denom).toLowerCase() === symbol.toLowerCase(),
-  );
-  return clashes ? `${symbol}-${launch.id}` : symbol;
+  /*
+   * `o.id < launch.id`, not `o.id !== launch.id`. Only a launch that came FIRST
+   * displaces this one from the plain form, which is what makes the plain form
+   * permanent for whoever got there first. Strictly less than also excludes the
+   * launch itself without a separate identity check, and tolerates a caller that
+   * passes a board this launch is not in yet.
+   */
+  const lower = symbol.toLowerCase();
+  const earlier = others.some((o) => o.id < launch.id && symbolOf(o.denom).toLowerCase() === lower);
+  return earlier ? `${symbol}-${launch.id}` : symbol;
 }
 
 export type LaunchRef =
@@ -88,16 +121,17 @@ export function parseLaunchRef(slug: string): LaunchRef | null {
 }
 
 export interface Resolution {
-  /** The launch, when exactly one answers to the slug. */
+  /** The launch the slug names, or null when nothing answers to it. */
   launch: Launch | null;
   /**
-   * Several launches share this ticker and the slug did not say which.
+   * The OTHER launches using this ticker. Empty for all but a copied name.
    *
-   * The page lists them rather than picking one. Picking the oldest would be the
-   * obvious shortcut and would quietly send someone to a different token than the
-   * one they were linked to, which on a launchpad is the worst available outcome.
+   * Not a choice to be made, which is what it was before: the slug already decided
+   * which launch this is. It is what the page needs to tell a reader that the ticker
+   * on their screen is not unique, which it must do on the original and on the copy,
+   * because either one can be the page somebody arrived at from a link.
    */
-  candidates: Launch[];
+  sameTicker: Launch[];
   /**
    * The canonical slug, when the one used was not it.
    *
@@ -109,7 +143,7 @@ export interface Resolution {
 
 /** Resolve a slug against the board. Pure, so it is testable without a chain. */
 export function resolveLaunchSlug(slug: string, launches: Launch[]): Resolution {
-  const none: Resolution = { launch: null, candidates: [], canonical: null };
+  const none: Resolution = { launch: null, sameTicker: [], canonical: null };
   const ref = parseLaunchRef(slug);
   if (!ref) return none;
 
@@ -117,20 +151,37 @@ export function resolveLaunchSlug(slug: string, launches: Launch[]): Resolution 
     const want = launchSlug(l, launches);
     return want === slug ? null : want;
   };
+  /* Computed for every resolved launch, not only the ambiguous entry point, because
+   * `/launch/40` and `/launch/INJINU-40` land on the copy without passing through the
+   * plain name at all, and that is the reader most in need of being told. */
+  const sharing = (l: Launch) => {
+    const sym = symbolOf(l.denom).toLowerCase();
+    return launches.filter((o) => o.id !== l.id && symbolOf(o.denom).toLowerCase() === sym);
+  };
+  const hit = (l: Launch): Resolution => ({
+    launch: l,
+    sameTicker: sharing(l),
+    canonical: canonical(l),
+  });
 
   if (ref.kind === 'id') {
-    const found = launches.find((l) => l.id === ref.id) ?? null;
-    return found ? { launch: found, candidates: [], canonical: canonical(found) } : none;
+    const found = launches.find((l) => l.id === ref.id);
+    return found ? hit(found) : none;
   }
 
   // The literal ticker first, so a token whose name ends in `-<digits>` wins its name.
   const lower = ref.symbol.toLowerCase();
   const named = launches.filter((l) => symbolOf(l.denom).toLowerCase() === lower);
-  if (named.length === 1) {
-    return { launch: named[0], candidates: [], canonical: canonical(named[0]) };
-  }
-  if (named.length > 1) {
-    return { launch: null, candidates: named, canonical: null };
+  if (named.length > 0) {
+    /*
+     * The earliest, which is the only launch this link has ever named. See the note
+     * at the top of the file: a plain ticker is handed out while it is unique, so
+     * resolving it to the lowest id is not choosing between two tokens, it is
+     * declining to let the second one take the first one's address. `reduce` rather
+     * than a sort, because the board's order is the contract's and is not ours to
+     * assume.
+     */
+    return hit(named.reduce((a, b) => (a.id <= b.id ? a : b)));
   }
 
   // Then `SYMBOL-id`. The id decides; the symbol must agree, so a stale link carrying
@@ -141,7 +192,7 @@ export function resolveLaunchSlug(slug: string, launches: Launch[]): Resolution 
     const found = launches.find(
       (l) => l.id === id && symbolOf(l.denom).toLowerCase() === m[1].toLowerCase(),
     );
-    if (found) return { launch: found, candidates: [], canonical: canonical(found) };
+    if (found) return hit(found);
   }
   return none;
 }

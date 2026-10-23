@@ -332,11 +332,13 @@ const MAX_LAUNCH_PAGES = 50;
  *  - `resolveLaunchSlug` matches against the list it is given, so launch 51's page
  *    would 404 at the URL the product itself generates for it. The numeric form still
  *    resolved, which means the token existed and only its own link did not work.
- *  - `launchSlug` decides whether a ticker needs its id appended by looking for a
- *    clash in that same list, so a later launch reusing an earlier ticker would be
- *    invisible to the check and `/launch/INJINU` would quietly serve the older token.
- *    `launchPath.ts` calls that "the worst available outcome" and the truncation
- *    defeated the guard written to prevent it.
+ *  - `launchSlug` appended an id whenever it could see ANY other launch with the same
+ *    ticker, so a later launch reusing an earlier ticker was invisible to the check
+ *    and `/launch/INJINU` quietly served the older token. Since F-17 serving the
+ *    older token is the intended answer and the slug only turns on launches with a
+ *    LOWER id, which truncation keeps; so this bullet no longer describes a wrong
+ *    link, only the 404 above. Recorded because it is why the paging was written, and
+ *    because the next person to change the slug rule inherits the exposure back.
  *  - `ClaimFees` lists a creator's launches to claim from: fees owed on launch 51
  *    would read as nothing to claim.
  *  - Analytics renders `rows.length` as "Launches" under a heading promising every

@@ -71,9 +71,8 @@ export const dynamic = 'force-dynamic';
  * Every launch, once per request. Falls back to empty, as the page always has.
  *
  * The metadata's fallback used to be `[launch]` rather than `[]`, and the difference
- * is nothing: `launchSlug` tests the clash list with `o.id !== launch.id`, so a list
- * holding only this launch and an empty list both say "no clash" and both yield the
- * bare ticker.
+ * is nothing: `launchSlug` looks for a launch with a LOWER id, so a list holding only
+ * this launch and an empty list both find none and both yield the bare ticker.
  */
 const allLaunches = cache(() => listLaunches().catch((): Launch[] => []));
 
@@ -197,48 +196,24 @@ export default async function LaunchPage({ params }: { params: Promise<{ slug: s
    * decision and for the clash list.
    */
   const board = await allLaunches();
-  const { launch: resolved, candidates, canonical } = resolveLaunchSlug(slug, board);
+  const { launch: resolved, sameTicker, canonical } = resolveLaunchSlug(slug, board);
 
   /*
    * One launch, one URL. `/launch/7` and `/launch/injinu` both land on
    * `/launch/INJINU`: serving the same page at three addresses splits its search
-   * ranking and makes a shared link look unlike the one in the address bar. A
-   * permanent redirect is right because the canonical form does not change back.
+   * ranking and makes a shared link look unlike the one in the address bar.
    */
   /*
-   * TEMPORARY (307), not permanent, and that is deliberate. Which slug is canonical
-   * depends on the board: `/launch/INJINU` is canonical until a second creator uses
-   * the ticker, at which point `/launch/INJINU-1` becomes canonical instead. A 308 is
-   * cached by browsers for ever, so it would promise something this page cannot keep.
-   * `rel="canonical"` in the metadata is what tells a crawler which form to index.
+   * TEMPORARY (307), not permanent. This used to say the reason was that a canonical
+   * slug changes when someone copies the ticker, and since F-17 that is no longer
+   * true: the first launch keeps the plain form for ever and a later one carries its
+   * suffix from the moment it exists, so a launch's canonical slug is now fixed. The
+   * redirect stays temporary anyway, because a 308 is cached by a browser
+   * indefinitely and is unrecoverable if it is ever wrong, while the cost of 307 is
+   * one extra hop on a legacy or hand-typed URL. `rel="canonical"` in the metadata is
+   * what tells a crawler which form to index, and that is the half that matters.
    */
   if (resolved && canonical) redirect(pathForSlug(canonical));
-
-  /*
-   * A ticker two creators both used. The page lists them instead of choosing: sending
-   * someone to a different token than the one they were linked to is the worst thing
-   * a launchpad can do with a URL, and it would look like it worked.
-   */
-  if (!resolved && candidates.length > 1) {
-    return (
-      <div className="empty">
-        <h1>{symbolOf(candidates[0].denom)}</h1>
-        <p>
-          More than one launch uses this ticker. A ticker is not unique on Injective,
-          so pick the one you meant.
-        </p>
-        <ul className="plain-list" style={{ marginTop: 'var(--space-4)' }}>
-          {candidates.map((c) => (
-            <li key={c.id}>
-              <Link href={launchPath(c, board)}>
-                {symbolOf(c.denom)} by {short(c.creator)}
-              </Link>
-            </li>
-          ))}
-        </ul>
-      </div>
-    );
-  }
 
   if (!resolved) notFound();
 
@@ -290,6 +265,12 @@ export default async function LaunchPage({ params }: { params: Promise<{ slug: s
     launch.curve,
   );
   const symbol = symbolOf(detail.denom);
+  /*
+   * Whether this is the launch that named the ticker. Read off `sameTicker` rather
+   * than recomputed, so the sentence below and the slug in the address bar cannot
+   * disagree about which launch came first.
+   */
+  const firstOfTicker = !sameTicker.some((o) => o.id < launch.id);
   // Only the links that survive the scheme allowlist, so nothing hostile reaches an
   // href even if the chain the UI is pointed at never checked them.
   const links = visibleLinks(launch.profile);
@@ -371,6 +352,43 @@ export default async function LaunchPage({ params }: { params: Promise<{ slug: s
           </div>
         </div>
       </div>
+      {/*
+          A TICKER IS NOT UNIQUE AND THE PAGE HAS TO SAY SO. Audit F-17, and the half
+          worth keeping from what it replaced: the old disambiguation page offered two
+          identically-named entries and asked the reader to pick, which told them
+          nothing they could act on and only appeared on the plain URL. This appears
+          on whichever launch was resolved, including the copy, which is the reader
+          who most needs it, and it says which one came first instead of asking.
+
+          Placed above the code check because it is a question about identity: the
+          contract can be exactly the published one and the token still not be the
+          one somebody meant to buy.
+        */}
+      {sameTicker.length > 0 && (
+        <div className="card" style={{ marginBottom: 'var(--space-4)' }}>
+          <h2 className="warn-text">
+            {firstOfTicker
+              ? `Another token is also called ${symbol}`
+              : `This is not the first token called ${symbol}`}
+          </h2>
+          <p className="note">
+            {firstOfTicker
+              ? `This is the earliest launch to use the ticker ${symbol}, and it keeps the plain link. `
+              : `An earlier launch already used the ticker ${symbol}. `}
+            Anyone can create a token with any ticker on Injective, so the name is not
+            an identity. Check the denom above and the creator before you buy.
+          </p>
+          <ul className="plain-list" style={{ marginTop: 'var(--space-3)' }}>
+            {sameTicker.map((c) => (
+              <li key={c.id}>
+                <Link href={launchPath(c, board)}>
+                  {symbolOf(c.denom)} by {short(c.creator)}
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       <TrustBadges status={codeStatus} migrated={detail.migrated} demo={isDemoMode()} />
       <CodeCheck status={codeStatus} curve={launch.curve} />
 

@@ -12,10 +12,13 @@
  *
  *  - `resolveLaunchSlug` matches against the list it is handed, so launch 51's page
  *    404s at the URL the product itself generates for it.
- *  - `launchSlug` appends an id only when it can see a clash in that same list, so a
- *    later launch reusing an earlier ticker stays invisible and `/launch/INJINU`
- *    quietly serves the older token - which `launchPath.ts` calls "the worst
- *    available outcome", in the guard this truncation defeats.
+ *  - `launchSlug` appended an id whenever it could see any other launch with the same
+ *    ticker, so a later launch reusing an earlier ticker stayed invisible and
+ *    `/launch/INJINU` quietly served the older token. Audit F-17 made serving the
+ *    older token the intended answer and narrowed the check to launches with a LOWER
+ *    id, which truncation keeps, so this one is no longer a wrong link. The exposure
+ *    comes back with the next change to the slug rule, which is why it stays written
+ *    down here.
  *  - `ClaimFees` would tell a creator there is nothing to claim on a launch they are
  *    owed fees from.
  *  - Analytics renders the count as "Launches" under a promise that every figure is
