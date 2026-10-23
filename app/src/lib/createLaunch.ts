@@ -142,6 +142,32 @@ export function denomFor(creator: string, symbol: string): string {
 }
 
 /**
+ * Whether this wallet has already created this ticker, or `null` when unread.
+ *
+ * Here rather than inside the component so the comparison can be exercised, because
+ * the two things it has to get right are both invisible at a glance.
+ *
+ *  - A DENOM IS CASE SENSITIVE. `factory/<creator>/GHDSJS` and
+ *    `factory/<creator>/ghdsjs` are two denoms, and the chain will create the second
+ *    after the first, so the comparison is on the exact string `MsgCreateDenom` will
+ *    carry. Case-folding here would refuse a launch the chain would accept, which is
+ *    the one failure direction a pre-check like this must not have.
+ *  - `null` IS NOT `false`. An unread list says nothing about whether a name is free,
+ *    so it must not reassure; and it must not block either, because the five messages
+ *    are one transaction and being wrong about a free ticker still creates nothing,
+ *    while being wrong about a taken one strands a creator behind an outage of ours.
+ */
+export function tickerAlreadyUsed(
+  created: string[] | null,
+  creator: string | null,
+  symbol: string,
+): boolean | null {
+  const ticker = symbol.trim();
+  if (created === null || creator === null || ticker === '') return null;
+  return created.includes(denomFor(creator, ticker));
+}
+
+/**
  * Everything the form must get right, refused one reason at a time.
  *
  * Ordered so the first failure is the one a user can act on: a bad ticker before

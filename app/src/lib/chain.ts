@@ -673,6 +673,47 @@ export async function denomAuthority(denom: string): Promise<string | null> {
   }
 }
 
+/**
+ * Every tokenfactory denom an address has already created, or `null` when unread.
+ *
+ * WHY NOT `denomAuthority`. The obvious way to ask whether a denom exists is to read
+ * its authority metadata, and that route cannot answer the question. Measured on
+ * testnet, 23 Oct 2026:
+ *
+ *     factory/inj1fhq…742p/AUDLAB7               200  admin inj13n7z…3llk
+ *     factory/inj1fhq…742p/NOPETHISDOESNOTEXIST  200  admin ""
+ *     factory/inj1u35…tk8/AUDLAB7                200  admin ""
+ *
+ * A denom that was never created and one whose admin has been cleared are the same
+ * 200 with the same body. Our own launches CLEAR NOTHING - the admin ends up as the
+ * curve - but reading existence off an empty admin would be a 200 taken for an
+ * answer, which is the failure this codebase keeps finding.
+ *
+ * `denoms_from_creator` answers it directly and distinguishes empty from populated.
+ * It takes no pagination parameters, so there is no prefix to mistake for the whole
+ * list; and if it ever truncated, the failure direction is safe. A name missing from
+ * the list is offered and then refused by the chain, which is exactly today's
+ * behaviour. A name PRESENT in the list cannot be a false positive, because its
+ * being there is the denom existing.
+ */
+export async function denomsFromCreator(creator: string): Promise<string[] | null> {
+  if (isDemoMode()) return [];
+  try {
+    const res = await fetch(
+      `${getLcdUrl()}/injective/tokenfactory/v1beta1/denoms_from_creator/${encodeURIComponent(creator)}`,
+      { headers: { accept: 'application/json' } },
+    );
+    if (!res.ok) return null;
+    const json = (await res.json()) as { denoms?: unknown };
+    // An absent or wrongly shaped field is unread, never an empty list: "this address
+    // has created nothing" is the answer that makes a taken ticker look free.
+    if (!Array.isArray(json.denoms)) return null;
+    return json.denoms.filter((d): d is string => typeof d === 'string');
+  } catch {
+    return null;
+  }
+}
+
 /** Short display form for an address. */
 export function short(addr: string, keep = 6): string {
   if (addr.length <= keep * 2 + 3) return addr;

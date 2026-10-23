@@ -4,11 +4,18 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { LogoUpload } from './LogoUpload';
 import { LaunchPreview } from './LaunchPreview';
-import { listQuotes, denomLabel, quoteLabel as quoteLabelOf, type QuoteAsset } from '@/lib/chain';
+import {
+  listQuotes,
+  denomLabel,
+  denomsFromCreator,
+  quoteLabel as quoteLabelOf,
+  type QuoteAsset,
+} from '@/lib/chain';
 import { CurveChart } from './CurveChart';
 import {
   planLaunch,
   describePlan,
+  tickerAlreadyUsed,
   LaunchInputError,
   type LaunchPlan,
 } from '@/lib/createLaunch';
@@ -216,6 +223,8 @@ export function CreateLaunch() {
   }, []);
   const [confirmed, setConfirmed] = useState(false);
   const [busy, setBusy] = useState(false);
+  /** The ticker this session has already launched, which must not be launched again. */
+  const [createdSymbol, setCreatedSymbol] = useState<string | null>(null);
   const tx = useTxFlow();
 
   const set = (k: keyof typeof DEFAULTS) => (v: string) => setF((p) => ({ ...p, [k]: v }));
@@ -392,6 +401,39 @@ export function CreateLaunch() {
   );
   const affordable = launchAffordable(gasBalance, cost);
 
+  /*
+   * THE OTHER HALF OF F-05: a ticker this wallet has already used cannot be launched
+   * again, and the chain is the only thing that knows. The session latch below covers
+   * a second click; this covers a reload, a second tab, and a ticker launched days
+   * ago, which the latch cannot see.
+   *
+   * The comparison itself lives in `tickerAlreadyUsed`, with the case sensitivity and
+   * the unread case explained there, because a denom is compared byte for byte and
+   * `null` is not `false` - two things that are invisible when read inline here.
+   */
+  const [mine, setMine] = useState<string[] | null>(null);
+  useEffect(() => {
+    if (!account) {
+      setMine(null);
+      return;
+    }
+    let live = true;
+    void denomsFromCreator(account.address).then((d) => {
+      if (live) setMine(d);
+    });
+    return () => {
+      live = false;
+    };
+  }, [account, createdSymbol]);
+  const tickerTaken = tickerAlreadyUsed(mine, account?.address ?? null, f.symbol);
+  /*
+   * Either reason is enough, and they are one disable so no path forgets the other.
+   * `tickerTaken === true` only: see the null case above.
+   */
+  const alreadyLaunched =
+    tickerTaken === true ||
+    (createdSymbol !== null && createdSymbol === f.symbol.trim());
+
   const plan = useMemo((): { plan: LaunchPlan } | { error: string; field?: string } | null => {
     if ('error' in built) return { error: built.error };
     if (!account) return null;
@@ -485,7 +527,24 @@ export function CreateLaunch() {
        * refresh is what makes the new launch appear, so it must follow the launch
        * existing rather than the signature happening.
        */
-      if (landed) router.refresh();
+      /*
+       * LATCHED ON THE TICKER THAT LANDED, so the same launch cannot be sent twice.
+       *
+       * `setBusy(false)` re-armed the button over an unchanged form, and audit F-05
+       * caught someone using it: block 143426568 created `ghdsjs`, and eight seconds
+       * later block 143426582 ran the same call and failed. The denom already
+       * existed, so the second transaction could only ever burn gas, and the chain's
+       * refusal is what the creator saw.
+       *
+       * Keyed on the symbol rather than a bare boolean because a creator launching a
+       * SECOND, different token is doing something legitimate: editing the ticker
+       * releases the latch, repeating one does not. It also survives the denom read
+       * below being unreachable, which is the point of having both.
+       */
+      if (landed) {
+        setCreatedSymbol(f.symbol.trim());
+        router.refresh();
+      }
     } finally {
       setBusy(false);
     }
@@ -1257,30 +1316,56 @@ export function CreateLaunch() {
               </p>
             )}
 
+            {alreadyLaunched && (
+              /*
+               * Named before the button is reached, because a disabled button with no
+               * reason reads as the page being broken. Which of the two reasons it is
+               * matters to the creator: one is "you just did this", the other is "this
+               * wallet did this at some point", and the second is the one that needs a
+               * new ticker rather than a reload.
+               */
+              <p className="note warn-text">
+                {createdSymbol !== null && createdSymbol === f.symbol.trim()
+                  ? `${f.symbol.trim()} was just created from this wallet. Change the ticker to launch another token: sending this one again would be refused by the chain and the gas would be spent.`
+                  : `This wallet has already created ${f.symbol.trim()}. A ticker can only be used once per wallet, so pick another one.`}
+              </p>
+            )}
+
             <button
               className="go"
-              disabled={!confirmed || busy || affordable === false}
+              disabled={!confirmed || busy || affordable === false || alreadyLaunched}
               onClick={() => void sign()}
             >
-              {busy ? 'Waiting for your wallet…' : `Create ${f.symbol.trim() || 'launch'}`}
+              {busy
+                ? 'Waiting for your wallet…'
+                : alreadyLaunched
+                  ? `${f.symbol.trim()} already exists`
+                  : `Create ${f.symbol.trim() || 'launch'}`}
             </button>
 
             <TxDialog flow={tx} />
 
             {/*
-                THE HONEST LABEL, and it is not a disclaimer to delete once this looks
-                like it works. The messages are built by a tested function and shown
-                above exactly as they will be sent, but the ENCODING has never run
-                against a node, and I cannot run it: that needs a wallet extension.
-                What makes it safe to offer anyway is that all five messages are one
-                transaction, so a mis-built launch is a rejected transaction rather
-                than a denom created with no curve behind it, and the factory refuses
-                any attached amount but the exact supply.
+                THE LABEL WAS HONEST AND THEN IT WAS NOT, which is the subtler half of
+                audit F-10. It said "this signing path has not yet been run against a
+                chain", written when the encoding had never left a unit test and I
+                could not run it, since that needs a wallet extension. It has been run
+                since: the audit's own F-05 evidence is two create transactions in
+                testnet blocks 143426568 and 143426582, the first of which created a
+                launch. A caution that has stopped being true costs the same as a
+                missing one, because the next true caution reads like this one.
+
+                What has NOT been exercised is mainnet, so that is what the caution is
+                scoped to now, and it is scoped by the network the build is pointed at
+                rather than by a flag somebody has to remember to clear. The structural
+                reassurance is unchanged and is why this was safe to offer either way:
+                all five messages are one transaction, so a mis-built launch is a
+                refused transaction rather than a denom with no curve behind it.
               */}
             <p className="note">
-              This signing path has not yet been run against a chain. All five messages
-              go in a single transaction, so if anything is wrong the chain refuses the
-              whole thing and nothing is created. Try it on testnet first.
+              {NETWORK.name === 'mainnet'
+                ? 'This signing path has been exercised on testnet and not yet on mainnet. All five messages go in a single transaction, so if anything is wrong the chain refuses the whole thing and nothing is created.'
+                : 'All five messages go in a single transaction, so if anything is wrong the chain refuses the whole thing and nothing is created.'}
             </p>
           </>
         )}
