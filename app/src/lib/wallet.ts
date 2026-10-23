@@ -291,6 +291,91 @@ export async function reconnect(): Promise<WalletAccount | null> {
   }
 }
 
+/**
+ * Which account the connected extension is on NOW, re-read from that extension.
+ *
+ * THE ADDRESS WAS READ ONCE AT CONNECT AND NEVER AGAIN. Switching account inside the
+ * wallet left every screen describing the account the user had just left: the header
+ * balance, the portfolio, a creator's claimable fees, the opening-buy cap, the "already
+ * created" check on the create page. A holder reading their own position was reading
+ * somebody else's, with nothing on the page saying so, which is the one failure a
+ * balance must not have. Audit F-18.
+ *
+ * Re-read from `account.provider`, not from `window.keplr`. Five wallets are offered
+ * and a browser can have several installed, so looking the extension up again would
+ * answer about whichever one is there rather than the one the user chose - the same
+ * reason `WalletAccount` carries the provider at all.
+ *
+ * THE RETURN IS THREE-WAY and the identity matters.
+ *
+ *  - The SAME object when the address has not changed. A keystore event fires for
+ *    renaming an account and for approving a chain too, and a fresh object would
+ *    re-fire every effect keyed on `account`: balances, the purchased-so-far read,
+ *    and whatever else is keyed on it later. Unchanged has to be indistinguishable
+ *    from no event at all.
+ *  - A NEW object carrying the new address when it has changed.
+ *  - `null` when the extension will not answer, which is a locked wallet or a revoked
+ *    approval, and when it answers with an address that is not Injective's. Both mean
+ *    the session is over, and showing a non-`inj1` address as the connected account is
+ *    the wrong-prefix hazard `finishConnect` already refuses at connect time.
+ */
+export async function currentAccount(account: WalletAccount): Promise<WalletAccount | null> {
+  const ext = account.provider as InjectedWallet | undefined;
+  /*
+   * A provider that cannot be asked is reported as unchanged rather than as a
+   * disconnect. Every connected account came through `finishConnect`, which calls
+   * `getKey`, so this cannot happen for one of ours - and inventing a disconnect from
+   * an unrecognised shape would log someone out of a working session.
+   */
+  if (!ext || typeof ext.getKey !== 'function') return account;
+  let next: string;
+  try {
+    next = (await ext.getKey(NETWORK.chainId)).bech32Address;
+  } catch {
+    return null;
+  }
+  if (!/^inj1[0-9a-z]{38,}$/.test(next)) return null;
+  return next === account.address ? account : { ...account, address: next };
+}
+
+/**
+ * Every event name a wallet announces an account switch with, plus the two that catch
+ * the ones that announce nothing.
+ *
+ * The event names cannot all be verified from here - there are five wallets and no way
+ * to drive their extensions from a test - so they are the fast path rather than the
+ * mechanism. `focus` and `visibilitychange` are the mechanism: switching account
+ * happens in an extension popup or another tab, so coming back to the page is the one
+ * thing that always happens afterwards, whatever the wallet chose to emit. A wallet
+ * whose event name is wrong here still updates the moment the user looks at the page.
+ *
+ * The re-read behind this is one local call into the extension and makes no network
+ * request, so firing it on focus costs nothing worth saving.
+ */
+const KEYSTORE_EVENTS = [
+  'keplr_keystorechange',
+  'leap_keystorechange',
+  'cosmostation_keystorechange',
+  'owallet_keystorechange',
+  'ninji_keystorechange',
+] as const;
+
+/** Binds the listeners above and returns the unbind. */
+export function onAccountChange(cb: () => void): () => void {
+  if (typeof window === 'undefined') return () => {};
+  const onVisible = () => {
+    if (document.visibilityState === 'visible') cb();
+  };
+  for (const name of KEYSTORE_EVENTS) window.addEventListener(name, cb);
+  window.addEventListener('focus', cb);
+  document.addEventListener('visibilitychange', onVisible);
+  return () => {
+    for (const name of KEYSTORE_EVENTS) window.removeEventListener(name, cb);
+    window.removeEventListener('focus', cb);
+    document.removeEventListener('visibilitychange', onVisible);
+  };
+}
+
 export async function connect(name: WalletName): Promise<WalletAccount> {
   const ext = injected(name);
   if (!ext) {

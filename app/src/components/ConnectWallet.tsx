@@ -4,6 +4,8 @@ import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import {
   available,
   connect,
+  currentAccount,
+  onAccountChange,
   reconnect,
   rememberWallet,
   quoteBalance,
@@ -136,6 +138,45 @@ export function ConnectWallet({
       live = false;
     };
   }, []);
+
+  /*
+   * FOLLOW THE WALLET WHEN IT SWITCHES ACCOUNT. Audit F-18: the address was read once
+   * at connect and never again, so switching inside the extension left every screen
+   * describing the account the user had just left, with nothing saying so.
+   *
+   * `currentAccount` returns the SAME object when nothing changed, so `setAccount` is a
+   * no-op for React and the effects keyed on `account` below do not re-fire. That
+   * matters because this is bound to `focus` as well as to the wallets' own events, for
+   * the reason given on `KEYSTORE_EVENTS`, and a new object per focus would re-request
+   * balances and the purchased-so-far read every time the user clicked back into the
+   * window.
+   *
+   * Coalesced on a ref rather than on state: focus and a keystore event arrive together
+   * when the user comes back from the popup, and two overlapping reads could land out of
+   * order and set the older answer.
+   */
+  const rereading = useRef(false);
+  useEffect(() => {
+    if (!account) return;
+    const check = () => {
+      if (rereading.current) return;
+      rereading.current = true;
+      void currentAccount(account)
+        .then((a) => {
+          /*
+           * `null` is a locked wallet or a revoked approval, which is a disconnect and
+           * has to be shown as one. The remembered wallet NAME is deliberately kept:
+           * this is not the user pressing Disconnect, it is the extension locking, and
+           * forgetting the name would stop the next reload restoring the session.
+           */
+          setAccount(a);
+        })
+        .finally(() => {
+          rereading.current = false;
+        });
+    };
+    return onAccountChange(check);
+  }, [account]);
 
   useEffect(() => {
     onAccount?.(account);

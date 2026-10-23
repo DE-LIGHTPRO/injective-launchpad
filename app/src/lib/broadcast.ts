@@ -49,7 +49,13 @@ import {
  */
 
 export class BroadcastError extends Error {
-  readonly kind: 'no-signer' | 'rejected' | 'account' | 'simulate' | 'broadcast';
+  readonly kind:
+    | 'no-signer'
+    | 'rejected'
+    | 'account'
+    | 'wrong-account'
+    | 'simulate'
+    | 'broadcast';
   /** The node's own words, kept for a developer and never shown raw to a user. */
   readonly detail?: string;
   constructor(kind: BroadcastError['kind'], message: string, detail?: string) {
@@ -286,7 +292,7 @@ interface InjectedSigner {
       signature: { signature: string };
     }>;
   };
-  getKey: (chainId: string) => Promise<{ pubKey: Uint8Array }>;
+  getKey: (chainId: string) => Promise<{ pubKey: Uint8Array; bech32Address: string }>;
 }
 
 /**
@@ -362,6 +368,32 @@ async function signAndBroadcast(opts: {
   }
 
   const key = await signer.getKey(NETWORK.chainId);
+
+  /*
+   * THE OTHER HALF OF F-18, and it is the half that reaches a prompt. The messages,
+   * the sender and the sequence are all built for `opts.sender`, the address the page
+   * was showing; `key` is read from the extension HERE, at signing time. If the user
+   * switched account in the wallet after the trade was prepared, those are two
+   * different accounts, and this would carry one account's pubkey in the other's
+   * authInfo, ask the extension to sign for an address it is no longer on, and lose
+   * whichever way it went: refused by the wallet, or refused by the chain's signature
+   * verification after the user had already approved it.
+   *
+   * No funds are at risk either way - a transaction that fails verification never
+   * enters a block, so it costs no gas - and that is exactly why this is worth
+   * refusing rather than attempting. What it costs is a prompt the user approves and
+   * an error they cannot explain, about an account they can no longer see on the page.
+   * The listener in `ConnectWallet` makes this rare; it cannot make it impossible,
+   * because the switch can happen between the quote and the click.
+   */
+  if (key.bech32Address !== opts.sender) {
+    throw new BroadcastError(
+      'wrong-account',
+      'Your wallet has switched to a different account since this was prepared. Nothing was signed. Check the address in the header and try again.',
+      `prepared for ${opts.sender}, wallet is on ${key.bech32Address}`,
+    );
+  }
+
   const msgs = opts.msgs;
 
   // Account number and sequence come from the chain, never from memory: a stale
