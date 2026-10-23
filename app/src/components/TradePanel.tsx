@@ -14,6 +14,7 @@ import {
   poolBuyImpactBps,
   poolSellImpactBps,
   parseAmount,
+  effectiveFeeBps,
   fmt,
   CurveError,
   type CurveConfig,
@@ -249,11 +250,12 @@ export function TradePanel({
    */
   const baseBps = Number(config.feeBps);
   /*
-   * The exit rate, which the opening premium never touches: the premium is a charge for
-   * taking the opening, and the contract applies it on the buy side only. It does not
-   * expire at graduation either, so it is the same number on both venues.
+   * The exit rate is not read here any more. It reached the screen as a label beside
+   * an amount it was meant to describe, and both sides of that row now come from the
+   * amounts themselves: `config.feeSellBps` goes into the quote, and the rate shown
+   * is measured back out of it. The premium never touches the sell side, which is why
+   * there was nothing to compose and nothing that drifted.
    */
-  const sellBps = Number(config.feeSellBps);
   // Launch-window rules expire with the curve: the pool charges its base fee only.
   const chargedBps = inPool ? baseBps : feeBpsAt(rules, baseBps, now);
   const premiumBps = Math.max(0, chargedBps - baseBps);
@@ -335,6 +337,26 @@ export function TradePanel({
       } as const;
     }
   }, [input, side, config, state, premiumBps, inputDecimals, inPool, pool]);
+
+  /*
+   * The fee row's two halves, derived from ONE place so they cannot disagree.
+   *
+   * The label read `chargedBps`, the sum of the opening premium and the curve's fee,
+   * above an amount produced by applying them in sequence: 4.45% beside 0.004415 INJ
+   * on a 0.1 INJ buy, which is 4.4155%. See `effectiveFeeBps`, where the arithmetic
+   * and the reason live, out of the component as the premium basis already is.
+   */
+  const okQuote = quote && quote.ok ? quote : null;
+  const feeCharged =
+    okQuote === null
+      ? null
+      : okQuote.side === 'buy'
+        ? okQuote.fee + (okQuote.earlyFeePremium ?? 0n)
+        : okQuote.fee;
+  const feeChargedBps =
+    okQuote === null || feeCharged === null
+      ? null
+      : effectiveFeeBps(feeCharged, okQuote.side === 'buy' ? okQuote.injInAfterFee : okQuote.injOut);
 
   /**
    * Send the trade.
@@ -645,18 +667,16 @@ export function TradePanel({
           </div>
           <div className="metric-row">
             <span className={premiumBps > 0 && quote.side === 'buy' ? 'k warn-text' : 'k'}>
-              {/* An exit's rate is the sell fee. This read `baseBps`, the BUY fee, so
-                  a launch with 1% entry and 10% exit labelled the row "Fee · 1%"
+              {/* Read off the amount beside it, not off a bps constant. It read
+                  `chargedBps` during an opening window, the sum of two rates charged
+                  in sequence, so the percent was 4.45% above an amount that was
+                  4.4155% of the spend. Before that it read `baseBps` on both sides,
+                  so a launch with 1% entry and 10% exit labelled the row "Fee · 1%"
                   above a figure that was 10% of the gross. */}
-              Fee · {(quote.side === 'buy' ? chargedBps : sellBps) / 100}%
+              Fee{feeChargedBps === null ? '' : ` · ${(feeChargedBps / 100).toFixed(2)}%`}
             </span>
             <span className={premiumBps > 0 && quote.side === 'buy' ? 'v mono warn-text' : 'v mono'}>
-              {fmt(
-                quote.side === 'buy' ? quote.fee + (quote.earlyFeePremium ?? 0n) : quote.fee,
-                quoteAsset.decimals,
-                6,
-              )}{' '}
-              {quoteAsset.label}
+              {fmt(feeCharged ?? 0n, quoteAsset.decimals, 6)} {quoteAsset.label}
             </span>
           </div>
           {premiumBps > 0 && quote.side === 'buy' && decaySecondsLeft !== null && (
@@ -666,9 +686,18 @@ export function TradePanel({
              * premium goes into the pool at graduation. The countdown is the point of
              * the rule, so it is shown rather than buried in the rules panel.
              */
+            /*
+             * AND IT MUST NOT INVITE THE ADDITION THE ROW ABOVE NO LONGER MAKES.
+             * This read "3.45% above the curve's 1.00%", two rates a reader adds to
+             * 4.45%, which is the figure the fee row was corrected away from. The
+             * premium is taken first and the curve's fee is charged on what is left,
+             * so the sequence is stated and the combined rate is pointed at rather
+             * than restated here, where a third copy of it could drift.
+             */
             <p className="note warn-text">
-              Opening fee: {(premiumBps / 100).toFixed(2)}% above the curve&rsquo;s{' '}
-              {(baseBps / 100).toFixed(2)}%, falling to it in{' '}
+              Opening fee: {(premiumBps / 100).toFixed(2)}% comes off first, then the
+              curve&rsquo;s {(baseBps / 100).toFixed(2)}% on what is left, which is the
+              combined rate above. It falls to the curve&rsquo;s own fee in{' '}
               {decaySecondsLeft >= 60
                 ? `${Math.ceil(decaySecondsLeft / 60)} min`
                 : `${decaySecondsLeft}s`}

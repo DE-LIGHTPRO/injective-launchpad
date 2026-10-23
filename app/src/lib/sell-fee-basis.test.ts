@@ -46,6 +46,7 @@ import {
   quoteBuy,
   quoteSell,
   poolQuoteSell,
+  effectiveFeeBps,
   validate,
   CurveError,
   type CurveConfig,
@@ -216,16 +217,36 @@ test('the panel labels and prices an exit at the sell rate', () => {
    * `fee-ceiling-claims.test.ts`).
    */
   const tsx = maskComments(readFileSync(PANEL, 'utf8'));
+  /*
+   * THIS PINNED THE OLD REMEDY AND NOT THE CLAIM. It asserted two literals,
+   * `const sellBps = Number(config.feeSellBps)` and the ternary that chose between
+   * the two constants, which is one correct way to label the row and not the only
+   * one. Audit F-11 then found the buy side of that same ternary wrong for a
+   * different reason - `chargedBps` is the SUM of the opening premium and the curve's
+   * fee, where the amount beside it is the two applied in sequence - and the fix is
+   * to measure the rate out of the amount for both sides. These assertions failed on
+   * that fix while the claim they exist to defend held, so they now assert the claim:
+   * the exit's rate comes from the exit's own numbers.
+   */
   assert.match(
     tsx,
-    /const sellBps = Number\(config\.feeSellBps\)/,
-    'the panel no longer derives an exit rate from the sell fee',
+    /effectiveFeeBps\(\s*feeCharged,[\s\S]*?okQuote\.injOut/,
+    'the fee row no longer measures an exit rate out of the exit quote',
   );
-  assert.match(
-    tsx,
-    /quote\.side === 'buy' \? chargedBps : sellBps/,
-    'the fee row no longer labels an exit at the sell rate',
+  assert.ok(
+    !/\bsellBps\b/.test(tsx),
+    'a separate exit-rate constant is back, and a second copy of a rate is what drifted',
   );
+  /*
+   * The behavioural half, which the literals never covered: a 10% exit on a launch
+   * whose entry is free has to read 10%, and reading it off the amount is what makes
+   * that true without the panel naming a rate at all.
+   */
+  const { st, tokens } = warm(ASYMMETRIC, 50n * ONE);
+  const s = quoteSell(ASYMMETRIC, st, tokens / 2n);
+  const bps = effectiveFeeBps(s.fee, s.injOut);
+  assert.ok(bps !== null, 'an exit with proceeds behind it has a rate');
+  assert.equal((bps / 100).toFixed(2), '10.00', 'the exit rate is not the sell fee');
   assert.match(
     tsx,
     /poolQuoteSell\(pool, config\.feeSellBps/,

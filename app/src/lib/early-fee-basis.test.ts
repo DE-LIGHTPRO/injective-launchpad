@@ -35,7 +35,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { quoteBuy, quoteBuyWithPremium, type CurveConfig, type CurveState } from './curve.ts';
+import {
+  quoteBuy,
+  quoteBuyWithPremium,
+  effectiveFeeBps,
+  fmt,
+  type CurveConfig,
+  type CurveState,
+} from './curve.ts';
 import { maskComments } from './testing/maskComments.ts';
 
 const SRC = join(import.meta.dirname, '..');
@@ -201,6 +208,93 @@ test('the contract still charges the premium on what is spent', () => {
     /let total_refund = q\.refund\.checked_add\(carried_refund\)\?;/,
     'the contract no longer carries the first quote\u2019s refund',
   );
+});
+
+/**
+ * THE SECOND HALF OF THE SAME DEFECT, found by the external audit of 19 Oct 2026 and
+ * recorded as F-11: once the panel quoted the premium correctly, it still LABELLED
+ * the result with the sum of the two rates. "Fee 4.45 percent" above 0.004415 INJ on
+ * a 0.1 INJ buy, which is 4.4155 percent.
+ *
+ * Neither number was wrong about its own basis, which is why neither looked wrong.
+ * The premium comes off the top and the curve's fee is charged on what is left, so
+ * the rates compose rather than add.
+ */
+test('the fee rate is measured out of the amount, not added up from two rates', () => {
+  const spend = ONE / 10n; // 0.1, the audit's figure.
+  // A 4.45% charged rate over a 1% curve fee, which is a 3.45% premium.
+  const q = quoteBuyWithPremium(CFG, FRESH, spend, 345n);
+  const charged = q.fee + q.earlyFeePremium;
+
+  // The audit's measurement, to the digit it reported.
+  assert.equal(fmt(charged, 18, 6), '0.004415', 'the charged amount is no longer the audit\u2019s');
+
+  const bps = effectiveFeeBps(charged, q.injInAfterFee);
+  assert.ok(bps !== null, 'a fee with a basis behind it has a rate');
+  assert.equal((bps / 100).toFixed(2), '4.42', 'the rate shown is not the rate charged');
+
+  /*
+   * And the figure the panel used to print, asserted as WRONG rather than merely
+   * absent, so restoring it fails here instead of passing quietly.
+   */
+  assert.notEqual((bps / 100).toFixed(2), '4.45', 'the sum of the two rates is back');
+  assert.ok(bps < 445, 'composing two rates cannot cost more than adding them');
+});
+
+test('a buy with no premium still reads as the curve\u2019s own fee', () => {
+  /*
+   * The derived rate has to agree with the constant wherever there is nothing to
+   * compose, or the fix would have traded one wrong label for a noisier one. The
+   * contract floors the fee, so the raw bps lands just under 100 and the two decimal
+   * places it is shown to are what make them equal.
+   */
+  const q = quoteBuyWithPremium(CFG, FRESH, 3n * ONE, 0n);
+  const bps = effectiveFeeBps(q.fee + q.earlyFeePremium, q.injInAfterFee);
+  assert.ok(bps !== null);
+  assert.equal((bps / 100).toFixed(2), '1.00');
+  assert.ok(bps <= 100, 'a floored fee cannot exceed its own rate');
+});
+
+test('a fee with no basis behind it has no rate, never a zero', () => {
+  // Rule: a figure is measured or it is unknown. 0% would be a claim about a trade
+  // that was never priced, and the row renders the bare word "Fee" instead.
+  assert.equal(effectiveFeeBps(0n, 0n), null);
+  assert.equal(effectiveFeeBps(-1n, ONE), null);
+  assert.equal(effectiveFeeBps(ONE, -1n), null);
+  // A free venue is a measurement, so it is 0 bps rather than null.
+  assert.equal(effectiveFeeBps(0n, ONE), 0);
+});
+
+test('the panel reads the rate off the amount it prints', () => {
+  /*
+   * REGISTRATION IS NOT WIRING. `effectiveFeeBps` could exist, pass everything above,
+   * and the row could keep printing `chargedBps`: the helper's own tests cannot see
+   * the label. Caught by mutation, so asserted at the source, the same way the
+   * premium basis above it is.
+   */
+  const panel = maskComments(readFileSync(join(SRC, 'components', 'TradePanel.tsx'), 'utf8'));
+  assert.match(panel, /effectiveFeeBps\s*\(/, 'the panel no longer derives the rate it shows');
+  // The label itself, not merely the derivation above it: the helper could be called
+  // and its result ignored, which is the shape a mutation found.
+  assert.match(
+    panel,
+    /feeChargedBps\s*\/\s*100\)\.toFixed\(2\)/,
+    'the fee row is labelled from something other than the rate measured off its amount',
+  );
+  assert.ok(
+    !/\bchargedBps\s*\/\s*100/.test(panel),
+    'the summed rate is rendered again, and it is the figure F-11 reported',
+  );
+  /*
+   * And the note underneath must not restate the sum the row was corrected away
+   * from. It said "3.45% above the curve's 1.00%", which a reader adds to 4.45%:
+   * the right figure, in the wrong place, is the same disclosure defect.
+   */
+  assert.ok(
+    !/%\s*above the curve/.test(panel),
+    'the opening-fee note invites the addition again',
+  );
+  assert.match(panel, /comes off first, then the/, 'the note no longer states the sequence');
 });
 
 test('the panel does not do its own premium arithmetic', () => {

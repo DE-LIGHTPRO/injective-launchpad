@@ -248,6 +248,41 @@ export function quoteBuyWithPremium(
   return { ...q, refund: q.refund + probe.refund, earlyFeePremium: premium };
 }
 
+/**
+ * What the fee actually came to, in basis points of the amount it was taken from.
+ *
+ * THE RATE AND THE AMOUNT DISAGREED, and each was right about its own basis. During
+ * an opening window the panel labelled the fee row with `chargedBps`, the SUM of the
+ * two rates, while the figure beside it was the result of applying them in sequence:
+ * the premium comes off the top and the curve's own fee is then charged on what is
+ * left, so a 3.45% premium over a 1% fee costs 3.45% + 1% x 96.55% = 4.4155%, not
+ * 4.45%. Measured on AUDLAB7 by the external audit: "Fee 4.45 percent" above
+ * 0.004415 INJ on a 0.1 INJ buy.
+ *
+ * So the rate is derived from the two amounts rather than from the rates that
+ * produced them. That is the stronger form of the fix: the sum is wrong only while a
+ * premium is running, but a rate read off a bps constant is an assertion about the
+ * arithmetic rather than a measurement of it, and the next composition would be
+ * wrong the same way.
+ *
+ * `afterFee` is what the basis became once the fee was taken, so the basis is the
+ * two added: gross quote in on a buy, gross proceeds on a sell. Passing the basis
+ * directly would let a caller hand in `injIn`, which on a partial fill includes a
+ * refund the fee was never charged on.
+ *
+ * Returns a fractional bps, because two decimal places of a percent is one hundredth
+ * of a bps, and `null` where there is no basis to measure against: a fee with nothing
+ * behind it has no rate, and zero would be a claim.
+ */
+export function effectiveFeeBps(totalFee: bigint, afterFee: bigint): number | null {
+  if (totalFee < 0n || afterFee < 0n) return null;
+  const basis = totalFee + afterFee;
+  if (basis <= 0n) return null;
+  // Scaled inside bigint so an 18 decimal basis never reaches a float before the
+  // division that decides the answer.
+  return Number((totalFee * BPS_DENOM * 1000n) / basis) / 1000;
+}
+
 export function quoteSell(cfg: CurveConfig, st: CurveState, tokensIn: bigint): SellQuote {
   validate(cfg);
   if (st.graduated) throw new CurveError('this launch has graduated; trading is closed');
