@@ -23,18 +23,25 @@ export const PRIMARY_NAV: readonly NavItem[] = [
 ] as const;
 
 /**
- * The footer carries one more than the header does, because the header spends that room
- * on the Create button instead. It is the same destination either way.
+ * The header spends a button on this destination instead of a nav slot, which is why it
+ * is declared apart from the six. It is the same destination either way.
  */
 export const CREATE_NAV: NavItem = { href: '/create', label: 'Create a launch' };
 
 /**
- * The footer's order, which is the header's with Create second - where it has always sat
- * in the footer, and the arrangement this derivation exists to preserve rather than
- * quietly restyle. Appending Create instead would have moved `Risks` off the end, which
- * is a decision about what a visitor sees and not a tidy-up.
+ * Every destination, in the footer's order: the header's six with Create second - where
+ * it has always sat in the footer, and the arrangement this derivation exists to preserve
+ * rather than quietly restyle. Appending Create instead would have moved `Risks` off the
+ * end, which is a decision about what a visitor sees and not a tidy-up.
+ *
+ * THE PHONE MENU READS THIS TOO, AND DID NOT USED TO. Audit F-14/F-15. It rendered
+ * `PRIMARY_NAV`, so Create was in the header and in the footer and nowhere else - fine
+ * while the header carried the button at every width, and the header cannot: below 360px
+ * the connected cluster, the brand, the menu and a Create button do not fit, and Create
+ * is the one of the four that something else can carry. A destination the header sheds
+ * has to land somewhere, and this was called `FOOTER_NAV` when only the footer took it.
  */
-export const FOOTER_NAV: readonly NavItem[] = PRIMARY_NAV.flatMap((item, i) =>
+export const ALL_NAV: readonly NavItem[] = PRIMARY_NAV.flatMap((item, i) =>
   i === 0 ? [item, CREATE_NAV] : [item],
 );
 

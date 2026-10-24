@@ -1968,6 +1968,18 @@ header.top .chip { font-size: var(--text-micro); letter-spacing: 0.04em; padding
  * The stack is gone, and the rule is what keeps the two apart now.
  */
 .wallet > button.ghost {
+  /*
+   * A row, because the button now holds an icon and a label that sheds.
+   *
+   * Audit F-14/F-15. The label is wrapped in `.hide-sm`, so below 640px the button
+   * is the icon alone and the gap has nothing to separate - `gap` applies between
+   * items, and a `display: none` child is not an item, so the padding closes up on
+   * its own with no second rule to keep in step.
+   */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   height: 36px;
   padding: 0 12px;
   border-radius: 8px;
@@ -2072,6 +2084,46 @@ header.top .chip { font-size: var(--text-micro); letter-spacing: 0.04em; padding
   .hide-sm { display: none !important; }
   header.top .wordmark { display: none; }
   .wrap { padding: 0 var(--space-4); }
+  /*
+   * The Create button is a glyph from here down, because `.hide-sm` has taken its word.
+   * 14px of side padding was sized against a label beside the icon; with the label gone
+   * it is a 44px box around a 14px mark, and the 8px saved is what makes the button fit
+   * a 360px phone with room rather than with two pixels. Still 36x36, over the WCAG
+   * 2.5.8 floor.
+   */
+  .nav-create { padding: 0 10px; }
+  /*
+   * And the brand's 16px right margin goes to 8. That margin separates a wordmark from
+   * the nav, and the wordmark is `display: none` two rules up, so below 640px it is 16px
+   * of air beside a 26px glyph that already has an 8px flex gap after it. Measured at
+   * 360px: without this the Disconnect button finished 6px inside the right gutter.
+   */
+  header.top .brand { margin-right: var(--space-2); }
+}
+/*
+ * THE LAST RUNG OF THE HEADER'S LADDER. Audit F-14/F-15.
+ *
+ * Dropping the word for the glyph buys 55px, which is enough at 375 and at 360. It is
+ * not enough at 320: measured on this bar with a wallet connected, the row needs 326px
+ * of a 288px content box. Four things compete for it - the brand, the phone menu, this
+ * button and the wallet cluster - and three cannot go. The address is the only thing on
+ * the screen saying which account is about to sign, the menu is the only navigation at
+ * this width, and nothing else can carry the brand; the menu carries this destination
+ * (see `ALL_NAV`), so this button is the one that can.
+ *
+ * 358px is where the glyph stops fitting, measured by stepping the viewport rather than
+ * by adding the parts up: at 350 the wallet cluster was squeezed to 180 of the 188 it
+ * needs and the Disconnect button finished 8px inside the gutter. The breakpoint is set
+ * at 360 instead of 358 because 360 is the narrowest widely-used Android width and it
+ * fits exactly, with the Disconnect button landing on the content edge to the pixel.
+ * Two pixels of slack costs nothing and no device is 358 wide.
+ *
+ * `display: none` takes it out of the accessibility tree as well, which is correct here
+ * and was a defect when `.top-nav` did it with nothing in its place: the destination is
+ * in the menu, in the tree, at a 44px target.
+ */
+@media (max-width: 359px) {
+  .nav-create { display: none; }
 }
 @media (max-width: 900px) { .hide-md { display: none !important; } }
 

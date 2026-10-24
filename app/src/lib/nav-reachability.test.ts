@@ -23,7 +23,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
-import { PRIMARY_NAV, CREATE_NAV, FOOTER_NAV, isNavCurrent } from './navItems.ts';
+import { PRIMARY_NAV, CREATE_NAV, ALL_NAV, isNavCurrent } from './navItems.ts';
 import { maskComments } from './testing/maskComments.ts';
 
 const SRC = join(import.meta.dirname, '..');
@@ -189,8 +189,93 @@ test('the three navigations read from one list', () => {
   // Asserted against whichever file renders each nav, so the three can live wherever
   // they need to - the header's moved out of the layout to get `usePathname`.
   assert.match(navNamed('top-nav').src, /PRIMARY_NAV\.map/, 'the header nav does not render PRIMARY_NAV');
-  assert.match(navNamed('footer-nav').src, /FOOTER_NAV\.map/, 'the footer nav does not render FOOTER_NAV');
-  assert.match(navNamed('mobile-nav-menu').src, /PRIMARY_NAV\.map/, 'the phone menu does not render PRIMARY_NAV');
+  assert.match(navNamed('footer-nav').src, /ALL_NAV\.map/, 'the footer nav does not render ALL_NAV');
+  /*
+   * The phone menu asserted `PRIMARY_NAV` here until audit F-14/F-15, and that assertion
+   * was not weak - it was correct about a policy that was wrong. Create lived in the
+   * header and the footer and nowhere else, which held only while the header carried the
+   * button at every width, and below 360px it cannot. The menu is where the shed
+   * destination lands, so the menu takes the list that has all seven.
+   */
+  assert.match(navNamed('mobile-nav-menu').src, /ALL_NAV\.map/, 'the phone menu does not render ALL_NAV');
+});
+
+test('the header sheds Create only where the phone menu already carries it', () => {
+  /*
+   * THE PAIR IS THE ASSERTION, for the same reason the nav swap above is asserted as a
+   * pair: hiding the button is only safe because something else offers the destination,
+   * and the two halves live in different files with nothing connecting them at runtime.
+   * Hide it at a width where the menu is absent and `/create` is unreachable on a phone,
+   * which is the defect this whole file was written about, one destination over.
+   */
+  const at = /@media\s*\(\s*max-width:\s*(\d+)px\s*\)\s*\{/g;
+  let hiddenAt: number | null = null;
+  for (const m of css.matchAll(at)) {
+    const block = braceMatched(m.index + m[0].length - 1);
+    if (/\.nav-create\s*\{[^}]*display:\s*none/.test(block)) hiddenAt = Number(m[1]);
+  }
+  assert.ok(hiddenAt, '.nav-create is not hidden at any width: there is no shed to check');
+
+  let menuFrom: number | null = null;
+  for (const m of css.matchAll(at)) {
+    const block = braceMatched(m.index + m[0].length - 1);
+    if (/\.mobile-nav\s*\{\s*display:\s*(?!none)/.test(block)) menuFrom = Number(m[1]);
+  }
+  assert.ok(menuFrom, 'the phone menu appears at no width');
+  assert.ok(
+    hiddenAt <= menuFrom,
+    `Create is hidden below ${hiddenAt}px and the phone menu only appears below ${menuFrom}px, ` +
+      `so between them /create is reachable from no navigation on a phone`,
+  );
+
+  // And the menu has to be rendering the list that includes it, not just be present.
+  assert.ok(
+    ALL_NAV.some((i) => i.href === CREATE_NAV.href),
+    'the list the phone menu renders no longer carries Create',
+  );
+});
+
+test('the controls the header sheds a word from keep an accessible name', () => {
+  /*
+   * `.hide-sm` is how this bar sheds: the balance, the chips, and now the words inside
+   * the Create link and the Disconnect button. A visible label IS the accessible name,
+   * so hiding it leaves a control named by nothing at the one width where the control is
+   * a bare glyph - and `display: none` means a screen reader cannot read it either.
+   *
+   * Asserted over whatever is wrapped that way rather than over the two known controls,
+   * because the next word shed from this bar is the one nobody re-checks. Discovery is
+   * anti-vacuous below: find none and the test says so.
+   */
+  const shedders = NAV_SOURCES.concat(
+    [['ConnectWallet.tsx', 'components']].map(([f, d]) => ({
+      rel: `${d}/${f}`,
+      src: code(readFileSync(join(SRC, d, f), 'utf8')),
+    })),
+  );
+  let checked = 0;
+  for (const { rel, src } of shedders) {
+    for (const m of src.matchAll(/<span className="hide-sm">/g)) {
+      /*
+       * SCANNED BACKWARDS to the control that opens, rather than forwards from the tag.
+       * The forward version was `<(Link|button)\s([^>]*?)>` and it found one of the two:
+       * an `onClick={() => ...}` attribute contains a `>`, so the attribute class ended
+       * inside the handler and the match never reached the span. The control it skipped
+       * was the Disconnect button - the one this test was written for.
+       */
+      const before = src.slice(0, m.index);
+      const open = Math.max(before.lastIndexOf('<Link'), before.lastIndexOf('<button'));
+      if (open < 0) continue;
+      checked += 1;
+      const attrs = before.slice(open);
+      assert.match(
+        attrs,
+        /aria-label/,
+        `${rel} hides this control's only label at 640px and gives it no aria-label: ` +
+          `below that width it is an unnamed glyph. ${attrs.slice(0, 80).replace(/\s+/g, ' ')}`,
+      );
+    }
+  }
+  assert.ok(checked >= 2, `only ${checked} controls shed a label: the scan is not measuring`);
 });
 
 test('every navigation says which page you are on, through one resolver', () => {
@@ -234,13 +319,13 @@ test('the footer carries every primary destination, plus Create', () => {
   // move Risks off the end, which is a decision about what a visitor sees.
   for (const item of PRIMARY_NAV) {
     assert.ok(
-      FOOTER_NAV.some((f) => f.href === item.href),
+      ALL_NAV.some((f) => f.href === item.href),
       `${item.href} is in the header nav and not in the footer`,
     );
   }
-  assert.ok(FOOTER_NAV.includes(CREATE_NAV), 'the footer has lost the Create destination');
-  assert.equal(FOOTER_NAV.length, PRIMARY_NAV.length + 1);
-  assert.equal(FOOTER_NAV[FOOTER_NAV.length - 1].href, PRIMARY_NAV[PRIMARY_NAV.length - 1].href);
+  assert.ok(ALL_NAV.includes(CREATE_NAV), 'the footer has lost the Create destination');
+  assert.equal(ALL_NAV.length, PRIMARY_NAV.length + 1);
+  assert.equal(ALL_NAV[ALL_NAV.length - 1].href, PRIMARY_NAV[PRIMARY_NAV.length - 1].href);
 });
 
 test('Risks is last and present everywhere, because that is the point of it', () => {

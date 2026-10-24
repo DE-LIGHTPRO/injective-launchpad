@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useId, useRef, useState } from 'react';
-import { PRIMARY_NAV, isNavCurrent } from '@/lib/navItems';
+import { ALL_NAV, isNavCurrent } from '@/lib/navItems';
 import { useDismissOnEscape } from '@/lib/useDismissOnEscape';
 
 /**
@@ -21,9 +21,15 @@ import { useDismissOnEscape } from '@/lib/useDismissOnEscape';
  * 0x0, and the nine controls still under the WCAG 2.5.8 floor were all in the footer -
  * which is the only reason the footer was carrying navigation in the first place.
  *
- * The links come from `PRIMARY_NAV` rather than being written out again here, because
- * a phone menu that silently lacks a destination the header has is the exact failure
- * this component exists to fix.
+ * The links come from `ALL_NAV` rather than being written out again here, because a
+ * phone menu that silently lacks a destination the header has is the exact failure this
+ * component exists to fix.
+ *
+ * `ALL_NAV` and not `PRIMARY_NAV`, which is the seventh destination: Create. Audit
+ * F-14/F-15 sheds the header's Create button below 360px, where a connected wallet, the
+ * brand, this button and that one do not fit a 320px screen, so this menu is now the
+ * only place it is reachable at that width. Taking the list that already includes it is
+ * the fix; adding a seventh row by hand here would be the defect the list exists against.
  */
 export function MobileNav() {
   const [open, setOpen] = useState(false);
@@ -112,7 +118,7 @@ export function MobileNav() {
 
       {open && (
         <nav className="mobile-nav-menu" id={menuId} aria-label="Primary">
-          {PRIMARY_NAV.map((item, i) => (
+          {ALL_NAV.map((item, i) => (
             <Link
               key={item.href}
               href={item.href}

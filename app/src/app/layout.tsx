@@ -10,7 +10,7 @@ import { ConnectWallet } from '@/components/ConnectWallet';
 import { MobileNav } from '@/components/MobileNav';
 import { ChainMismatchBanner } from '@/components/ChainMismatchBanner';
 import { PrimaryNav } from '@/components/PrimaryNav';
-import { CREATE_NAV, FOOTER_NAV } from '@/lib/navItems';
+import { ALL_NAV, CREATE_NAV } from '@/lib/navItems';
 import './globals.css';
 
 /*
@@ -98,10 +98,33 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               */}
             {isDemoMode() && <span className="chip warn hide-sm">demo</span>}
             <span className="chip hide-sm">{NETWORK.name}</span>
-            {/* The destination comes from the same place the footer's reads it from; the
-                label is shorter here because the header has a button's worth of room. */}
-            <Link href={CREATE_NAV.href} className="nav-create">
-              <PlusIcon size={14} /> Create
+            {/*
+                The destination comes from the same place the footer's reads it from; the
+                label is shorter here because the header has a button's worth of room.
+
+                AND THE ROOM RUNS OUT, WHICH IS AUDIT F-14/F-15. Measured on this header
+                at 375px with a wallet connected: 343px of content room against a row that
+                needs 373 - brand 26 plus its 16px margin, the phone menu 36, two 8px
+                gaps, this button 91, and the wallet cluster 188 (an address that is 138px
+                of monospace, a 10px gap, and the way out). `.wallet` carries
+                `min-width: 0`, so it does not refuse: it shrinks to 142 while its
+                `white-space: nowrap` children keep their width and spill past the right
+                edge, putting 31px of sideways scroll on every page in the one state a
+                trader is actually in.
+
+                So this sheds in two stages, which is what the rest of this bar already
+                does - the balance at 1100px, the network and demo chips at 640px. Below
+                640 the word goes and the glyph stays, which buys 55px and fixes 375 and
+                360. Below 360 the whole button goes and the phone menu carries the
+                destination, because at 320px even the glyph does not fit. The brand is
+                the only other thing that could have gone, and nothing can carry it.
+
+                `aria-label` is unconditional so the control is named in all three states,
+                and the visible word is a subset of it, which is what WCAG 2.5.3 asks.
+              */}
+            <Link href={CREATE_NAV.href} className="nav-create" aria-label={CREATE_NAV.label}>
+              <PlusIcon size={14} />
+              <span className="hide-sm">Create</span>
             </Link>
             {/*
                 The wallet sits in the header because it is page-independent: a
@@ -140,7 +163,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               </p>
             </div>
             <nav className="footer-nav" aria-label="Footer">
-              {FOOTER_NAV.map((item) => (
+              {ALL_NAV.map((item) => (
                 <Link key={item.href} href={item.href}>
                   {item.label}
                 </Link>

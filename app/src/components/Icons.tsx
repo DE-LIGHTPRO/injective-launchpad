@@ -66,3 +66,16 @@ export const CheckIcon = (p: P) => (
     <path d="M3 8.5 6.5 12 13 4.5" />
   </Svg>
 );
+/**
+ * Disconnect, for the header's wallet cluster where the word does not fit a phone.
+ *
+ * The bracket and the arrow leaving it, which is the one logout convention a reader
+ * does not have to be taught. Drawn on the same 16px grid as the rest so it sits on
+ * the baseline of the address beside it.
+ */
+export const SignOutIcon = (p: P) => (
+  <Svg {...p}>
+    <path d="M6.5 13.5H3.5A1 1 0 0 1 2.5 12.5v-9a1 1 0 0 1 1-1h3" />
+    <path d="M10.5 11l3-3-3-3M13.5 8H6" />
+  </Svg>
+);

@@ -16,6 +16,7 @@ import {
   type WalletName,
 } from '@/lib/wallet';
 import { fmt } from '@/lib/curve';
+import { SignOutIcon } from './Icons';
 import { NETWORK } from '@/lib/config';
 import { useDismissOnEscape } from '@/lib/useDismissOnEscape';
 import { setConnectedAccount } from '@/lib/walletStore';
@@ -249,6 +250,28 @@ export function ConnectWallet({
         <button
           type="button"
           className="ghost"
+          /*
+           * THE WORD GOES ON A PHONE AND THE ICON STAYS. Audit F-14 and F-15, which are
+           * one defect: the connected cluster does not fit a 375px header.
+           *
+           * Measured at 375x812 with the connected markup in place: brand 26, the mobile
+           * nav 36, Create 91, and the cluster's own children 90 + 10 + 97 = 197, which
+           * is 382 against 343px of content room. `.wallet` carries `min-width: 0`, so
+           * it does not refuse - it shrinks to 142 while its `white-space: nowrap`
+           * children keep their width and spill out of it, pushing the document to 414.
+           * 39px of sideways scroll on every page, in the one state a trader is in.
+           *
+           * THE ADDRESS IS THE PART THAT CANNOT GO. It is the only thing on the screen
+           * that says which account is about to sign, which is the whole point of the
+           * F-18 work. Dropping it would save 100px and lose the safety-critical half.
+           * Shedding the label saves 61, which closes a 39px gap with room to spare, and
+           * it is the next rung on a ladder this header already climbs: the balance goes
+           * at 1100px, the network and demo chips at 640px, both for this exact reason.
+           *
+           * `aria-label` is unconditional so the control has a name in both states, and
+           * "Disconnect" is a subset of it, which is what WCAG 2.5.3 asks for.
+           */
+          aria-label="Disconnect wallet"
           onClick={() => {
             // Forgetting is the point of the button: without this a reload would
             // silently reconnect the wallet the user just disconnected.
@@ -256,7 +279,8 @@ export function ConnectWallet({
             setAccount(null);
           }}
         >
-          Disconnect
+          <SignOutIcon size={14} />
+          <span className="hide-sm">Disconnect</span>
         </button>
       </div>
     );
