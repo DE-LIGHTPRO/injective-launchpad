@@ -44,8 +44,23 @@ import {
  *
  * What remains unverified is the ENCODING: whether this composes those messages into
  * bytes a node accepts. That fails loudly at simulate or broadcast, costs nothing but
- * gas on a rejected transaction, and the one thing it cannot do is half-create a
- * launch. `simulateLaunch` exists so that failure happens before a wallet prompt.
+ * gas on a rejected transaction, and the one thing it cannot do is half-create a launch.
+ *
+ * THIS PARAGRAPH USED TO END "`simulateLaunch` exists so that failure happens before a
+ * wallet prompt", AND NO SUCH FUNCTION HAD EVER BEEN WRITTEN. Audit F-09. Of the four
+ * bullets above, three are claims about code that exists and can be checked; that
+ * sentence was the one covering what they do not cover, and it was the only part of the
+ * argument resting on code rather than on reasoning. It rested on nothing, in the single
+ * docblock whose job is to justify shipping an unexercised transaction builder - which
+ * is the worst direction for a comment to be wrong in, because a reader who sees the
+ * risk named and answered stops looking for it.
+ *
+ * The simulation is real now: `simulateThroughOrigin` below runs the messages against
+ * the chain before any prompt, and `txSimulate.ts` holds the half that cannot run in a
+ * browser. It is wired into `signAndBroadcast`, which is the only way to this file's
+ * signing path, so there is no entry point it does not cover. `pre-sign-simulation.test.ts`
+ * asserts that, because a simulation that exists and is not called is the same defect
+ * wearing the fix's clothes.
  */
 
 export class BroadcastError extends Error {
@@ -179,7 +194,14 @@ export function describeBroadcastFailure(raw: string): string {
     return 'That ticker is already taken on this chain. Choose another.';
   }
   if (s.includes('out of gas')) {
-    return 'The transaction ran out of gas. Try again; the estimate is raised automatically.';
+    /*
+     * "the estimate is raised automatically" WAS NOT TRUE and had never been: there was
+     * no estimate, the limit was a per-operation literal, and a retry sent the same
+     * number at the same state. It is a sentence that tells a user to do the one thing
+     * that cannot help. Now a retry re-measures against current state, which is a real
+     * reason to try again, and that is all this claims.
+     */
+    return 'The transaction ran out of gas. Try again: the limit is measured again each time.';
   }
   if (s.includes('unauthorized') || s.includes('signature')) {
     return 'The wallet signed with an account the chain did not accept. Check the selected account.';
@@ -187,12 +209,23 @@ export function describeBroadcastFailure(raw: string): string {
   if (s.includes('account sequence') || s.includes('sequence mismatch')) {
     return 'Another transaction from this account is still settling. Wait a moment and try again.';
   }
-  /*
-   * Deliberately not the raw text. A node error is written for a validator operator
-   * and leaks module paths and type URLs; shown to a creator it reads as a crash.
-   */
-  return 'The chain refused the transaction. Nothing was created and nothing was spent beyond the fee.';
+  return GENERIC_CHAIN_REFUSAL;
 }
+
+/**
+ * What this says when it has nothing specific to say.
+ *
+ * Deliberately not the raw text. A node error is written for a validator operator and
+ * leaks module paths and type URLs; shown to a creator it reads as a crash.
+ *
+ * EXPORTED BECAUSE "WE CANNOT NAME THIS" IS A DECISION SOMETHING ELSE ACTS ON.
+ * `txSimulate.ts` blocks a transaction before the wallet prompt only when the refusal
+ * can be explained, and this constant is how it tells the difference. Comparing against
+ * a second copy of the sentence would mean a reworded message silently turned every
+ * pre-sign refusal into a pass.
+ */
+export const GENERIC_CHAIN_REFUSAL =
+  'The chain refused the transaction. Nothing was created and nothing was spent beyond the fee.';
 
 /**
  * The plan's messages, rebuilt as SDK message objects.
@@ -304,11 +337,12 @@ interface InjectedSigner {
  * step for "almost done" because there is no line of code that means it.
  *
  *  - `preparing`   reading the account number and sequence from the chain.
+ *  - `simulating`  the node is running the messages; no prompt has been shown.
  *  - `signing`     the wallet prompt is open; we can see nothing inside it.
  *  - `broadcasting` the signed bytes are on their way to the chain.
  *  - `settling`    the node took it and has not put it in a block yet.
  */
-export type TxStage = 'preparing' | 'signing' | 'broadcasting' | 'settling';
+export type TxStage = 'preparing' | 'simulating' | 'signing' | 'broadcasting' | 'settling';
 
 /**
  * What a broadcast returns once it stops pretending every send is decided.
@@ -325,7 +359,34 @@ export interface BroadcastOutcome {
   settled: boolean;
 }
 
-/** Gas limits per operation. See `signAndBroadcast` on why these are not simulated. */
+/**
+ * THE FALLBACK gas limit per operation, for when the chain cannot be asked.
+ *
+ * These were the limit, full stop, and the comment defending them said an over-estimate
+ * "costs the user nothing on Injective's fee market". THAT IS FALSE, and it is the
+ * measurement that decided this file's design rather than the reasoning. Fifty-six
+ * consecutive `MsgExecuteContract` transactions on testnet, read 24 Oct 2026 around
+ * height 145,296,000:
+ *
+ *     fee / gas_wanted = 500000000  on every single one
+ *     fee / gas_used   = 513M to 615M, scattered
+ *
+ * The declared fee is `gas_limit x price` and it is deducted in full. `gas_used` never
+ * enters it, so there is no refund of an unspent ceiling: an over-estimate costs exactly
+ * the over-estimate. Those same traders set limits 1.03 to 1.23 times their measurement.
+ * We were declaring 800,000 for an execute that measures around 250,000, so a trader
+ * paid roughly three times the gas they used, on a product whose argument is that every
+ * cost is named before you sign.
+ *
+ * In absolute terms it is 0.0004 INJ against 0.00015. The reason to fix it anyway is
+ * that the sentence justifying it was wrong, and a wrong premise is worth more than the
+ * money it cost here: the next decision resting on "a ceiling is free" might not be.
+ *
+ * So the limit now comes from a simulation and these are what is used when there is no
+ * simulation to use. They stay generous, because that is the right shape for a fallback:
+ * too low fails AFTER the user has approved the prompt, and the fallback is reached
+ * exactly when we know least.
+ */
 export const GAS = {
   /** Four messages including two contract instantiates. */
   launch: 3_000_000,
@@ -334,6 +395,124 @@ export const GAS = {
   /** One execute with up to two bank sends out. */
   claim: 500_000,
 } as const;
+
+/**
+ * What a measured figure is multiplied by before it becomes a limit.
+ *
+ * A simulation runs against the state of one block and the transaction executes against
+ * a later one, so the measurement is right about a state that has already moved: another
+ * trade shifts the curve, a branch is taken that was not, a map entry is written where
+ * one was updated. The multiplier is the margin for that, and the asymmetry decides it -
+ * too high costs the difference in fee, too low costs a signature the user already gave.
+ *
+ * 1.5 against the 1.03 to 1.23 that live traders on this chain actually set, which is the
+ * only empirical anchor available for how far execution strays from measurement. Still
+ * roughly half what the flat fallback was charging for a trade.
+ */
+export const GAS_SIMULATION_MARGIN = 1.5;
+
+/**
+ * The limit to declare, given what the chain measured.
+ *
+ * Exported and pure so the arithmetic can be exercised without a chain, and so the one
+ * place it is decided is the one place it is tested. A floor of the base transaction
+ * cost, because a measurement of a trivial message is still a transaction that has to be
+ * admitted, signed and indexed.
+ */
+export function gasLimitFor(simulatedGasUsed: number): number {
+  return Math.max(120_000, Math.ceil(simulatedGasUsed * GAS_SIMULATION_MARGIN));
+}
+
+/**
+ * What the simulation decided: a gas limit to use, or a refusal to stop on.
+ *
+ * `measured` is kept alongside the limit so a caller can tell a measured limit from a
+ * fallback one. There is no third case here on purpose - "could not ask" is resolved
+ * into `gas` with `measured: null`, because by the time this reaches the caller the only
+ * question left is whether to go to the wallet, and the answer to that is yes.
+ */
+export type SimDecision =
+  | { kind: 'gas'; gas: number; measured: number | null }
+  | { kind: 'refused'; reason: string; detail?: string };
+
+/**
+ * Decide the gas limit by asking the chain, through our own origin.
+ *
+ * THE SIGNATURE IS SIXTY-FOUR ZERO BYTES. A node does not verify signatures when
+ * simulating, and needing one would defeat the point: the whole value here is that it
+ * happens before the wallet prompt. The array still has to be there and be the right
+ * length, because the bytes are decoded as a transaction either way.
+ *
+ * FAILING OPEN IS DELIBERATE AND IT IS SAFE ONLY BECAUSE OF THE FALLBACK. Every path out
+ * of here that is not a named refusal returns the caller's fixed limit, so a dead LCD, a
+ * 429 from our own rate limiter, a parse failure or an unrecognised chain error all leave
+ * the user exactly where they were before this function existed. The one thing that would
+ * make this unsafe is a mean fallback, which is why `GAS`'s generosity is now load
+ * bearing rather than merely cautious.
+ */
+/**
+ * Turn whatever came back from `/api/simulate` into the one decision that matters.
+ *
+ * PURE AND EXPORTED BECAUSE "FAILS OPEN" IS A PROPERTY THAT MUST NOT SILENTLY INVERT.
+ * Buried inside the fetch, every branch here was unreachable from a test, and the branch
+ * that matters is the one nobody exercises: a body that is null, or truncated, or
+ * carries `ok` without a number. Each of those has to yield the fallback limit and let
+ * the user through, and the way to know they still do is to be able to pass them in.
+ *
+ * `null` for a body covers the throw, the non-JSON response and the 429 alike. They are
+ * one case: we did not get an answer we understand, so we have no verdict.
+ */
+export function decideGas(body: unknown, fallbackGas: number): SimDecision {
+  const open = (measured: number | null): SimDecision => ({
+    kind: 'gas',
+    gas: measured === null ? fallbackGas : gasLimitFor(measured),
+    measured,
+  });
+  const data = body as { ok?: unknown; gasUsed?: unknown; refused?: unknown; detail?: unknown } | null;
+  if (!data || typeof data !== 'object') return open(null);
+  /*
+   * A NAMED REFUSAL IS THE ONLY THING THAT STOPS THE USER. It has to be a non-empty
+   * string: an empty one would be thrown as a refusal with no reason in it, which is a
+   * dialog that blocks a trade and says nothing, and `txSimulate` only ever sets this
+   * field when it has words to put in it.
+   */
+  if (typeof data.refused === 'string' && data.refused.trim() !== '') {
+    return {
+      kind: 'refused',
+      reason: data.refused,
+      detail: typeof data.detail === 'string' ? data.detail : undefined,
+    };
+  }
+  /*
+   * A 200 is not a measurement. `ok` has to be true AND the number has to be a usable
+   * one: a zero or a NaN multiplied by the margin is a zero, which would be sent as a
+   * gas limit and fail for certain, produced by the check meant to prevent it.
+   */
+  const gasUsed = Number(data.gasUsed);
+  if (data.ok !== true || !Number.isFinite(gasUsed) || gasUsed <= 0) return open(null);
+  return open(gasUsed);
+}
+
+async function simulateThroughOrigin(
+  built: { txRaw: { bodyBytes: Uint8Array; authInfoBytes: Uint8Array } },
+  fallbackGas: number,
+): Promise<SimDecision> {
+  const toB64 = (b: Uint8Array) => Buffer.from(b).toString('base64');
+  try {
+    const resp = await fetch('/api/simulate', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        bodyBytes: toB64(built.txRaw.bodyBytes),
+        authInfoBytes: toB64(built.txRaw.authInfoBytes),
+        signatures: [toB64(new Uint8Array(64))],
+      }),
+    });
+    return decideGas(await resp.json().catch(() => null), fallbackGas);
+  } catch {
+    return decideGas(null, fallbackGas);
+  }
+}
 
 /**
  * Signs and broadcasts a prepared set of messages, returning the transaction hash.
@@ -412,26 +591,58 @@ async function signAndBroadcast(opts: {
   }
 
   const base = account.account.base_account;
-  const { txRaw, signDoc } = createTransaction({
-    message: msgs,
-    memo: '',
-    /*
-     * The fee scales with the gas limit. It was a flat 0.002 INJ against a 3000000
-     * limit whatever the operation, so a fee claim paid a launch's fee.
-     *
-     * The price itself, and why it is not the chain's minimum, is documented on
-     * `GAS_PRICE_INJ`. It lives in `config.ts` because `wallet.ts` has to tell Keplr
-     * the same number, and the two were separate literals.
-     */
-    fee: {
-      amount: [{ denom: 'inj', amount: String(BigInt(opts.gas) * GAS_PRICE_INJ) }],
-      gas: String(opts.gas),
-    },
-    pubKey: Buffer.from(key.pubKey).toString('base64'),
-    sequence: Number(base.sequence),
-    accountNumber: Number(base.account_number),
-    chainId: NETWORK.chainId,
-  });
+
+  /*
+   * Built twice, because the fee is inside the bytes. The gas limit lives in `AuthInfo`,
+   * so a transaction simulated at one limit and signed at another is two different sets
+   * of bytes: there is no way to learn the gas from a simulation and then patch it into
+   * what was simulated. Encoding is pure and local, so building it again costs nothing.
+   */
+  const build = (gas: number) =>
+    createTransaction({
+      message: msgs,
+      memo: '',
+      /*
+       * The fee scales with the gas limit. It was a flat 0.002 INJ against a 3000000
+       * limit whatever the operation, so a fee claim paid a launch's fee.
+       *
+       * The price itself, and why it is not the chain's minimum, is documented on
+       * `GAS_PRICE_INJ`. It lives in `config.ts` because `wallet.ts` has to tell Keplr
+       * the same number, and the two were separate literals.
+       */
+      fee: {
+        amount: [{ denom: 'inj', amount: String(BigInt(gas) * GAS_PRICE_INJ) }],
+        gas: String(gas),
+      },
+      pubKey: Buffer.from(key.pubKey).toString('base64'),
+      sequence: Number(base.sequence),
+      accountNumber: Number(base.account_number),
+      chainId: NETWORK.chainId,
+    });
+
+  /*
+   * ASK THE CHAIN WHAT WOULD HAPPEN, BEFORE THE PROMPT. Audit F-09, whose second half
+   * this is: the docblock at the top of this file claimed a `simulateLaunch` existed for
+   * exactly this and none ever did.
+   *
+   * A refusal we can name is thrown here, where the user has approved nothing and spent
+   * nothing. A refusal we cannot name, or an LCD we cannot reach, is NOT a refusal: it
+   * carries on to the wallet on the fallback limit, exactly as this path behaved before
+   * the simulation existed. Our own plumbing failing must not present as the chain
+   * refusing the user's trade, and the fallback being generous is what makes carrying on
+   * safe. See `txSimulate.ts` for why that asymmetry is the whole design.
+   */
+  stage('simulating');
+  const sim = await simulateThroughOrigin(build(opts.gas), opts.gas);
+  if (sim.kind === 'refused') {
+    throw new BroadcastError(
+      'simulate',
+      `${sim.reason} Nothing was signed, so this cost nothing.`,
+      sim.detail,
+    );
+  }
+
+  const { txRaw, signDoc } = build(sim.gas);
 
   let signature: string;
   try {

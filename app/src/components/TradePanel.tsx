@@ -43,10 +43,18 @@ type Side = 'buy' | 'sell';
 /**
  * Left behind by Max on a buy, so the transaction can pay its own fee.
  *
- * 0.05 INJ against a launch transaction that simulates near 3,000,000 gas. Spending the
- * whole balance instead produces a transaction that is rejected for fees AFTER the user
- * has approved it, which reads as the app being broken rather than as a balance being
+ * 0.05 INJ, which is deliberately far more than a transaction costs. Spending the whole
+ * balance instead produces a transaction that is rejected for fees AFTER the user has
+ * approved it, which reads as the app being broken rather than as a balance being
  * exactly empty.
+ *
+ * THIS SAID "a launch transaction that simulates near 3,000,000 gas" AND NOTHING
+ * SIMULATED ANYTHING. Audit F-09: the figure was the flat literal in `GAS.launch`, and
+ * the word "simulates" came from the same vanished `simulateLaunch` the docblock in
+ * `broadcast.ts` claimed. A measured launch is the one number nobody here has yet, since
+ * the create path needs a funded key, so this reserve is stated as what it is - a
+ * generous round number - rather than dressed as a measurement. A real curve buy measures
+ * 249,433 gas, which is 0.000187 INJ, so 0.05 is roughly 250 times a trade's fee.
  */
 const GAS_RESERVE_INJ = 5n * 10n ** 16n;
 

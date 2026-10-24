@@ -36,6 +36,13 @@ import type { TxStage, BroadcastOutcome } from '@/lib/broadcast';
 /** The ordered rail. Index in this array IS the progress. */
 const STEPS: Array<{ stage: TxStage; title: string; while: string }> = [
   { stage: 'preparing', title: 'Preparing', while: 'Reading your account number and sequence from the chain.' },
+  /*
+   * A real step with a real line of code behind it, which is the rule this list is
+   * written to. Audit F-09: the node runs the transaction here and nothing has been
+   * signed yet, so a refusal at this step costs the user nothing, and saying so is the
+   * point of showing it rather than folding it into "Preparing".
+   */
+  { stage: 'simulating', title: 'Checking', while: 'Running it against the chain first, so a failure costs you nothing.' },
   { stage: 'signing', title: 'Your wallet', while: 'Approve the transaction in your wallet to continue.' },
   { stage: 'broadcasting', title: 'Broadcasting', while: 'Sending the signed transaction to Injective.' },
   { stage: 'settling', title: 'Settling', while: 'Waiting for a validator to put it in a block.' },
