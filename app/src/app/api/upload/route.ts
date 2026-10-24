@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { put } from '@vercel/blob';
 import { allowUploadShared, clientKey } from '@/lib/uploadLimit';
+import { MAX_UPLOAD_BYTES, MAX_UPLOAD_LABEL, oversizeMessage } from '@/lib/uploadSize';
 
 /**
  * Store a launch logo and hand back a URL the profile can hold.
@@ -23,7 +24,14 @@ import { allowUploadShared, clientKey } from '@/lib/uploadLimit';
  * typed by hand for anyone who would rather pin it themselves.
  */
 
-const MAX_BYTES = 5 * 1024 * 1024;
+/*
+ * THE CAP IS NOT OURS ALONE. Audit F-16: this read 5 MB, and the host refuses a body
+ * over 4,500,000 bytes before this function is invoked at all, so between 4.5 and 5 MB
+ * the route's own limit was unreachable and its message unsendable. See `uploadSize.ts`
+ * for the measurement. The number and the words both come from there now, because they
+ * were four hand-written copies of one decision and the page had the stale one.
+ */
+const MAX_BYTES = MAX_UPLOAD_BYTES;
 
 /*
  * Checked against the sniffed bytes, not the declared type. `Content-Type` on an
@@ -93,7 +101,10 @@ export async function POST(req: Request) {
    */
   const declared = Number(req.headers.get('content-length') ?? '0');
   if (declared > MAX_BYTES + 64 * 1024) {
-    return NextResponse.json({ error: 'That image is over the 5 MB limit.' }, { status: 413 });
+    return NextResponse.json(
+      { error: `That image is over the ${MAX_UPLOAD_LABEL} limit.` },
+      { status: 413 },
+    );
   }
 
   let file: File | null = null;
@@ -109,10 +120,7 @@ export async function POST(req: Request) {
   // Size first: reading the bytes of something enormous in order to reject it is the
   // expensive order to do this in.
   if (file.size > MAX_BYTES) {
-    return NextResponse.json(
-      { error: `That image is ${(file.size / 1024 / 1024).toFixed(1)} MB. The limit is 5 MB.` },
-      { status: 413 },
-    );
+    return NextResponse.json({ error: oversizeMessage(file.size) }, { status: 413 });
   }
   if (file.size === 0) {
     return NextResponse.json({ error: 'That file is empty.' }, { status: 400 });
