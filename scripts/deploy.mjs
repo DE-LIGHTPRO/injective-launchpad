@@ -547,11 +547,18 @@ function quoteVirtualWhole() {
  * some other way. It reports what the constant means today either way, because that is
  * useful even when there is nothing to compare it against.
  */
-/** The quote's price, or a throw. Symbol from the configured denom, INJ by default. */
+/**
+ * The quote's price, or a throw.
+ *
+ * INJ, not a configurable symbol. The first version read an `INJ_QUOTE_DENOM` that
+ * nothing sets and nothing documents - inventing a switch in order to look general,
+ * which `.env.example` exists to forbid: a variable nothing reads advertises a choice
+ * that silently does nothing. Everything around this call already assumes INJ, from
+ * `quote_decimals: 18` to `quoteVirtualWhole` being documented in whole INJ, so the
+ * honest version hardcodes it and changes when that assumption actually changes.
+ */
 async function priceUsdForQuote() {
-  const denom = (process.env.INJ_QUOTE_DENOM?.trim() || 'inj').toUpperCase();
-  const symbol = denom === 'INJ' ? 'INJ' : denom.replace(/^.*\//, '').toUpperCase();
-  return (await readQuotePrice(symbol)).price;
+  return (await readQuotePrice('INJ')).price;
 }
 
 async function checkQuoteScaleFreshness(whole) {

@@ -166,6 +166,15 @@ and deployed another, silently, and the only evidence would have been the market
 every launch opened at. The deploy now **refuses on mainnet** when it is unset, and the
 derive script prints a command with it already in place.
 
+**And set `INJ_OPEN_TARGET_USD` to the dollar figure you just chose**, so forgetting
+this step becomes a refusal rather than a wrong market cap. `INJ_QUOTE_VIRTUAL_WHOLE`
+is a number of INJ, so it silently stops meaning what it was picked to mean as INJ
+moves: it drifted 700 to 711 to 710 across three runs in one afternoon. The dollar cap
+does not drift. With it set, `deploy.mjs` re-derives the constant at the price on the
+day and **refuses past 15% drift**, naming the number you want, before it has paid to
+store anything. Leave it unset and the deploy reports what your constant opens at and
+says plainly that it cannot tell you whether that is the figure you chose.
+
 ### 7. Deploy
 
 ```bash
@@ -173,6 +182,7 @@ cd /path/to/injective-launchpad
 ./scripts/build-wasm.sh
 
 INJ_QUOTE_VIRTUAL_WHOLE=from-step-6 \
+INJ_OPEN_TARGET_USD=5000 \
 INJ_LAUNCH_FEE=0.2 \
 INJ_PLATFORM_ADDRESS=inj1... \
 INJ_FACTORY_ADMIN=inj1... \
