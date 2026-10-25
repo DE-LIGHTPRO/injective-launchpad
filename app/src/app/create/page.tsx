@@ -3,6 +3,9 @@ import { CreateLaunch } from '@/components/CreateLaunch';
 import { DemoBanner } from '@/components/DemoBanner';
 import { isDeployed } from '@/lib/config';
 import { isDemoMode } from '@/lib/demo';
+import { EmptyState } from '@/components/EmptyState';
+import { MarkLaunches } from '@/components/EmptyMark';
+import { NETWORK } from '@/lib/config';
 
 export const metadata = { title: 'Create a launch' };
 
@@ -14,13 +17,13 @@ export default function CreatePage() {
         <Link href="/">&larr; launches</Link>
       </p>
       {!isDeployed() && !isDemoMode() ? (
-        <div className="card">
+        <>
           <h1>Create a launch</h1>
-          <p className="note">
-            The launchpad is not deployed yet, so there is no factory to create against. The form
-            opens as soon as one is configured.
-          </p>
-        </div>
+          <EmptyState mark={<MarkLaunches />} title="No factory to create against yet">
+            The launchpad is not deployed on {NETWORK.name}, so there is nothing for a
+            launch to be created on. The form opens as soon as one is configured.
+          </EmptyState>
+        </>
       ) : (
         <CreateLaunch />
       )}

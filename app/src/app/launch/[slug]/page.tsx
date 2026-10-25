@@ -36,6 +36,8 @@ import { TradePanel } from '@/components/TradePanel';
 import { Trades } from '@/components/Trades';
 import { hasEverTraded, loadTradeView } from '@/lib/tradeView';
 import { EMPTY_SERIES } from '@/lib/priceSeries';
+import { EmptyState } from '@/components/EmptyState';
+import { MarkLaunches } from '@/components/EmptyMark';
 
 export const dynamic = 'force-dynamic';
 
@@ -180,13 +182,25 @@ export default async function LaunchPage({ params }: { params: Promise<{ slug: s
   const { slug } = await params;
 
   if (!isDeployed() && !isDemoMode()) {
+    /*
+     * THE SAME ABSENCE AS /create's, so the same mark. No factory is configured, so
+     * there is nothing for this launch to be read from - which is not an error and must
+     * not be dressed as one: nothing failed, nothing is set up. The chain-error branch
+     * further down stays bare and red, because that one IS a failure.
+     */
     return (
-      <div className="empty">
-        <p>No factory is configured, so this launch cannot be loaded.</p>
-        <Link href="/" className="note">
-          ← back to launches
-        </Link>
-      </div>
+      <EmptyState
+        mark={<MarkLaunches />}
+        title="No factory is configured"
+        action={
+          <Link href="/" className="go">
+            Back to launches
+          </Link>
+        }
+      >
+        This launch cannot be loaded because the launchpad is not deployed on{' '}
+        {NETWORK.name} yet.
+      </EmptyState>
     );
   }
 
