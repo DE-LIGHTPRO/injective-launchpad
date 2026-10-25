@@ -4,6 +4,49 @@ Not a third-party audit. Findings from reviewing the contracts, app and scripts
 against what Pons (`ponsdotdev/pons-labs`) and nearly.trade do. Newest first.
 Severity uses the usual scale: Critical / High / Medium / Low / Info.
 
+## 2026-10-25 review, seventh pass (contract solvency against the chain)
+
+Prompted by the mainnet governance vote: the contracts have no independent audit, and
+the question a validator will ask hardest is whether the accounting holds. Six prior
+passes read code and simulated messages. None had asked the bank module what a launch
+actually holds and compared it against the claims recorded in that launch's own state.
+
+### Checked, nothing to fix
+
+Both solvency invariants hold **exactly**, to the base unit, on every live launch.
+
+| | |
+|---|---|
+| Quote side | bank balance == `inj_collected` + `lp_bonus` + `pool_quote` + `creator_owed` + `platform_owed` |
+| Token side | bank balance == `pool_tokens` after graduation, else `curve_supply` + `lp_reserve` - `tokens_sold` |
+
+Measured across six launches on testnet factory
+`inj1u350rygnvuxyzqcwzz6wulu4q70te4ez3hjtk8`, spanning both quote decimal scales
+(18-decimal INJ and 6-decimal test dollars) and both lifecycle states, one of them
+graduated and trading against the locked pool. Delta zero on all twelve comparisons.
+
+Also confirmed by source read rather than by behaviour: all four fee-taking paths
+(`exec_buy`, `exec_sell`, `exec_pool_buy`, `exec_pool_sell`) credit `platform_owed`
+and call `apply_route` exactly once each, so no path can take a fee and drop the
+creator's 70% share. Rounding in `quote_buy` and `quote_sell` is `ceil_div` on the
+reserve being solved for in both directions, so tokens out and payouts both round
+against the trader and never against the pool.
+
+### Why this needed a script and not a test
+
+The contract's own tests assert its counters move correctly **relative to each
+other**, and would pass identically if every counter were scaled by a constant. Only
+an external balance read can catch an accounting error the contract is internally
+consistent about. `scripts/verify-solvency.mjs` is that read, exits non-zero on any
+shortfall, and is worth running against mainnet on a schedule.
+
+Mutation-verified: injecting one base unit of phantom debt makes it report every
+launch short and exit 1, restored it exits 0. A solvency script that can only print
+"solvent" is the vacuous guard this log already records twice.
+
+A surplus is reported and tolerated, not failed: anyone can send a contract funds, and
+treating that as a defect would make the check cry wolf on an unsolicited transfer.
+
 ## 2026-10-11 review, sixth pass (the chart, the curve scale, and a share link)
 
 Triggered by promoting candles to the launch page's main chart and rescaling the curve

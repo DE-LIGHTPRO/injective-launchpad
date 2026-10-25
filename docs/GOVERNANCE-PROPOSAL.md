@@ -98,10 +98,19 @@ injectived tx gov submit-proposal proposal.json \
 >
 > Source: https://github.com/DE-LIGHTPRO/injective-launchpad
 >
-> The contracts run on Injective testnet now, factory
-> `inj1gucswq9mjf05ye3qjhf6wzryehhp4ctpmn47ul`, where the fee split, the graduation
+> The contracts run on Injective testnet now, where the fee split, the graduation
 > transition and the post-graduation fee routing have each been exercised against the
 > chain. The Rust suite is 153 tests.
+>
+> Solvency is checked against the chain rather than asserted. `scripts/verify-solvency.mjs`
+> asks the bank module what each launch holds and compares it to every claim recorded in
+> that launch's own state: on the quote side `inj_collected + lp_bonus + pool_quote +
+> creator_owed + platform_owed`, and on the token side the pool's tokens after
+> graduation or the unsold curve supply plus LP reserve before it. Across six launches
+> on testnet factory `inj1u350rygnvuxyzqcwzz6wulu4q70te4ez3hjtk8`, spanning both quote
+> decimal scales and both lifecycle states, the difference is zero on all twelve
+> comparisons. Anyone can re-run it against any factory, and it exits non-zero on a
+> shortfall, so it is also usable as a monitor.
 >
 > Disclosure: the CosmWasm contracts have not had an independent third-party audit. An
 > external review of the application was completed and its eighteen findings addressed,
@@ -158,10 +167,18 @@ the first time anyone has heard of this.
 > and cannot redirect them: the contract pays the recorded addresses, so a compromised
 > keeper key wastes its own gas and nothing else.
 >
-> **State of it.** Live on Injective testnet, factory
-> `inj1gucswq9mjf05ye3qjhf6wzryehhp4ctpmn47ul`. 153 Rust tests on the contracts and 624
+> **State of it.** Live on Injective testnet. 153 Rust tests on the contracts and 624
 > on the application. The fee split, the graduation transition and the post-graduation
 > fee routing have each been exercised against testnet rather than only in tests.
+>
+> **Solvency, checked rather than claimed.** A contract's own tests assert its counters
+> move correctly relative to each other, and would pass identically if every counter
+> were scaled by a constant. So `scripts/verify-solvency.mjs` asks the bank module what
+> each launch actually holds and compares it against every claim in that launch's state.
+> Across six testnet launches, both quote decimal scales, and one launch already
+> graduated and trading against its locked pool, the difference is zero on all twelve
+> comparisons, to the base unit. It is in the repo, it runs against any factory
+> including a mainnet one, and it exits non-zero on a shortfall. Please run it.
 >
 > **Source.** https://github.com/DE-LIGHTPRO/injective-launchpad
 >

@@ -369,9 +369,19 @@ sees, not one that stops the deployment. Getting both right here is the cheap pl
 
 ```bash
 node scripts/verify-deployment.mjs https://your-domain
+node scripts/verify-solvency.mjs
 ```
 
-It reads the served chunks rather than the env, so it answers "is the live site the
+The second one asks the bank module what every launch on the factory actually holds and
+compares it against the claims recorded in that launch's own state, on both the quote
+and the token side. It exits non-zero on a shortfall, so it is worth running on a
+schedule rather than once. It is the only check here that can catch an accounting error
+the contract is internally consistent about, which is the class the contract's own tests
+cannot see: they assert the counters move correctly relative to each other and would
+pass identically if every counter were scaled by a constant. A surplus is reported and
+tolerated, because anyone can send a contract funds.
+
+`verify-deployment.mjs` reads the served chunks rather than the env, so it answers "is the live site the
 one I think is live" instead of "did I set the variable". It also checks the factory
 on chain: admin, platform, launch fee, that the curve code id it instantiates is one
 the app pins, and that every allowlisted quote has an opening reserve.

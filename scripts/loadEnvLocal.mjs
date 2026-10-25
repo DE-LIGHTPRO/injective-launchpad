@@ -74,3 +74,40 @@ export function loadEnvLocal(onError = (msg, fix) => {
     if (process.env[key] === undefined) process.env[key] = value;
   }
 }
+
+/**
+ * The app's `NEXT_PUBLIC_*` configuration, which is where the factory address lives.
+ *
+ * Separate from `loadEnvLocal` and never mode-checked, because nothing in this file
+ * is a secret: `NEXT_PUBLIC_*` is inlined into the browser bundle at build time, so
+ * every value in it is already published. Refusing to read it at 0644 would be
+ * theatre.
+ *
+ * Read-only scripts need it. `verify-solvency.mjs` asks the chain what every launch
+ * holds, and it cannot find a single launch without the factory address, which no
+ * operator has any reason to duplicate into `scripts/.env.local`.
+ *
+ * `payout-keeper.mjs` still carries its own copy of both loaders. It is on a
+ * fifteen-minute schedule and a break there looks exactly like an idle run, so
+ * folding it in is worth doing on its own rather than as a side effect of adding a
+ * read-only script.
+ */
+export function loadAppEnv() {
+  const appPath = join(HERE, '..', 'app', '.env.local');
+  if (!existsSync(appPath)) return;
+  for (const line of readFileSync(appPath, 'utf8').split('\n')) {
+    const t = line.trim();
+    if (t.length === 0 || t.startsWith('#')) continue;
+    const eq = t.indexOf('=');
+    if (eq < 1) continue;
+    const key = t.slice(0, eq).trim();
+    let value = t.slice(eq + 1).trim();
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1);
+    }
+    if (process.env[key] === undefined) process.env[key] = value;
+  }
+}
