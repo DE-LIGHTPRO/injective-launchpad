@@ -1310,7 +1310,9 @@ button.ghost { background: transparent; border: 1px solid var(--line); color: va
 
 /* The curve explorer: the one thing on this page nobody else has. */
 .explorer {
-  margin-top: var(--space-6);
+  /* Follows its own `.section-head`, so this is the 12 of a heading-to-content
+     gap rather than the 48 of a section boundary. */
+  margin-top: var(--space-3);
   padding: var(--space-5);
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-lg);
@@ -1823,7 +1825,7 @@ header.top .brand { display: inline-flex; align-items: center; gap: var(--space-
  * launch's quote and a single list spanning pairs ranks numbers that cannot be
  * compared.
  */
-.pairs { margin-top: var(--space-5); }
+.pairs { margin-top: var(--space-7); } /* a section boundary: see the rhythm block */
 .pairs-grid {
   display: grid;
   /* `min(..., 100%)` so a track can shrink below its floor rather than pushing the
@@ -2214,7 +2216,8 @@ header.top .chip { font-size: var(--text-micro); letter-spacing: 0.04em; padding
   background: var(--surface-1);
   border: 1px solid var(--line);
   border-radius: var(--radius-lg, 16px);
-  margin-bottom: var(--space-6);
+  /* A section boundary like every other one: --space-7, not -6. */
+  margin-bottom: var(--space-7);
 }
 /*
  * LARGER, AND THE CEILING IS WHAT MOVED. It clamped to 2.875rem (46px), which on a
@@ -2453,7 +2456,29 @@ table.board .dim { color: var(--text-faint); }
 }
 
 /* --------------------------------------------------------- top movers -- */
-.hill { margin-top: 0; }
+/*
+ * THE PAGE'S VERTICAL RHYTHM, WRITTEN DOWN.
+ *
+ * There already was one and I said there was not. Measured across the home page's
+ * sixteen top-level children, the spacing is 48px between sections and 12px between a
+ * heading and the thing it introduces - `--space-7` and `--space-3`, used consistently
+ * almost everywhere. My first reading reported gaps of "32, 48, 24, 0, 24, 186, 12,
+ * 107" and called it noise, but that measurement filtered out every child under 40px
+ * tall, so the large figures were a gap PLUS the elements I had hidden from myself.
+ * Re-measured without the filter, the system was obvious and only four places broke it.
+ *
+ * Those four are fixed here rather than in each component, so the rule is readable in
+ * one place:
+ *
+ *     totals -> hill      0   two sections flush against each other
+ *     hero   -> ticker   32   --space-6 where every other section boundary is -7
+ *     hill   -> pairs    24   --space-5, same
+ *     head   -> explorer 32   a heading and its own content, which is a 12 gap
+ *
+ * `.hill` carried `margin-top: 0` and `margin-bottom: var(--space-2)`, which is where
+ * the 0 came from: it leant on whatever sat above it and then pushed 8px down.
+ */
+.hill { margin-top: var(--space-7); margin-bottom: 0; }
 /*
  * `.hill-head h2 { font-size: var(--text-lg) }` was here and is gone. It restated the
  * size `h2` already had, so it did nothing - until `h2` moved to 22px, at which point
@@ -2554,7 +2579,7 @@ table.board .dim { color: var(--text-faint); }
 
 .ticker { margin: 0 0 var(--space-7); }
 .ticker li { padding-top: 9px; padding-bottom: 9px; font-size: var(--text-sm); }
-.hill { margin-bottom: var(--space-2); }
+/* `.hill`'s margins are set once, with the rhythm block above. */
 .metric-strip { background: var(--surface-1); }
 .metric-strip > div { background: transparent; }
 
