@@ -2860,3 +2860,55 @@ table.board .dim { color: var(--text-faint); }
   .tx-steps { flex-wrap: wrap; }
   .tx-steps li { flex: 0 0 calc(50% - var(--space-2)); }
 }
+
+/* ------------------------------------------------------------ empty states -- */
+
+/*
+ * ONE SHAPE FOR "NOTHING HERE", because there were three.
+ *
+ * The watchlist had a heading, a sentence and a button in a panel; Portfolio had a
+ * bare paragraph; Claim had a bare paragraph in a dashed box with no heading at all,
+ * which made it the thinnest page in the product. The same situation should not look
+ * like three different products.
+ *
+ * Centred and generously padded on purpose: an empty state is the whole page, not a
+ * notice at the top of one, so it should occupy the space rather than apologise for it.
+ */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: var(--space-8) var(--space-5);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface-1);
+}
+.empty-state h3 { margin: var(--space-4) 0 0; font-size: var(--text-xl); letter-spacing: -0.015em; }
+.empty-state .note { margin: var(--space-2) 0 0; max-width: 46ch; }
+.empty-state .go { margin-top: var(--space-5); }
+/*
+ * The mark carries its own floor-glow, so it needs room beneath it that padding on the
+ * heading cannot supply without pushing the glow into the text.
+ */
+.empty-mark { display: block; width: 120px; height: 88px; }
+
+/*
+ * THE BUTTON IS NOT THE PANEL. `.go` is `width: 100%` because it is normally the submit
+ * control at the foot of a form, where filling the column is right. Centred in an empty
+ * state it stretched to the full card and read as a banner rather than an action.
+ */
+.empty-state .go { width: auto; min-width: 12rem; }
+/*
+ * NESTED IN A CARD, THE EMPTY STATE DROPS ITS OWN CHROME. `/claim` renders `ClaimFees`
+ * inside a `.card`, so the state's border and surface sat inside an identical border
+ * and surface - a frame around a frame, which reads as a mistake because it is one.
+ * Handled here rather than by passing a flag through two components: whether there is
+ * already a panel is a fact about the surroundings, which is what a descendant
+ * selector is for.
+ */
+.card > .empty-state {
+  border: none;
+  background: transparent;
+  padding: var(--space-6) var(--space-4);
+}

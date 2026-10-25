@@ -18,6 +18,8 @@ import { fmt } from '@/lib/curve';
 import { selectClaimable, type ClaimRow } from '@/lib/claimable';
 import { launchPath } from '@/lib/launchPath';
 import { CREATOR_FEE_SHARE_BPS, PLATFORM_FEE_SHARE_BPS } from '@/lib/launchLimits';
+import { EmptyState } from './EmptyState';
+import { MarkFees } from './EmptyMark';
 
 /**
  * Every fee this wallet can claim, in one place and one transaction.
@@ -169,12 +171,18 @@ export function ClaimFees() {
 
   if (!account) {
     return (
-      <div className="empty">
-        <p>
-          Connect a wallet, using the button in the header, to see the fees your
-          launches have earned.
-        </p>
-      </div>
+      <EmptyState mark={<MarkFees />} title="No fees to claim yet">
+        {/*
+            The share is NOT restated here. `fee-ceiling-claims.test.ts` caught the
+            first version saying "70% of every trading fee", which is wrong: the share
+            applies to a launch's own fee rate, not to the opening premium, so "every"
+            overstates what a creator is owed. The page's subtitle two lines above
+            already states it correctly, and a second copy is one more place for the
+            two to disagree.
+          */}
+        Connect a wallet, using the button in the header, to see the fees your
+        launches have earned.
+      </EmptyState>
     );
   }
 

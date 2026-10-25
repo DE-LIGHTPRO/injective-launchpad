@@ -9,6 +9,8 @@ import { fmt } from '@/lib/curve';
 import { FIXED_TOTAL_SUPPLY } from '@/lib/launchLimits';
 import { TokenLogo } from './TokenLogo';
 import { rowQuoteLabel, type LaunchRow } from '@/lib/launchList';
+import { EmptyState } from './EmptyState';
+import { MarkHoldings } from './EmptyMark';
 
 /*
  * The divisor is `FIXED_TOTAL_SUPPLY`, not a local copy of it.
@@ -93,13 +95,16 @@ export function Portfolio({ rows }: { rows: LaunchRow[] }) {
   }, [holdings]);
 
   if (!account) {
+    /*
+     * No action here on purpose. The header's connect button is sticky and always in
+     * view, so a second one would be the same control twice on one screen, and
+     * `EmptyState` makes the action optional for exactly that reason.
+     */
     return (
-      <div className="empty" style={{ marginTop: 'var(--space-5)' }}>
-        {/* The header's connect button is sticky and always in view; a second one
-            here would be the same control twice on one screen. */}
-        <p>Connect a wallet, using the button in the header, to see what it holds
-          across launches.</p>
-      </div>
+      <EmptyState mark={<MarkHoldings />} title="No holdings to show">
+        Connect a wallet, using the button in the header, to see what it holds
+        across launches.
+      </EmptyState>
     );
   }
 
@@ -112,17 +117,28 @@ export function Portfolio({ rows }: { rows: LaunchRow[] }) {
   }
 
   if (holdings.length === 0) {
+    /*
+     * A FAILED READ IS NOT AN EMPTY WALLET, which is why the title changes with it.
+     * Showing "No launch tokens yet" over balances that could not be read states
+     * something nobody measured, and it is the direction that matters: a holder told
+     * they hold nothing has been given a wrong answer, not a missing one.
+     */
     return (
-      <div className="empty" style={{ marginTop: 'var(--space-5)' }}>
-        <p>
-          {failed
-            ? 'Balances could not be read just now. Try again in a moment.'
-            : 'This wallet holds no launch tokens yet.'}
-        </p>
-        <div style={{ marginTop: 'var(--space-3)' }}>
-          <Link href="/" className="go ghost">Browse launches</Link>
-        </div>
-      </div>
+      <EmptyState
+        mark={<MarkHoldings />}
+        title={failed ? 'Balances could not be read' : 'No launch tokens yet'}
+        action={
+          failed ? null : (
+            <Link href="/" className="go ghost">
+              Browse launches
+            </Link>
+          )
+        }
+      >
+        {failed
+          ? 'The network did not answer just now, so this is not a statement about what the wallet holds. Try again in a moment.'
+          : 'Tokens bought from any launch on this board will appear here.'}
+      </EmptyState>
     );
   }
 
