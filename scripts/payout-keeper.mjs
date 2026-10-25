@@ -176,7 +176,32 @@ if (DRY) {
 
 const privateKey = PrivateKey.fromMnemonic(mnemonic);
 const sender = privateKey.toBech32();
-const broadcaster = new MsgBroadcasterWithPk({ privateKey, network });
+/*
+ * SIMULATE, BECAUSE THE FEE IS CHARGED ON THE LIMIT AND NOT ON WHAT IS USED.
+ *
+ * Measured on the keeper's own first mainnet-shaped run, testnet tx
+ * 7DE3C551…C22BDD: gas_wanted 550,000 against gas_used 253,005. The declared fee is
+ * `gas_wanted x price` and is deducted in full - unused gas is never refunded, which
+ * 56 consecutive MsgExecuteContract transactions confirmed - so this wallet was paying
+ * roughly twice what its payouts cost, every run, forever.
+ *
+ * The flat limits below are where that came from: `300_000 + 250_000 * n` is sized for
+ * the worst batch rather than the one being sent. They stay, because `getTxWithStdFee`
+ * falls back to the supplied fee when a simulation fails or returns no gasUsed, so an
+ * unreachable node degrades to the old behaviour instead of stopping the payouts. That
+ * is the same asymmetry the app's signing path uses: simulation improves the common
+ * case and never becomes a new way to fail.
+ *
+ * 1.5 rather than the SDK's default 1.1. A payout that runs out of gas costs the fee
+ * and pays nobody, and this runs unattended with no one watching to retry it; the
+ * margin is worth more here than the fraction of a cent it costs.
+ */
+const broadcaster = new MsgBroadcasterWithPk({
+  privateKey,
+  network,
+  simulateTx: true,
+  gasBufferCoefficient: 1.5,
+});
 console.log(`\n  keeper  ${sender}`);
 
 const msgFor = (curve) =>
