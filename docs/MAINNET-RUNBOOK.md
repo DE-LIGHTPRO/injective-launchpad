@@ -175,21 +175,85 @@ day and **refuses past 15% drift**, naming the number you want, before it has pa
 store anything. Leave it unset and the deploy reports what your constant opens at and
 says plainly that it cannot tell you whether that is the figure you chose.
 
-### 7. Deploy
+### 7. Upload the code, which is a governance vote and not a transaction
+
+**This step takes four days and 200 INJ. Start it before anything else on this list.**
+
+Injective mainnet runs wasmd with a permissioned uploader. Measured on chain, not
+read from a doc:
+
+```
+code_upload_access             AnyOfAddresses ["inj1ez42atafr3ujpudsuk666jpjj9t53sehcynh3a"]
+instantiate_default_permission Everybody
+```
+
+One address for the whole of `injective-1`, and it is not ours, so `MsgStoreCode`
+can never succeed from the deploy key. It fails inside the SDK's gas simulation as a
+raw stack trace ending `can not create code: unauthorized` at `keeper.go:175`, which
+reads like a bug in the script or a bad key rather than a chain policy that no
+amount of retrying will move. `deploy.mjs` now refuses before step 5 and prints
+these commands instead.
 
 ```bash
 cd /path/to/injective-launchpad
 ./scripts/build-wasm.sh
 
+# One proposal per contract. 100 INJ deposit each.
+injectived tx wasm submit-proposal wasm-store \
+    target/wasm32-unknown-unknown/release/curve.wasm \
+    --title "Upload injpad curve" \
+    --summary "Bonding-curve launchpad: fixed supply, liquidity locked at graduation." \
+    --instantiate-everybody true \
+    --deposit 100000000000000000000inj \
+    --chain-id injective-1 --node https://sentry.tm.injective.network:443 \
+    --gas 20000000 --gas-prices 160000000inj --from <your key>
+# then the same for factory.wasm
+```
+
+Governance parameters, read from `injective-1` on 25 Oct 2026:
+
+| | |
+|---|---|
+| deposit to enter voting | **100 INJ per proposal**, so 200 INJ for both |
+| enough to submit | 10 INJ (`min_initial_deposit_ratio` 0.1), rest due within 2 days or it lapses |
+| voting period | **4 days** (`expedited` is 1 day but costs 500 INJ) |
+| quorum / threshold / veto | 33.4% / 50% / 33.4% |
+| deposit refunded | on pass, on reject, and on a failed quorum |
+| deposit **burned** | only if 33.4% vote `NoWithVeto` |
+
+Build the wasm **once** and propose those exact bytes. Step 7b verifies the chain's
+sha256 against a fresh build, so rebuilding between the proposal and the deploy, on
+a different toolchain or with any source change, fails there rather than
+instantiating something nobody voted on.
+
+### 7b. Instantiate, once both proposals have passed
+
+```bash
 INJ_QUOTE_VIRTUAL_WHOLE=from-step-6 \
 INJ_OPEN_TARGET_USD=5000 \
 INJ_LAUNCH_FEE=0.2 \
 INJ_PLATFORM_ADDRESS=inj1... \
 INJ_FACTORY_ADMIN=inj1... \
 INJ_FACTORY_WASM_ADMIN=inj1... \
-NEXT_PUBLIC_NETWORK=mainnet \
-node scripts/deploy.mjs
+INJ_CURVE_CODE_ID=<from the passed proposal> \
+INJ_FACTORY_CODE_ID=<from the passed proposal> \
+node scripts/deploy.mjs --mainnet --i-understand-this-is-real-money
 ```
+
+**The chain comes from `--mainnet`, not from `NEXT_PUBLIC_NETWORK`.** This block
+used to read `NEXT_PUBLIC_NETWORK=mainnet \` and `node scripts/deploy.mjs`, and
+following it exactly deployed to **testnet** and reported success: two contracts
+stored, a factory instantiated, code ids 40066/40067, on `injective-888`. Nothing in
+the output was false - it says `-> testnet` on its second line. Every other piece of
+this project does take its chain from `NEXT_PUBLIC_NETWORK` (the app,
+`payout-keeper.mjs`, `mainnet-readiness.mjs`), which is exactly why that command was
+the natural thing to type. `deploy.mjs` now refuses when the two disagree rather
+than quietly picking one, but the runbook was the half that would have cost the
+money, so it is corrected here too.
+
+Instantiation needs no proposal, because `instantiate_default_permission` is
+`Everybody`. The script verifies each code id holds the sha256 of the bytes just
+built, then instantiates.
 
 The signing key is **not** on that command line. `INJ_MNEMONIC` (or
 `INJ_PRIVATE_KEY`, one or the other) lives in `scripts/.env.local` at mode 0600,

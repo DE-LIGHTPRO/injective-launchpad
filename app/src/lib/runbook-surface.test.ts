@@ -35,6 +35,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, sep } from 'node:path';
 import { isRead, mergeReads, scanEnvReads, type EnvReads } from './testing/envScan.ts';
+import { deployCommand } from './testing/runbookBlocks.ts';
 
 const APP_SRC = join(import.meta.dirname, '..');
 const ROOT = join(APP_SRC, '..', '..');
@@ -188,9 +189,29 @@ test('every variable the deploy refuses without is in the command you paste', ()
     `only ${refused.length} refusals found in deploy.mjs; a reworded message makes this guard vacuous rather than failing`,
   );
 
-  const block = RUNBOOK.slice(RUNBOOK.indexOf('### 7. Deploy'));
-  const command = block.slice(0, block.indexOf('node scripts/deploy.mjs'));
-  assert.ok(command.length > 50, 'the step 7 command block could not be found');
+  // Anchored on the command rather than the heading above it, and shared with
+  // `derived-constant-wiring.test.ts`, which had the identical brittle anchor. See
+  // `testing/runbookBlocks.ts` for why a heading anchor fails silently.
+  const command = deployCommand(RUNBOOK);
+
+  /*
+   * THE INVOCATION, not only the variables in it. The runbook said
+   * `NEXT_PUBLIC_NETWORK=mainnet \` and `node scripts/deploy.mjs`, which named every
+   * required variable and so satisfied every assertion in this file, and deployed to
+   * TESTNET. The chain is the one thing in this command that is not a variable: every
+   * other part of the project reads NEXT_PUBLIC_NETWORK, and this script alone takes
+   * `--mainnet`, which is what made the wrong form the natural thing to write.
+   */
+  for (const flag of ['--mainnet', '--i-understand-this-is-real-money']) {
+    assert.ok(
+      command.includes(flag),
+      `the runbook's deploy command is missing ${flag}, so following it deploys to testnet`,
+    );
+  }
+  assert.ok(
+    !/NEXT_PUBLIC_NETWORK=mainnet/.test(command),
+    "the runbook's deploy command sets NEXT_PUBLIC_NETWORK=mainnet, which deploy.mjs refuses and which used to deploy to testnet silently",
+  );
 
   assert.deepEqual(
     refused.filter((v) => !command.includes(`${v}=`)).sort(),

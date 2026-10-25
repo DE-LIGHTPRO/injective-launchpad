@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { maskComments } from './testing/maskComments.ts';
+import { deployCommand } from './testing/runbookBlocks.ts';
 
 /**
  * A constant the runbook tells you to derive must be a constant the deploy can receive.
@@ -100,9 +101,10 @@ test('the runbook names the variable and does not offer a literal to copy', () =
     /Carry the number into step 7 as `INJ_QUOTE_VIRTUAL_WHOLE`/,
     'the runbook no longer tells the operator where the derived number goes',
   );
-  const deployBlock = RUNBOOK.slice(RUNBOOK.indexOf('### 7. Deploy'));
-  const command = deployBlock.slice(0, deployBlock.indexOf('node scripts/deploy.mjs'));
-  assert.ok(command.length > 50, 'step 7 command block not found, so nothing was measured');
+  // Not `indexOf('### 7. Deploy')`: that anchored on the heading's wording, and
+  // splitting step 7 into a governance upload and an instantiate emptied the slice.
+  // `deployCommand` throws instead of returning nothing to measure.
+  const command = deployCommand(RUNBOOK);
   assert.match(
     command,
     /INJ_QUOTE_VIRTUAL_WHOLE=/,
