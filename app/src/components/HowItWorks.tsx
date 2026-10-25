@@ -1,5 +1,6 @@
 import { NETWORK } from '@/lib/config';
 import { MAX_EARLY_FEE_BPS } from '@/lib/launchRules';
+import { StepCreate, StepTrade, StepGraduate } from './StepArt';
 
 /**
  * What this is, for someone who arrives before there is anything to look at.
@@ -28,7 +29,15 @@ export function HowItWorks() {
         </h2>
         <ol className="steps">
           <li>
-            <span className="step-n">1</span>
+            {/*
+                THE NUMBER BECAME A WORD, AND GAINED A PICTURE. `1` in a badge is an
+                ordinal and nothing else; "STEP ONE" above a drawing of the step reads
+                as a stage in a process, which is what this list is. The art is a
+                diagram rather than decoration - see `StepArt` on why each shape is the
+                shape it is - so it carries meaning rather than filling space.
+              */}
+            <StepCreate />
+            <span className="step-n">Step one</span>
             <div>
               <strong>Create</strong>
               <p className="note">
@@ -38,7 +47,8 @@ export function HowItWorks() {
             </div>
           </li>
           <li>
-            <span className="step-n">2</span>
+            <StepTrade />
+            <span className="step-n">Step two</span>
             <div>
               <strong>Trade on the curve</strong>
               <p className="note">
@@ -48,7 +58,8 @@ export function HowItWorks() {
             </div>
           </li>
           <li>
-            <span className="step-n">3</span>
+            <StepGraduate />
+            <span className="step-n">Step three</span>
             <div>
               <strong>Graduate</strong>
               <p className="note">
