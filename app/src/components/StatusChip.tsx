@@ -47,5 +47,11 @@ export function StatusChip({
   }, [status]);
 
   const { text, tone } = statusLabel(status);
-  return <span className={`chip ${tone}`}>{text}</span>;
+  /*
+   * `chip-status` adds the dot and the uppercase treatment, and the dot takes
+   * `currentColor`, so each tone colours its own without a second mapping here. The
+   * tones themselves are unchanged and still come from `statusLabel`: this is how a
+   * launch LOOKS, not a second opinion about what it is.
+   */
+  return <span className={`chip chip-status ${tone}`}>{text}</span>;
 }
