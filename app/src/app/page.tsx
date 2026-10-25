@@ -62,6 +62,9 @@ function heroStats(rows: Row[]): HeroStats | null {
   const label = rowQuoteLabel(group[0]);
   return {
     launches: rows.length,
+    // Counted over every row, like `launches` and `graduated`: a count is comparable
+    // across pairs where an amount is not.
+    live: rows.filter((r) => !r.graduated).length,
     liquidity: `${compact(t.raised, decimals)} ${label}`,
     graduated: rows.filter((r) => r.graduated).length,
     paidToCreators: `${compact(t.paidToCreators, decimals)} ${label}`,

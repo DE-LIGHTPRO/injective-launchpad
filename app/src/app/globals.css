@@ -352,6 +352,30 @@ header.top .spacer { margin-left: auto; }
  * compete with the launches somebody can actually trade.
  */
 .chip.muted { color: var(--text-dim); border-color: var(--line-strong); background: transparent; }
+/*
+ * A STATUS CHIP, WITH A DOT AND ITS OWN COLOUR.
+ *
+ * The network chip was 11px grey on transparent beside a filled Create button, which
+ * is the least prominent thing in the header - and what it says is whether the money
+ * on this screen is real. I measured it at 8.06:1 earlier and called it a contrast
+ * defect, which it is not; it passes AA comfortably. It is a PROMINENCE decision, and
+ * the decision was wrong in the direction that matters.
+ *
+ * Amber for testnet and green for mainnet, both reusing chip variants that already
+ * exist. The dot is a `::before` rather than a character so it cannot be read aloud as
+ * punctuation or break the accessible name.
+ */
+.chip-status { text-transform: uppercase; letter-spacing: 0.07em; font-weight: 600; }
+.chip-status::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  margin-right: 6px;
+  vertical-align: 1px;
+}
 
 /* ------------------------------------------------------------- typography -- */
 
@@ -2236,6 +2260,19 @@ header.top .chip { font-size: var(--text-micro); letter-spacing: 0.04em; padding
    change on the three numbers the front page is built around, with no defect behind
    it, which is the opposite of what the scale is for. */
 .stat .v { display: block; font-size: 1.25rem; font-weight: 600; letter-spacing: -0.02em; margin-top: 2px; }
+/*
+ * THE THIRD TIER. Label over value is two lines of equal weight, which reads as a
+ * table rather than a figure. This line is the quietest of the three on purpose: it
+ * carries the scope and the meaning that the label used to try to hold, and it must
+ * not compete with the number it explains.
+ */
+.stat-note {
+  display: block;
+  margin-top: var(--space-1);
+  font-size: var(--text-xs);
+  color: var(--text-faint);
+  line-height: 1.4;
+}
 @media (max-width: 720px) {
   .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .stat:nth-child(3) { border-left: none; }

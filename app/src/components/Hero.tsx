@@ -2,6 +2,13 @@ import Link from 'next/link';
 
 export interface HeroStats {
   launches: number;
+  /**
+   * How many of those are still on their curve.
+   *
+   * A board-wide COUNT like `launches` and `graduated`, not a money figure, so it
+   * spans every pair without the cross-quote problem the amounts below have.
+   */
+  live: number;
   /** Already formatted with its unit, e.g. "188.89 INJ". */
   liquidity: string;
   graduated: number;
@@ -68,30 +75,52 @@ export function Hero({ stats }: { stats: HeroStats | null }) {
         </a>
       </div>
       {stats && (
+        /*
+            THREE TIERS, AND THE THIRD FIXED A DEFECT RATHER THAN DECORATING.
+            Label over value is two lines of equal weight, which reads as a table. The
+            caption underneath carries the meaning the label was straining to hold.
+
+            It also removes a duplicated unit. Two of these read "Liquidity in INJ"
+            above "1.10 INJ" and "Paid to creators in INJ" above "0.0138 INJ" - the
+            asset named twice in one cell, because the label was doing two jobs at
+            once. The value already says which asset it is; the label only ever needed
+            to say WHAT the number is.
+
+            The scope moves to the caption rather than disappearing, which is the half
+            that matters. These two money figures cover the busiest quote only, since
+            summing 18-decimal INJ with 6-decimal USDC is wrong by twelve orders of
+            magnitude and there is no oracle here. `moneyQuote` is non-null exactly
+            when that scope is narrower than the board, and the caption then says so in
+            words that have room to be clear.
+          */
         <dl className="stats">
           <div className="stat">
             <dt className="k">Launches</dt>
             <dd className="v">{stats.launches}</dd>
+            <dd className="stat-note">
+              {stats.live === stats.launches ? 'all live' : `${stats.live} live`}
+            </dd>
           </div>
           <div className="stat">
-            <dt className="k">
-              {stats.moneyQuote ? `Liquidity in ${stats.moneyQuote}` : 'Total liquidity'}
-            </dt>
+            <dt className="k">Liquidity</dt>
             <dd className="v">{stats.liquidity}</dd>
+            <dd className="stat-note">
+              {stats.moneyQuote ? `${stats.moneyQuote} pairs only` : 'in curve reserves'}
+            </dd>
           </div>
           <div className="stat">
             {/* A COUNT, so it spans every pair honestly: ranking or summing amounts
                 across quotes is the error, counting launches is not. */}
             <dt className="k">Graduated</dt>
             <dd className="v">{stats.graduated}</dd>
+            <dd className="stat-note">liquidity locked</dd>
           </div>
           <div className="stat">
-            <dt className="k">
-              {stats.moneyQuote
-                ? `Paid to creators in ${stats.moneyQuote}`
-                : 'Paid to creators'}
-            </dt>
+            <dt className="k">Paid to creators</dt>
             <dd className="v">{stats.paidToCreators}</dd>
+            <dd className="stat-note">
+              {stats.moneyQuote ? `${stats.moneyQuote} pairs only` : 'fees claimed so far'}
+            </dd>
           </div>
         </dl>
       )}

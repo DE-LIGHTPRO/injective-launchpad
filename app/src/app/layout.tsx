@@ -97,7 +97,16 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 banner and the network line in the footer still say both things.
               */}
             {isDemoMode() && <span className="chip warn hide-sm">demo</span>}
-            <span className="chip hide-sm">{NETWORK.name}</span>
+            {/*
+                It still reads whatever `NETWORK.name` is, so it follows the deployment
+                rather than being set by hand - what changed is that it now looks like
+                the safety label it is. Amber on testnet, green on mainnet.
+              */}
+            <span
+              className={`chip chip-status hide-sm ${NETWORK.name === 'mainnet' ? 'accent' : 'warn'}`}
+            >
+              {NETWORK.name}
+            </span>
             {/*
                 The destination comes from the same place the footer's reads it from; the
                 label is shorter here because the header has a button's worth of room.
