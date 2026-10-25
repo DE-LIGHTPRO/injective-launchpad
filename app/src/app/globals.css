@@ -2977,3 +2977,57 @@ table.board .dim { color: var(--text-faint); }
     var(--surface-1);
 }
 .card-warning h2 { color: var(--text); }
+
+/*
+ * THE CONTRACT GUARANTEES, WITH A SUBJECT BESIDE THEM.
+ *
+ * Six cards in an auto-fit grid read as six equal cards and nothing more. These six
+ * are the product's argument - the reasons to use this pad over one that can pull
+ * liquidity - so they get the weight of one panel with a subject next to them rather
+ * than six tiles of the same size as everything else on the page.
+ *
+ * The art column is fixed-ish and the list takes the rest, collapsing to one column
+ * below 900px where there is no room to sit side by side.
+ */
+.guarantees-panel {
+  display: grid;
+  grid-template-columns: minmax(min(18rem, 100%), 0.8fr) 1.2fr;
+  gap: var(--space-6);
+  align-items: center;
+  padding: var(--space-6);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface-1);
+}
+.guarantees-art { display: flex; justify-content: center; min-width: 0; }
+.guarantees-art img { width: 100%; height: auto; max-width: 22rem; }
+/*
+ * The items lose their own borders inside the panel: a card inside a card is a frame
+ * around a frame, and the panel is already the container.
+ */
+/*
+ * TWO COLUMNS INSIDE THE PANEL. `.guarantees` floors its tracks at 17rem, which is
+ * right when the grid has the full page width and wrong here: the list column is about
+ * 600px, so two 17rem tracks plus the gap do not fit and all six items stacked into
+ * one column. The floor is the panel's business, not the grid's.
+ */
+.guarantees-panel .guarantees {
+  gap: var(--space-5) var(--space-6);
+  grid-template-columns: repeat(auto-fit, minmax(min(13rem, 100%), 1fr));
+}
+.guarantees-panel .guarantees > div {
+  padding: 0;
+  border: none;
+  background: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+/* The check sits on the title's baseline rather than above it. */
+.guarantees strong { display: flex; align-items: center; gap: var(--space-2); }
+.guarantees strong svg { color: var(--buy); flex: none; }
+
+@media (max-width: 900px) {
+  .guarantees-panel { grid-template-columns: 1fr; }
+  /* Art first on a phone would push the whole argument below the fold. */
+  .guarantees-art { order: 2; }
+}

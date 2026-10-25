@@ -1,6 +1,8 @@
 import { NETWORK } from '@/lib/config';
 import { MAX_EARLY_FEE_BPS } from '@/lib/launchRules';
 import { StepCreate, StepTrade, StepGraduate } from './StepArt';
+import Image from 'next/image';
+import { CheckIcon } from './Icons';
 
 /**
  * What this is, for someone who arrives before there is anything to look at.
@@ -73,34 +75,68 @@ export function HowItWorks() {
 
       <section className="explain" aria-labelledby="guarantees-heading">
         <h2 id="guarantees-heading">Enforced by the contract</h2>
-        <div className="guarantees">
+        {/*
+            ART BESIDE THE LIST, NOT ABOVE IT. Six cards in an auto-fit grid read as six
+            equal cards and nothing more. These six are the product's argument - the
+            reasons to use this pad rather than one that can pull liquidity - so they get
+            the weight of a panel with a subject beside them.
+
+            A closed ring, because that is what the list is about: liquidity with no way
+            out of it. Decorative and `aria-hidden`, since all six claims are already
+            stated in words beside it.
+          */}
+        <div className="guarantees-panel">
+          <div className="guarantees-art">
+            <Image
+              src="/locked-ring.png"
+              alt=""
+              aria-hidden="true"
+              width={520}
+              height={520}
+              sizes="(max-width: 900px) 70vw, 32vw"
+            />
+          </div>
+          <div className="guarantees">
           <div>
-            <strong>Non-custodial</strong>
+            <strong>
+              <CheckIcon size={15} />
+              Non-custodial</strong>
             <p className="note">Reserves back the token. Fees are held apart and paid only to who earned them.</p>
           </div>
           <div>
-            <strong>Fixed supply</strong>
+            <strong>
+              <CheckIcon size={15} />
+              Fixed supply</strong>
             <p className="note">The mint key ends with the launch contract, which cannot mint.</p>
           </div>
           <div>
-            <strong>Locked liquidity</strong>
+            <strong>
+              <CheckIcon size={15} />
+              Locked liquidity</strong>
             <p className="note">Graduated liquidity has no withdrawal path, for anyone.</p>
           </div>
           <div>
-            <strong>Anti-sniping</strong>
+            <strong>
+              <CheckIcon size={15} />
+              Anti-sniping</strong>
             <p className="note">
               Optional opening fee up to {MAX_EARLY_FEE_BPS / 100}%, wallet caps and start times. No
               exemptions, including the creator.
             </p>
           </div>
           <div>
-            <strong>Same terms for all</strong>
+            <strong>
+              <CheckIcon size={15} />
+              Same terms for all</strong>
             <p className="note">One supply, one curve and one fee split on every launch.</p>
           </div>
           <div>
-            <strong>Costs shown up front</strong>
+            <strong>
+              <CheckIcon size={15} />
+              Costs shown up front</strong>
             <p className="note">Fee, price impact and minimum received are quoted before you sign.</p>
           </div>
+        </div>
         </div>
       </section>
     </>
