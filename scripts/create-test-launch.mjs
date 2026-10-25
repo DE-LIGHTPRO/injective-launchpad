@@ -89,6 +89,10 @@ const { fixedCurveFor, FIXED_LP_RESERVE } = await import(join(APP, 'src/lib/laun
 const { NETWORK } = await import(join(APP, 'src/lib/config.ts'));
 const { factoryLaunchFee } = await import(join(APP, 'src/lib/chain.ts'));
 
+const rewardRoute = (process.env.INJ_REWARD_ROUTE ?? 'creator').toLowerCase();
+if (!['creator', 'pool'].includes(rewardRoute)) {
+  die(`INJ_REWARD_ROUTE must be "creator" or "pool", not ${rewardRoute}`);
+}
 const symbol = (process.argv[2] ?? `TEST${Date.now().toString().slice(-4)}`).toUpperCase();
 const openingBuyQuote = Number(process.argv[3] ?? 0);
 
@@ -125,6 +129,15 @@ try {
       description:
         'A test launch for Vetta. Fixed supply, one bonding curve, liquidity that locks itself at graduation.',
     },
+    /*
+     * THE ROUTE WAS NOT SETTABLE, SO ONE OF THE TWO WAS UNTESTABLE. `planLaunch` has
+     * taken `rewardRoute` for a while and this script never passed it, so every launch
+     * it has ever made was creator-routed - and the pool route is the half that carried
+     * "a pool-routed launch stranded the creator's share on every trade after
+     * graduation". A script whose job is verifying the contracts could not reach the
+     * branch the bug was in.
+     */
+    ...(rewardRoute !== 'creator' ? { rewardRoute } : {}),
     curve,
     lpReserve: FIXED_LP_RESERVE,
     factory,
