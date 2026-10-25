@@ -79,6 +79,38 @@ if (wantMainnet && !confirmedMainnet) {
   );
 }
 
+/*
+ * THE CHAIN IS A FLAG HERE AND A VARIABLE EVERYWHERE ELSE, so a disagreement is
+ * refused rather than resolved.
+ *
+ * `payout-keeper.mjs`, `mainnet-readiness.mjs` and the app all take the chain from
+ * NEXT_PUBLIC_NETWORK; this script takes it from --mainnet, because an upload is not
+ * something an inherited environment variable should be able to aim at real money.
+ * Both choices are right on their own and together they cost a real deploy: I ran
+ * `NEXT_PUBLIC_NETWORK=mainnet node scripts/deploy.mjs`, watched it report success,
+ * and it had stored two contracts and instantiated a factory on TESTNET. Nothing in
+ * the output was false - it says `→ testnet` on its second line - and nothing in it
+ * contradicted the instruction either, which is what made it easy to miss.
+ *
+ * Obeying the variable is the wrong fix: it would let an exported value bypass the
+ * two-flag confirmation above, which is the one guard standing between a shell and a
+ * mainnet upload. Obeying the flag silently is what already happened. So neither
+ * wins - if the operator has said "mainnet" in one place, they do not get testnet
+ * quietly, they get told the two places disagree.
+ *
+ * Read before `loadEnvLocal` on purpose: this must see what the SHELL set, not what
+ * scripts/.env.local carries, or an ordinary testnet deploy would start refusing
+ * itself over a file it is supposed to be reading.
+ */
+const envNetwork = process.env.NEXT_PUBLIC_NETWORK?.trim();
+if (envNetwork === 'mainnet' && !wantMainnet) {
+  die(
+    'NEXT_PUBLIC_NETWORK=mainnet, but this script takes the chain from --mainnet and would deploy to testnet.',
+    'For mainnet: node scripts/deploy.mjs --mainnet --i-understand-this-is-real-money',
+    'For testnet: drop NEXT_PUBLIC_NETWORK from the command, or set it to testnet.',
+  );
+}
+
 const netName = wantMainnet ? 'mainnet' : 'testnet';
 const network = wantMainnet ? Network.Mainnet : Network.Testnet;
 const endpoints = getNetworkEndpoints(network);
@@ -362,6 +394,71 @@ async function assertCodeMatches(label, id, bytes) {
  */
 step(4, 'Checking the opening reserve is still the one you chose');
 await checkQuoteScaleFreshness(quoteVirtualWhole());
+
+/**
+ * UPLOADING TO MAINNET IS A GOVERNANCE VOTE, NOT A TRANSACTION, so this refuses here
+ * rather than letting the node refuse it at step 5.
+ *
+ * Injective mainnet runs wasmd with a permissioned uploader. Measured on chain:
+ *
+ *   code_upload_access = AnyOfAddresses ["inj1ez42atafr3ujpudsuk666jpjj9t53sehcynh3a"]
+ *   instantiate_default_permission = Everybody
+ *
+ * That is ONE address for the whole chain and it is not ours, so `MsgStoreCode` can
+ * never succeed from this key. What it does instead is fail inside the SDK's gas
+ * simulation, as a raw `TransactionException` stack trace ending "can not create
+ * code: unauthorized" at `keeper.go:175` - a message that reads like a bug in this
+ * script or a problem with the key, not like a chain policy that no amount of
+ * retrying, refunding or reconfiguring will move. That is rule 31: a route that
+ * cannot exist should say so, and say what WOULD change it.
+ *
+ * The second half of those params is why this is a pause and not a wall:
+ * instantiation is `Everybody`. So the division of labour on mainnet is that
+ * governance puts the bytes on chain and this script does everything after. Once a
+ * proposal has passed, re-run with the two code ids it produced and the deploy
+ * continues from step 5 through `assertCodeMatches`, which compares the chain's
+ * sha256 against the bytes just built - so a passed proposal for a DIFFERENT build
+ * is caught rather than instantiated.
+ *
+ * Steps 1 to 4 run first on purpose. Every one of them is a read, and finding out
+ * that the platform address has no account or that the opening reserve has drifted is
+ * worth far more before a four-day vote than after it.
+ */
+if (netName === 'mainnet' && !reusedCodeId('curve') && !reusedCodeId('factory')) {
+  const gov = (f) =>
+    `injectived tx wasm submit-proposal wasm-store ${join(ARTIFACTS, f)} \\\n` +
+    `           --title "Upload injpad ${f.replace('.wasm', '')}" \\\n` +
+    `           --summary "Bonding-curve launchpad: fixed supply, liquidity locked at graduation." \\\n` +
+    `           --instantiate-everybody true \\\n` +
+    `           --deposit 100000000000000000000inj \\\n` +
+    `           --chain-id injective-1 --node https://sentry.tm.injective.network:443 \\\n` +
+    `           --gas 20000000 --gas-prices 160000000inj --from ${sender}`;
+  die(
+    'Injective mainnet does not let this key upload contract code. That is chain policy, not a misconfiguration.',
+    ' ',
+    'code_upload_access is AnyOfAddresses with exactly one address, and it is not yours, so',
+    'MsgStoreCode is refused for everyone else. Uploading goes through a governance proposal.',
+    ' ',
+    '  1. Submit one proposal per contract. 100 INJ deposit each, so 200 INJ for both,',
+    '     against the balance printed at step 2 above:',
+    ' ',
+    `     ${gov('curve.wasm')}`,
+    ' ',
+    `     ${gov('factory.wasm')}`,
+    ' ',
+    '  2. Voting runs 4 days (measured from the chain, not the docs). The deposit comes back',
+    '     on pass, on reject and on a failed quorum; it is burned only if 33.4% vote NoWithVeto.',
+    '     10 INJ is enough to submit, with the remaining 90 due within 2 days or the proposal lapses.',
+    ' ',
+    '  3. When both have passed, re-run this script with the code ids they produced:',
+    ' ',
+    '     INJ_CURVE_CODE_ID=<id> INJ_FACTORY_CODE_ID=<id> \\',
+    '       node scripts/deploy.mjs --mainnet --i-understand-this-is-real-money',
+    ' ',
+    '     It verifies each code id holds the sha256 of the bytes just built, then instantiates.',
+    '     Instantiation needs no proposal: instantiate_default_permission is Everybody.',
+  );
+}
 
 step(5, 'Storing the contracts on chain');
 const curveReuse = reusedCodeId('curve');
