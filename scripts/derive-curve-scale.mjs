@@ -38,12 +38,15 @@ if (!Number.isFinite(TARGET_USD) || TARGET_USD <= 0) {
  * `CURVE_VIRTUAL_TOKENS` and `FIXED_TOTAL_SUPPLY` in the factory; if either moves,
  * this is wrong and the opening cap it reports is not the one a launch would get.
  */
-const VIRTUAL_TOKENS = 1_073_000_000;
-const TOTAL_SUPPLY = 1_000_000_000;
-const CURVE_SUPPLY = 800_000_000;
-/** Graduation as a fraction of the opening reserve: `GRADUATION_NUM / DEN`. */
-const GRAD_NUM = 17;
-const GRAD_DEN = 6;
+/*
+ * From `curveScale.mjs`, because `deploy.mjs` needs the same arithmetic to tell whether
+ * a configured constant has gone stale. Two copies would be two answers to the one
+ * question the check exists to ask.
+ */
+import {
+  VIRTUAL_TOKENS, TOTAL_SUPPLY, CURVE_SUPPLY, GRAD_NUM, GRAD_DEN,
+  virtualQuoteFor, readQuotePrice,
+} from './curveScale.mjs';
 
 /**
  * The quote's price in dollars.
@@ -72,50 +75,25 @@ async function priceUsd(symbol) {
     console.log(`  using the price you supplied: ${symbol}/USD ${v} (not measured here)`);
     return v;
   }
-  if (['USDC', 'USDT', 'USD', 'DAI'].includes(symbol)) {
-    console.log(`  ${symbol} is taken as $1.00 (an assumption, not a measurement)`);
-    return 1;
-  }
-  const reads = [];
+  /*
+   * The venue reading itself is shared; the override above, the printing below and the
+   * exit-on-failure are this script's own, because it is interactive and `deploy.mjs`
+   * is not.
+   */
+  let got;
   try {
-    const r = await fetch(`https://api.coinbase.com/v2/exchange-rates?currency=${symbol}`, {
-      signal: AbortSignal.timeout(15_000),
-    }).then((x) => x.json());
-    const v = Number(r?.data?.rates?.USD);
-    if (Number.isFinite(v) && v > 0) reads.push({ venue: 'Coinbase', price: v });
-  } catch {
-    /* one venue being unreachable is not the answer */
-  }
-  try {
-    const r = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${symbol}USDT`, {
-      signal: AbortSignal.timeout(15_000),
-    }).then((x) => x.json());
-    const v = Number(r?.price);
-    if (Number.isFinite(v) && v > 0) reads.push({ venue: 'Binance', price: v });
-  } catch {
-    /* ditto */
-  }
-
-  if (reads.length === 0) {
-    console.error(`\n  ✗ No venue priced ${symbol}. Nothing is derived from a guess.\n`);
+    got = await readQuotePrice(symbol);
+  } catch (e) {
+    console.error(`\n  \u2717 ${e.message}. Nothing is derived from a guess.\n`);
     process.exit(1);
   }
-  for (const r of reads) console.log(`  ${r.venue.padEnd(9)} ${symbol}/USD  ${r.price}`);
-
-  if (reads.length === 2) {
-    const [a, b] = reads.map((r) => r.price);
-    const drift = Math.abs(a - b) / Math.min(a, b);
-    if (drift > 0.02) {
-      console.error(
-        `\n  ✗ The two venues disagree by ${(drift * 100).toFixed(1)}%. That is the finding;` +
-          `\n    re-run when they agree rather than picking one.\n`,
-      );
-      process.exit(1);
-    }
-  } else {
-    console.log('  only one venue answered: treat the result as provisional.');
+  if (got.assumed) {
+    console.log(`  ${symbol} is taken as $1.00 (an assumption, not a measurement)`);
+    return got.price;
   }
-  return reads.reduce((s, r) => s + r.price, 0) / reads.length;
+  for (const r of got.reads) console.log(`  ${r.venue.padEnd(9)} ${symbol}/USD  ${r.price}`);
+  if (got.provisional) console.log('  only one venue answered: treat the result as provisional.');
+  return got.price;
 }
 
 console.log(`\n  target opening market cap: $${TARGET_USD.toLocaleString('en-US')}\n`);
@@ -126,9 +104,7 @@ const price = await priceUsd(QUOTE);
  *                    = (virtual_quote / virtual_tokens) x total supply
  * so virtual_quote = cap x virtual_tokens / total supply.
  */
-const capInQuote = TARGET_USD / price;
-const exact = (capInQuote * VIRTUAL_TOKENS) / TOTAL_SUPPLY;
-const whole = Math.round(exact);
+const whole = virtualQuoteFor(TARGET_USD, price);
 
 // What that constant actually produces, which is the thing being chosen.
 const openingCap = (whole * TOTAL_SUPPLY) / VIRTUAL_TOKENS;

@@ -383,12 +383,39 @@ try {
 } catch {
   /* No venue, or two that disagree. Either one is an answer, and it is not a number. */
 }
-hm(
-  'The opening reserve must be re-derived for mainnet.',
-  derivedScale
-    ? `For a $5,000 open at INJ's price just now, INJ_QUOTE_VIRTUAL_WHOLE=${derivedScale}. Run node scripts/derive-curve-scale.mjs 5000 and read what that curve does before using it.`
-    : 'node scripts/derive-curve-scale.mjs 5000. No venue priced INJ from here, so nothing is derived: whatever is in use is a premise about the day it was chosen.',
-);
+/*
+ * REPORTED AGAINST THE DECISION, NOT AGAINST A MEMORY. This used to say flatly that
+ * the reserve "must be re-derived for mainnet", every run, forever - an instruction to
+ * remember something at the worst possible moment. `deploy.mjs` now refuses a constant
+ * that has drifted past MAX_DRIFT from `INJ_OPEN_TARGET_USD`, so when that target is
+ * set this is a measurement with a verdict rather than a standing reminder.
+ */
+const configuredScale = Number(process.env.INJ_QUOTE_VIRTUAL_WHOLE?.trim() || '');
+const openTarget = Number(process.env.INJ_OPEN_TARGET_USD?.trim() || '');
+if (derivedScale && configuredScale > 0 && openTarget > 0) {
+  const drift = (configuredScale - Number(derivedScale)) / Number(derivedScale);
+  const pct = `${drift >= 0 ? '+' : ''}${(drift * 100).toFixed(1)}%`;
+  if (Math.abs(drift) <= 0.15) {
+    ok(`the opening reserve is current: ${configuredScale} against ${derivedScale} for a $${openTarget.toLocaleString('en-US')} open (${pct}), and deploy.mjs refuses it if it drifts`);
+  } else {
+    no(
+      `INJ_QUOTE_VIRTUAL_WHOLE=${configuredScale} has drifted ${pct} from the $${openTarget.toLocaleString('en-US')} in INJ_OPEN_TARGET_USD.`,
+      `It should be about ${derivedScale}. deploy.mjs will refuse this. Run node scripts/derive-curve-scale.mjs ${openTarget} and read what that curve does.`,
+    );
+  }
+} else if (configuredScale > 0 && !(openTarget > 0)) {
+  hm(
+    'INJ_OPEN_TARGET_USD is not set, so nothing can tell whether the opening reserve is still the figure you chose.',
+    'Set it to the dollar cap you intended. deploy.mjs then refuses a stale constant instead of shipping one.',
+  );
+} else {
+  hm(
+    'The opening reserve must be re-derived for mainnet.',
+    derivedScale
+      ? `For a $5,000 open at INJ's price just now, INJ_QUOTE_VIRTUAL_WHOLE=${derivedScale}. Run node scripts/derive-curve-scale.mjs 5000 and read what that curve does before using it.`
+      : 'node scripts/derive-curve-scale.mjs 5000. No venue priced INJ from here, so nothing is derived: whatever is in use is a premise about the day it was chosen.',
+  );
+}
 
 const keeper = join(ROOT, 'scripts', '.env.keeper.local');
 if (existsSync(keeper)) {

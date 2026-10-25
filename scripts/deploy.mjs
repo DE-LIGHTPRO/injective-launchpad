@@ -44,6 +44,9 @@ import {
 import { Network, getNetworkEndpoints } from '@injectivelabs/networks';
 import { createHash } from 'node:crypto';
 import { loadEnvLocal } from './loadEnvLocal.mjs';
+import {
+  openingCapUsd, driftFrom, virtualQuoteFor, MAX_DRIFT, readQuotePrice,
+} from './curveScale.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ARTIFACTS = join(HERE, '..', 'target', 'wasm32-unknown-unknown', 'release');
@@ -351,7 +354,16 @@ async function assertCodeMatches(label, id, bytes) {
   return id;
 }
 
-step(4, 'Storing the contracts on chain');
+/*
+ * BEFORE ANYTHING IS PAID FOR. A stale opening reserve caught after `storeCode` has
+ * run is a refusal that already cost the gas to upload two contracts, which is the
+ * complaint the readiness script makes about the payout-address check sitting in step
+ * 5. A free check belongs ahead of a paid step, and this one is two HTTP reads.
+ */
+step(4, 'Checking the opening reserve is still the one you chose');
+await checkQuoteScaleFreshness(quoteVirtualWhole());
+
+step(5, 'Storing the contracts on chain');
 const curveReuse = reusedCodeId('curve');
 const curveCodeId = curveReuse
   ? await assertCodeMatches('curve', curveReuse, curveWasm)
@@ -409,7 +421,7 @@ async function assertPayable(label, address) {
   console.log(`     ${label}: ${address} ✓ exists on chain`);
 }
 
-step(5, 'Instantiating the factory');
+step(6, 'Instantiating the factory');
 /*
  * NO SILENT FALLBACK TO THE DEPLOY KEY.
  *
@@ -505,6 +517,73 @@ function quoteVirtualWhole() {
     );
   }
   return raw;
+}
+
+/**
+ * Has the configured constant gone stale since somebody chose it?
+ *
+ * THE PROBLEM THIS SOLVES IS FORGETTING, which is not a problem a comment can solve.
+ * `INJ_QUOTE_VIRTUAL_WHOLE` is a number of INJ, and what anybody actually chose is a
+ * DOLLAR opening cap. INJ moves, so the constant silently stops meaning what it was
+ * picked to mean - it drifted 700 to 711 to 710 across three runs in a single
+ * afternoon. Every doc here says "re-derive it on the day", which is an instruction to
+ * remember something at the worst possible moment, with real money on the other side.
+ *
+ * So the deploy checks instead of trusting. `INJ_OPEN_TARGET_USD` records the decision
+ * - the dollar cap, which does NOT go stale - and this re-derives what the constant
+ * should be at today's price and refuses if the two have diverged past `MAX_DRIFT`.
+ * Set it once and forgetting becomes a refusal with the right number in it rather than
+ * a launchpad quietly opening at the wrong price.
+ *
+ * IT DOES NOT DERIVE THE CONSTANT FOR YOU, deliberately, and that is the line
+ * `derive-curve-scale.mjs` draws: the number is a judgement about what a launch should
+ * cost to enter, and the script prints the curve's whole behaviour because those are
+ * the figures it is chosen against. Silently substituting a fresh value would deploy a
+ * curve nobody looked at. A refusal naming the number keeps the human in the loop and
+ * costs them one command.
+ *
+ * UNSET IS ALLOWED AND SAYS SO. Refusing without it would make a new required variable
+ * out of a safety net, and this must not block a deployment that has made its decision
+ * some other way. It reports what the constant means today either way, because that is
+ * useful even when there is nothing to compare it against.
+ */
+/** The quote's price, or a throw. Symbol from the configured denom, INJ by default. */
+async function priceUsdForQuote() {
+  const denom = (process.env.INJ_QUOTE_DENOM?.trim() || 'inj').toUpperCase();
+  const symbol = denom === 'INJ' ? 'INJ' : denom.replace(/^.*\//, '').toUpperCase();
+  return (await readQuotePrice(symbol)).price;
+}
+
+async function checkQuoteScaleFreshness(whole) {
+  const target = Number(process.env.INJ_OPEN_TARGET_USD?.trim() || '');
+  let price;
+  try {
+    price = await priceUsdForQuote();
+  } catch (e) {
+    // A price we cannot read is not a finding. The deploy proceeds; it simply cannot
+    // say whether the constant is stale, and says that rather than implying it checked.
+    console.log(`  ? could not price the quote asset, so staleness was not checked (${String(e.message).slice(0, 60)})`);
+    return;
+  }
+  const opens = openingCapUsd(Number(whole), price);
+  console.log(`  at ${price} per unit, ${whole} opens a launch at about $${Math.round(opens).toLocaleString('en-US')}`);
+
+  if (!Number.isFinite(target) || target <= 0) {
+    console.log('  ? INJ_OPEN_TARGET_USD is not set, so nothing here can tell you if that is the figure you chose.');
+    console.log('    Set it to the dollar cap you intended and this refuses a stale constant instead of shipping one.');
+    return;
+  }
+  const drift = driftFrom(target, Number(whole), price);
+  if (Math.abs(drift) <= MAX_DRIFT) {
+    console.log(`  ✓ within ${Math.round(MAX_DRIFT * 100)}% of the $${target.toLocaleString('en-US')} you intended (${drift >= 0 ? '+' : ''}${(drift * 100).toFixed(1)}%)`);
+    return;
+  }
+  die(
+    `INJ_QUOTE_VIRTUAL_WHOLE=${whole} is stale: it opens launches at about $${Math.round(opens).toLocaleString('en-US')}, not the $${target.toLocaleString('en-US')} in INJ_OPEN_TARGET_USD (${drift >= 0 ? '+' : ''}${(drift * 100).toFixed(1)}%).`,
+    `At ${price} per unit the constant should be about ${virtualQuoteFor(target, price)}.`,
+    'Run this, read what the curve would do, then set it:',
+    `  node scripts/derive-curve-scale.mjs ${target}`,
+  );
 }
 
 /**
