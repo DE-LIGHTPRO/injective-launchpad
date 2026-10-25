@@ -2178,8 +2178,41 @@ header.top .chip { font-size: var(--text-micro); letter-spacing: 0.04em; padding
  */
 
 /* ------------------------------------------------------------------ hero -- */
-.hero { padding: var(--space-6) 0 var(--space-5); border-bottom: 1px solid var(--line); margin-bottom: var(--space-6); }
-.hero h1 { font-size: clamp(2rem, 4.2vw, 2.875rem); line-height: 1.08; letter-spacing: -0.035em; max-width: 20ch; font-weight: 650; }
+/*
+ * A CONTAINER, NOT A RULE UNDER THE TEXT. The hero was padding and a 1px bottom
+ * border, so the first screen was type sitting directly on the page background with a
+ * line beneath it - which is what a document looks like, not a product. Giving it a
+ * surface, a border and a radius is most of the difference between the two, and it
+ * costs nothing: the same tokens every card on this page already uses.
+ */
+.hero {
+  padding: var(--space-7, 48px) var(--space-6);
+  background: var(--surface-1);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg, 16px);
+  margin-bottom: var(--space-6);
+}
+/*
+ * LARGER, AND THE CEILING IS WHAT MOVED. It clamped to 2.875rem (46px), which on a
+ * 1440px screen left the headline occupying about a third of the width with the rest
+ * of the row empty - a quiet page rather than a confident one. 4rem at the top end
+ * takes the same sentence to three lines and makes it read as a statement.
+ *
+ * `max-width: 18ch` rather than 20: the measure is what forces the wrap, and a
+ * headline that breaks into a block carries far more weight than one long line.
+ */
+.hero h1 {
+  font-size: clamp(2.125rem, 5vw, 4rem);
+  line-height: 1.04;
+  letter-spacing: -0.038em;
+  max-width: 18ch;
+  font-weight: 650;
+}
+/*
+ * The accent is the brand blue the primary button already uses, so the headline and
+ * the action it leads to are visibly the same colour rather than two blues.
+ */
+.hero-accent { color: var(--accent-text); }
 /* `1.0625rem` in both this and `.wordmark` was `--text-lg` spelled out, so the scale
    looked unused at exactly the two places the eye lands first. */
 .hero .sub { font-size: var(--text-lg); max-width: 52ch; margin-top: var(--space-3); line-height: 1.55; }

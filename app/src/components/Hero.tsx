@@ -40,7 +40,21 @@ export interface HeroStats {
 export function Hero({ stats }: { stats: HeroStats | null }) {
   return (
     <section className="hero" aria-labelledby="hero-title">
-      <h1 id="hero-title">Fair token launches, with liquidity locked at graduation.</h1>
+      {/*
+          THE CLAIM IS THE ACCENT. The headline carried no colour at all, so the one
+          sentence stating why this launchpad exists read with exactly the emphasis of
+          the paragraph under it. "Locked at graduation" is the promise the contracts
+          back and the reason to choose this over a pad that can pull liquidity, so it
+          is the half that is coloured.
+
+          One `<h1>` with a `<span>` inside, not two elements: a screen reader reads it
+          as one sentence either way, and splitting it into separate headings would
+          invent a structure the page does not have.
+        */}
+      <h1 id="hero-title">
+        Fair token launches, with liquidity{' '}
+        <span className="hero-accent">locked at graduation</span>.
+      </h1>
       <p className="sub">
         Fixed supply and one bonding curve for every token. At graduation the liquidity
         moves into a pool no one can withdraw, and no one can mint more.
