@@ -25,6 +25,7 @@ import { NETWORK, getLcdUrl, getFactoryAddress } from './config.ts';
 import { isDemoMode, demoLaunches, demoDetail, demoDetailByCurve, demoTrades, DEMO_HEIGHT } from './demo.ts';
 import type { CurveConfig, CurveState, PoolReserves } from './curve.ts';
 import type { ContractFacts } from './codeCheck.ts';
+import { txSearch, TxSearchError } from './txSearch.ts';
 
 /** Shape stored by the factory for each launch. */
 export interface Launch {
@@ -906,17 +907,17 @@ export async function listTrades(curve: string, limit = 20): Promise<Trade[]> {
   if (isDemoMode()) return demoTrades(curve, limit);
 
   const q = encodeURIComponent(`wasm._contract_address='${curve}'`);
-  const url = `${getLcdUrl()}/cosmos/tx/v1beta1/txs?query=${q}&limit=${limit}&order_by=ORDER_BY_DESC`;
+  /*
+   * Through `txSearch`, which tries deeper endpoints when this one cannot answer.
+   * Audit F-04: the configured endpoint's transaction index reaches back about 16
+   * hours, so a chart and a feed built on it empty out overnight, and this used to
+   * read from that one host and give up. The path is still built here because the
+   * `limit` and the ordering are decisions documented at their call sites; only the
+   * choice of host moved.
+   */
+  const path = `/cosmos/tx/v1beta1/txs?query=${q}&limit=${limit}&order_by=ORDER_BY_DESC`;
 
-  let res: Response;
-  try {
-    res = await fetch(url, { headers: { accept: 'application/json' } });
-  } catch (e) {
-    throw new ChainError(`Could not reach ${NETWORK.name} to read trades.`, (e as Error).message);
-  }
-  if (!res.ok) throw translateQueryError(res.status, await res.text().catch(() => ''));
-
-  const json = (await res.json()) as {
+  let json: {
     tx_responses?: Array<{
       txhash?: string;
       height?: string;
@@ -928,6 +929,12 @@ export async function listTrades(curve: string, limit = 20): Promise<Trade[]> {
     code?: number;
     message?: string;
   };
+  try {
+    json = (await txSearch(path)).json as typeof json;
+  } catch (e) {
+    if (e instanceof TxSearchError) throw translateQueryError(e.status, e.body);
+    throw new ChainError(`Could not reach ${NETWORK.name} to read trades.`, (e as Error).message);
+  }
   /*
    * This endpoint answers a malformed query with HTTP 200 and an error document,
    * which is how it was first mistaken for a working call. The error shape is

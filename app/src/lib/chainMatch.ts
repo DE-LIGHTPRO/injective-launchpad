@@ -48,14 +48,24 @@ export function assessChainMatch(served: string | null | undefined): ChainMatch 
 }
 
 /**
- * Ask the configured endpoint which chain it is. One request, no retry.
+ * Ask an endpoint which chain it is. One request, no retry.
  *
  * Every failure path returns null rather than throwing, because this runs on page load
  * beside the reads that matter and must never be the reason a page does not render.
+ *
+ * `endpoint` DEFAULTS TO THE CONFIGURED ONE AND EXISTS FOR THE HISTORY FALLBACKS.
+ * `txSearch` has to know whether a fallback host serves this chain before it trusts a
+ * single number from it, and the first version of that file asked the question itself -
+ * a second place comparing chain ids, which `app-chain-match.test.ts` refused, and was
+ * right to: this comparison has been got wrong here before, and two copies means the
+ * next fix lands on one of them. The parameter is the whole change.
  */
-export async function probeServedChainId(timeoutMs = 8_000): Promise<string | null> {
+export async function probeServedChainId(
+  timeoutMs = 8_000,
+  endpoint: string = getLcdUrl(),
+): Promise<string | null> {
   try {
-    const res = await fetch(`${getLcdUrl()}/cosmos/base/tendermint/v1beta1/node_info`, {
+    const res = await fetch(`${endpoint.replace(/\/$/, '')}/cosmos/base/tendermint/v1beta1/node_info`, {
       headers: { accept: 'application/json' },
       signal: AbortSignal.timeout(timeoutMs),
     });

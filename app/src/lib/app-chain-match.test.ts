@@ -130,9 +130,20 @@ test('nothing else compares chain ids for itself', () => {
     return out;
   })(SRC);
 
+  /*
+   * MASKED, BECAUSE A COMMENT IS NOT A READ. This swept the raw text and failed on
+   * `txSearch.ts`, whose only mention of the field is a comment recording that it used
+   * to compare chain ids itself and that THIS guard refused it. A guard that punishes
+   * the note explaining it teaches the next person to delete the note.
+   *
+   * `maskComments` was written for this exact failure one guard over: its docblock
+   * records `key-separation-check` asserting a variable was absent from a script and
+   * failing on the comment saying it must not be read. Masking costs nothing here,
+   * because a real read is code.
+   */
   const offenders = files
     .filter((f) => !f.endsWith('chainMatch.ts'))
-    .filter((f) => /default_node_info/.test(readFileSync(f, 'utf8')))
+    .filter((f) => /default_node_info/.test(maskComments(readFileSync(f, 'utf8'))))
     .map((f) => f.split('/src/').pop()!);
 
   assert.deepEqual(offenders, [], `${offenders.join(', ')} reads the served chain id directly; use probeServedChainId`);

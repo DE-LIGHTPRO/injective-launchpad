@@ -40,6 +40,36 @@ export interface NetworkConfig {
   chainId: string;
   /** REST (LCD) endpoint. Smart queries go over this, no SDK required. */
   lcd: string;
+  /**
+   * Deeper endpoints to fall back to for HISTORY only, in order.
+   *
+   * WHY HISTORY NEEDS ITS OWN LIST. The chart, the trade feed, the trade count and
+   * 24h volume all come from `/cosmos/tx/v1beta1/txs`, so they live or die by how far
+   * back an endpoint's transaction index reaches - and `lcd` above reaches nowhere
+   * near far enough. Measured 25 Oct 2026: `sentry.lcd.injective.network` kept 100,004
+   * blocks, about 16.4 hours, where 24h volume needs 132,923. The figure a reader
+   * wants is not merely stale on that host, it is UNOBTAINABLE, from the first hour.
+   *
+   * These were measured the same day, six samples each, and the balancer caveat that
+   * `translateQueryError` records applies to them too: a hostname is not a node.
+   * `injective-rest.publicnode.com` answered from two nodes with floors at
+   * 186,072,000 and 186,387,753 against a head of 188,827,540 - so the SHALLOWER of
+   * them still held 2,439,787 blocks, roughly 18 days and about 18x the window 24h
+   * volume needs. On testnet both of these returned this factory's COMPLETE history,
+   * 14 transactions back to height 143,397,352, far below the sentry's floor, which is
+   * what proves the transaction index reaches back and not merely the block store.
+   *
+   * NOT AN SLA, AND NOT A REASON TO SKIP A PAID ENDPOINT FOREVER. These are free
+   * public hosts: retention can change without notice and they will rate limit under
+   * real traffic. They are here so that a deployment with nothing configured degrades
+   * to days of history instead of hours, and `NEXT_PUBLIC_LCD_FALLBACKS` overrides
+   * them. Reachability is not asserted by any test, because a test cannot resolve DNS
+   * and a configured hostname can simply not exist.
+   *
+   * PER NETWORK BY CONSTRUCTION, so a mainnet build can never fall back to a testnet
+   * host. That would not fail loudly: it would answer with somebody else's trades.
+   */
+  historyFallbacks: readonly string[];
   explorer: string;
   quoteDenom: string;
   /**
@@ -81,6 +111,12 @@ export const NETWORKS: Record<NetworkName, NetworkConfig> = {
     name: 'testnet',
     chainId: 'injective-888', // verified 3 Oct 2026
     lcd: 'https://testnet.sentry.lcd.injective.network',
+    // Both served this factory's complete 14-transaction history on 25 Oct 2026, back
+    // past the sentry's floor. Verified to report `injective-888` before use.
+    historyFallbacks: [
+      'https://injective-testnet-api.polkachu.com',
+      'https://injective-testnet-rest.publicnode.com',
+    ],
     // Not testnet.explorer.injective.network: its redirect drops the path. See above.
     explorer: 'https://testnet.injscan.com',
     quoteDenom: 'inj',
@@ -94,6 +130,19 @@ export const NETWORKS: Record<NetworkName, NetworkConfig> = {
     name: 'mainnet',
     chainId: 'injective-1', // verified 3 Oct 2026
     lcd: 'https://sentry.lcd.injective.network',
+    /*
+     * `publicnode` first because it is the one whose depth was measured here: two
+     * nodes, floors 186,072,000 and 186,387,753 against head 188,827,540 on
+     * 25 Oct 2026, so about 18 days on the shallower. `polkachu` is second and its
+     * MAINNET depth was NOT measured - its testnet host was, and that is not the same
+     * claim about the same machine. It sits in the chain because a second candidate
+     * that might answer beats none, and its data is only used once it has proved it
+     * serves `injective-1`.
+     */
+    historyFallbacks: [
+      'https://injective-rest.publicnode.com',
+      'https://injective-api.polkachu.com',
+    ],
     // The redirect target, used directly: one hop fewer, and the hop is what broke
     // testnet. Confirmed 16 Oct 2026 as this host's own 301 destination, path intact.
     explorer: 'https://injscan.com',
@@ -149,6 +198,33 @@ export function getLcdUrl(): string {
 
 export function isLcdConfigured(): boolean {
   return Boolean(process.env.NEXT_PUBLIC_LCD_URL?.trim());
+}
+
+/**
+ * Every endpoint a HISTORY read may try, primary first.
+ *
+ * One resolver, because the two transaction-search call sites each built their own URL
+ * from `getLcdUrl()` and a fallback added to one of them would have left the other on
+ * a 16-hour window. `listTrades` feeds the chart and the feed; `countTxs` feeds the
+ * trade count and 24h volume. They are one decision about one index.
+ *
+ * `NEXT_PUBLIC_LCD_FALLBACKS` replaces the measured defaults rather than adding to
+ * them, so an operator who has bought an archival endpoint is not still sending a
+ * share of their traffic to a free host. The primary is always first and always the
+ * configured one: falling back is for when it cannot answer, never a load balance.
+ *
+ * Deduplicated, because the primary commonly appears in a hand-written fallback list
+ * too and retrying the same host twice is a slower way to get the same refusal.
+ */
+export function getHistoryEndpoints(): string[] {
+  const primary = getLcdUrl().replace(/\/$/, '');
+  const configured = process.env.NEXT_PUBLIC_LCD_FALLBACKS?.trim();
+  const rest = (
+    configured
+      ? configured.split(',').map((s) => s.trim()).filter((s) => /^https?:\/\//.test(s))
+      : [...NETWORK.historyFallbacks]
+  ).map((s) => s.replace(/\/$/, ''));
+  return [...new Set([primary, ...rest])];
 }
 
 /**

@@ -1,6 +1,7 @@
 import { getLcdUrl, NETWORK } from './config.ts';
 import { isDemoMode } from './demo.ts';
 import { listTrades, currentHeight, quoteMoved, type Trade } from './chain.ts';
+import { txSearch } from './txSearch.ts';
 
 /**
  * How busy a launch is, from what this chain will actually answer.
@@ -118,12 +119,15 @@ export interface LaunchActivity {
  * to guess at.
  */
 async function countTxs(query: string): Promise<number> {
-  const url = `${getLcdUrl()}/cosmos/tx/v1beta1/txs?query=${encodeURIComponent(
+  /*
+   * Through `txSearch` as well, and it has to be: audit F-04's remedy on one of the two
+   * search call sites would have left this one on a 16-hour window while the chart
+   * beside it read days. The trade count and 24h volume come from here.
+   */
+  const path = `/cosmos/tx/v1beta1/txs?query=${encodeURIComponent(
     query,
   )}&limit=1&order_by=ORDER_BY_DESC`;
-  const res = await fetch(url, { headers: { accept: 'application/json' } });
-  if (!res.ok) throw new Error(`tx search ${res.status}`);
-  const body = (await res.json()) as { total?: unknown };
+  const body = (await txSearch(path)).json as { total?: unknown };
   /*
    * The total arrives as a STRING, and `Number(undefined)` is NaN rather than a
    * throw, so an endpoint that stops returning it would otherwise put NaN on a card.

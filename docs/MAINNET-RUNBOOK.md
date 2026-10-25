@@ -228,6 +228,7 @@ The full list the deployed app reads, so none of it is discovered later:
 | `NEXT_PUBLIC_CURVE_CODE_HASHES` | `shasum -a 256 target/wasm32-unknown-unknown/release/curve.wasm`, which `deploy.mjs` prints | the page falls back to the id pin and says the weaker thing: a number only you can vouch for, rather than bytes anyone can rebuild from the repository |
 | `NEXT_PUBLIC_NETWORK` | `mainnet` | **falls back to testnet**, silently, which is the right default and the wrong answer here |
 | `NEXT_PUBLIC_LCD_URL` | the archival endpoint from step 3 | falls back to the public sentry, and `isLcdConfigured()` reports false |
+| `NEXT_PUBLIC_LCD_FALLBACKS` | leave empty unless you have a second paid endpoint | the measured defaults in `config.ts` are used, which is days of history rather than the sentry's ~16 hours; set this only to REPLACE them, since it does not add to them |
 | `NEXT_PUBLIC_SITE_URL` | the domain from step 4 | canonical links, the sitemap and every social preview keep saying `injpad.vercel.app` |
 | `BLOB_READ_WRITE_TOKEN` | injected by attaching a Vercel Blob store | the logo drop zone **silently disappears** from the create form, leaving the paste-a-link field, which looks like a design decision |
 | `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` | an Upstash store | the upload rate limit is per serverless instance, which the platform multiplies |
