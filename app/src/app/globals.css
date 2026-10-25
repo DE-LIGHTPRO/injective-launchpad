@@ -362,8 +362,18 @@ header.top .spacer { margin-left: auto; }
  * when it renders at 1.875rem and 640. `h2` and `h3` keep their declarations because
  * each still contributes one the layer does not name.
  */
-h2 { font-size: var(--text-lg); font-weight: 620; letter-spacing: -0.01em; margin-bottom: var(--space-4); }
-h3 { font-size: var(--text-base); font-weight: 600; }
+/*
+ * `h2` AND `h3` MOVED TO THE SYSTEM LAYER TOO, and the comment above was already
+ * describing why without noticing it applied here. It says `h1`'s four properties were
+ * dead because the layer at the end redeclares them, and that `h2` and `h3` keep their
+ * declarations because "each still contributes one the layer does not name". Only the
+ * MARGIN was true of that: `font-weight: 620` and `letter-spacing: -0.01em` sat here
+ * looking authoritative while the layer's 600 and -0.015em won, one element down from
+ * the defect the comment exists for.
+ *
+ * So each heading is declared once now, there, including its margin. A reader looking
+ * up what an `h2` is finds one answer.
+ */
 .sub { color: var(--text-dim); margin-top: var(--space-2); max-width: 58ch; }
 .micro { font-size: var(--text-micro); color: var(--text-faint); }
 
@@ -1852,9 +1862,35 @@ body { font-feature-settings: 'cv11', 'ss01'; letter-spacing: -0.006em; }
   letter-spacing: -0.01em;
 }
 
+/*
+ * THE SCALE HAD NO MIDDLE, which is measurable rather than a matter of taste. Every
+ * `h2` on the home page rendered at 17px against body copy at 15px and the hero's own
+ * subhead at 17px: seven section headings the same size as the paragraph under them.
+ * The page went 43 (hero) to 17 to 17, so a reader scanning for structure had nothing
+ * to catch, and the whole page read as one undifferentiated column.
+ *
+ * `--text-xl` was sitting in the scale unused by any heading - one `.totals .v` was
+ * its only caller - so the rung existed and nothing stood on it. `h2` stands on it
+ * now and `h3` takes the 17 that `h2` vacated, which leaves:
+ *
+ *     hero h1  43   .hero h1 clamps, below
+ *     h1       30   --text-display
+ *     h2       22   --text-xl
+ *     h3       17   --text-lg
+ *     body     15   --text-base
+ *
+ * Ratios of about 1.36, 1.29 and 1.13: a step at every level, and the largest steps
+ * where the structural decisions are.
+ */
 h1 { font-size: var(--text-display); font-weight: 640; letter-spacing: -0.025em; line-height: 1.2; }
-h2 { font-size: var(--text-lg); font-weight: 600; letter-spacing: -0.015em; }
-h3 { font-weight: 600; }
+h2 {
+  font-size: var(--text-xl);
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  /* Declared here rather than in the typography block, so an `h2` has one definition. */
+  margin-bottom: var(--space-4);
+}
+h3 { font-size: var(--text-lg); font-weight: 600; letter-spacing: -0.01em; }
 .sub { color: var(--text-dim); }
 .note { color: var(--text-faint); font-size: var(--text-sm); line-height: 1.55; }
 .note a, .sub a { color: var(--accent-text); }
@@ -2348,7 +2384,13 @@ table.board .dim { color: var(--text-faint); }
 
 /* --------------------------------------------------------- top movers -- */
 .hill { margin-top: 0; }
-.hill-head h2 { font-size: var(--text-lg); }
+/*
+ * `.hill-head h2 { font-size: var(--text-lg) }` was here and is gone. It restated the
+ * size `h2` already had, so it did nothing - until `h2` moved to 22px, at which point
+ * it quietly became the one page section whose heading stayed at body size while every
+ * other section grew. A rule that only matters once something else changes is the kind
+ * that is never found by reading the rule itself.
+ */
 .hill-king { border-color: var(--line); box-shadow: none; background: var(--surface-1); }
 .hill-king:hover { border-color: var(--line-strong); background: var(--surface-2); }
 .hill-crown { color: var(--gold); letter-spacing: 0.06em; font-weight: 600; }
@@ -2589,6 +2631,12 @@ table.board .dim { color: var(--text-faint); }
 .tx-dialog:focus { outline: none; }
 
 .tx-head { display: flex; align-items: flex-start; gap: var(--space-3); margin-bottom: var(--space-4); }
+/*
+ * KEPT AT 17, AND DELIBERATELY, UNLIKE THE ONE REMOVED FROM `.hill-head`. The `h2`
+ * step to 22px exists so a PAGE SECTION heading stands above the body around it. A
+ * dialog has one heading, nothing competing beneath it, and far less room; the step
+ * buys nothing here and costs a line wrap on a narrow phone.
+ */
 .tx-head h2 { margin: 0; font-size: var(--text-lg); line-height: 1.3; flex: 1; min-width: 0; }
 
 .tx-close {
