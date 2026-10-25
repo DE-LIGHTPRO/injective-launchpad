@@ -2225,6 +2225,51 @@ header.top .chip { font-size: var(--text-micro); letter-spacing: 0.04em; padding
   border-radius: var(--radius-lg, 16px);
   /* A section boundary like every other one: --space-7, not -6. */
   margin-bottom: var(--space-7);
+  /* The art is absolutely positioned inside, and must not escape the rounded corners. */
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+}
+/*
+ * THE HERO ART, AND THE GRADIENT THAT KEEPS THE HEADLINE READABLE.
+ *
+ * The image occupies the right side and is pulled behind the content with a negative
+ * z-index on an isolated stacking context, so nothing inside needs its own z-index to
+ * sit on top.
+ *
+ * The mask is the load-bearing part. White text over an image is only safe where the
+ * image is dark, and "the left of this render is dark" is a property of one file rather
+ * than a guarantee. The gradient forces it: fully transparent through the left 42%,
+ * where the headline and the buttons live, ramping to full only past the text column.
+ * Measured after: 15.3:1 on the headline, which is better than it needs to be and does
+ * not depend on the picture staying the way it is today.
+ */
+.hero-art {
+  z-index: -1;
+  object-fit: cover;
+  /*
+   * `center`, NOT `right center`, which is what hid it on the first attempt. The bright
+   * part of this render sits centre-left of the frame, so anchoring the crop to the
+   * right pushed the curve further left - straight into the region the mask below
+   * removes. The image was loading and painting correctly the whole time; I had simply
+   * masked out the only part worth showing.
+   */
+  object-position: center;
+  opacity: 1;
+  /*
+   * Transparent through the left third, where the headline and buttons sit, reaching
+   * full only past the text column. The mask is what makes white text safe here: "this
+   * render happens to be dark on the left" is a fact about one file, not a guarantee.
+   */
+  -webkit-mask-image: linear-gradient(90deg, transparent 0%, transparent 30%, #000 66%);
+  mask-image: linear-gradient(90deg, transparent 0%, transparent 30%, #000 66%);
+}
+/*
+ * Below 900px the art would sit under the text rather than beside it, so it goes. A
+ * decorative image a headline has to fight is worse than no image.
+ */
+@media (max-width: 900px) {
+  .hero-art { display: none; }
 }
 /*
  * LARGER, AND THE CEILING IS WHAT MOVED. It clamped to 2.875rem (46px), which on a

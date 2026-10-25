@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import Image from 'next/image';
 
 export interface HeroStats {
   launches: number;
@@ -47,6 +48,29 @@ export interface HeroStats {
 export function Hero({ stats }: { stats: HeroStats | null }) {
   return (
     <section className="hero" aria-labelledby="hero-title">
+      {/*
+          THE EMPTY HALF, FILLED. 60% of the first screen was black, and the one visual
+          that explains this product is a rising curve - so the art is a curve rather
+          than a generic abstract.
+
+          `aria-hidden` and empty alt: it is decoration. The sentence beside it already
+          says what it says, and announcing "glowing blue curve" to a screen reader adds
+          nothing a listener can act on.
+
+          `priority` because it is above the fold on every visit to the busiest page, so
+          lazy-loading it would only guarantee it arrives late. `next/image` serves it as
+          WebP at the size actually needed; the source PNG is 1.1MB and must never reach
+          a phone as one.
+        */}
+      <Image
+        src="/hero-curve.png"
+        alt=""
+        aria-hidden="true"
+        fill
+        priority
+        sizes="(max-width: 900px) 100vw, 60vw"
+        className="hero-art"
+      />
       {/*
           THE CLAIM IS THE ACCENT. The headline carried no colour at all, so the one
           sentence stating why this launchpad exists read with exactly the emphasis of
