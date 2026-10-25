@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   quoteBuy,
   quoteBuyWithPremium,
@@ -131,6 +131,40 @@ export function TradePanel({
 }) {
   const inPool = pool !== null && pool.quote > 0n && pool.tokens > 0n;
   const [side, setSide] = useState<Side>('buy');
+
+  /*
+   * THE PANEL IS THREE SCREENS DOWN ON A PHONE. Measured on /launch/ORBIT at 375x812:
+   * the Buy/Sell tabs sit at y=2571 of a 4029px page, so a trader scrolls 3.07 viewports
+   * past the title, the badges, the stats and the chart before reaching the only control
+   * that does anything. The desktop layout puts the panel beside the chart and there is
+   * no room for that on a phone, so it falls below everything.
+   *
+   * A bar pinned to the bottom fixes the reach without reordering the page, which
+   * matters: the chart above the panel is the right order for reading, and moving the
+   * panel to the top would put a form above the thing it is a form about.
+   *
+   * IT ONLY APPEARS WHEN THE PANEL IS OFF SCREEN. A fixed bar duplicating a control the
+   * reader can already see is clutter, and two Buy buttons on one screen is the kind of
+   * thing that makes somebody check which one is real.
+   */
+  const cardRef = useRef<HTMLDivElement | null>(null);
+  const [panelInView, setPanelInView] = useState(true);
+  useEffect(() => {
+    const el = cardRef.current;
+    if (!el || typeof IntersectionObserver === 'undefined') return;
+    const io = new IntersectionObserver(([e]) => setPanelInView(e.isIntersecting), {
+      // Any sliver counts: the bar should go as soon as the real control is reachable.
+      threshold: 0,
+    });
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
+
+  /** Bring the panel into view and pick a side in one tap. */
+  const jumpTo = (s: Side) => {
+    setSide(s);
+    cardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  };
   const [input, setInput] = useState('');
 
   /*
@@ -563,7 +597,23 @@ export function TradePanel({
   const unit = side === 'buy' ? quoteAsset.label : symbol;
 
   return (
-    <div className="card">
+    <>
+      {/*
+          Hidden from the accessibility tree while the panel is in view, and removed from
+          the DOM otherwise - not merely visually hidden - so a screen reader and a
+          keyboard never meet a second Buy button that duplicates the real one.
+        */}
+      {!panelInView && (
+        <div className="trade-jump" role="group" aria-label="Jump to trading">
+          <button type="button" className="trade-jump-buy" onClick={() => jumpTo('buy')}>
+            Buy {symbol}
+          </button>
+          <button type="button" className="trade-jump-sell" onClick={() => jumpTo('sell')}>
+            Sell
+          </button>
+        </div>
+      )}
+      <div className="card" ref={cardRef}>
       <div className="segmented" role="group" aria-label="Trade side">
         <button aria-pressed={side === 'buy'} onClick={() => setSide('buy')}>
           Buy
@@ -883,6 +933,7 @@ export function TradePanel({
           ? 'This is a demo launch, so there is nothing to sign. The quote above is real arithmetic from the contract maths.'
           : 'Quotes come from the same curve maths the contract runs, checked against it unit for unit.'}
       </p>
-    </div>
+      </div>
+    </>
   );
 }

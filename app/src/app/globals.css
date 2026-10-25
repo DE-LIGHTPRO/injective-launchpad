@@ -2637,7 +2637,23 @@ table.board .dim { color: var(--text-faint); }
 
 /* Launch page: chart and history left, the trade panel pinned right like an exchange. */
 .cols { grid-template-columns: minmax(0, 1fr) 380px; gap: var(--space-4); }
-@media (max-width: 960px) { .cols { grid-template-columns: 1fr; } }
+/*
+ * `minmax(0, 1fr)`, NOT `1fr`, AND THE DIFFERENCE IS 12px OF SIDEWAYS SCROLL.
+ *
+ * `1fr` is `minmax(auto, 1fr)`, and `auto` as a track minimum is MIN-CONTENT, so the
+ * track cannot shrink below the widest thing that refuses to shrink. Measured on
+ * /launch/ORBIT at 375px: the chart card's min-content is 371px because the chart
+ * `<svg>` inside it reports a min-content of 760, so the single track was pinned at
+ * 370.5 inside a 343px container and the page scrolled sideways to 387.
+ *
+ * This is the defect `no-sideways-scroll.test.ts` exists for and could not catch: that
+ * guard reads `minmax(...)` declarations, and `1fr` written on its own has no `minmax`
+ * to inspect while meaning exactly the thing the guard forbids.
+ *
+ * The SVG is constrained below as well. The track being allowed to shrink is only half
+ * of it - something still has to tell the chart to fit.
+ */
+@media (max-width: 960px) { .cols { grid-template-columns: minmax(0, 1fr); } }
 .trade-col { position: sticky; top: 76px; align-self: start; }
 @media (max-width: 960px) { .trade-col { position: static; } }
 .stack-below > * { margin-top: var(--space-4); }
@@ -3031,3 +3047,81 @@ table.board .dim { color: var(--text-faint); }
   /* Art first on a phone would push the whole argument below the fold. */
   .guarantees-art { order: 2; }
 }
+
+/*
+ * THE JUMP BAR, PHONES ONLY.
+ *
+ * Measured on /launch/ORBIT at 375x812: the Buy/Sell tabs sit at y=2571 of a 4029px
+ * page, so a trader scrolls 3.07 viewports past the title, badges, stats and chart
+ * before reaching the only control that does anything. On desktop the panel sits beside
+ * the chart; on a phone there is no beside, so it falls under everything.
+ *
+ * Pinned rather than reordered. The chart above the panel is the right reading order,
+ * and hoisting a form above the thing it is a form about trades one problem for another.
+ *
+ * `env(safe-area-inset-bottom)` so it clears the home indicator on a notched iPhone,
+ * where a bar flush to the bottom is half a thumb from being untappable.
+ */
+.trade-jump {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 40;
+  display: flex;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  padding-bottom: calc(var(--space-3) + env(safe-area-inset-bottom, 0px));
+  /*
+   * OPAQUE, AND NO BLUR. Three source guards refused the first version and each was
+   * right about a different thing: content scrolls under a fixed surface, so anything
+   * translucent shows the page sliding through the buttons; a `backdrop-filter` needs a
+   * `prefers-reduced-transparency` override shipped alongside it; and a blur makes the
+   * element a containing block for any `position: fixed` descendant, which would trap a
+   * dialog opened from here inside a 73px bar.
+   *
+   * A solid surface is the right answer anyway. The bar sits over scrolling content and
+   * the only thing translucency buys is making the thing underneath harder to ignore.
+   */
+  background: var(--surface-1);
+  border-top: 1px solid var(--line-strong);
+}
+/*
+ * `min-width: 0` BECAUSE A FLEX ITEM DOES NOT SHRINK BELOW ITS CONTENT BY DEFAULT.
+ * Without it "Buy ORBIT" and "Sell" held their own widths and pushed the bar to 387px
+ * inside a 375px viewport, putting 12px of sideways scroll on the page - the same
+ * mechanism as audit F-14/F-15, reintroduced by a control added to fix something else.
+ */
+.trade-jump button {
+  flex: 1;
+  min-width: 0;
+  height: 48px;
+  border-radius: var(--radius-md);
+  border: 1px solid transparent;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+/* Buy takes the width, because buying is what most arrivals are here to do. */
+.trade-jump-buy { flex: 2; background: var(--buy); color: #04140d; }
+.trade-jump-sell { background: transparent; border-color: var(--line-strong); color: var(--text-dim); }
+
+/*
+ * The footer would otherwise sit under the bar. Applied on the launch page only, since
+ * that is the only page the bar appears on.
+ */
+@media (max-width: 900px) {
+  body:has(.trade-jump) { padding-bottom: 76px; }
+}
+/* Above 900px the panel is beside the chart and always reachable, so there is no bar. */
+@media (min-width: 901px) {
+  .trade-jump { display: none; }
+}
+
+/*
+ * The chart scales to its column instead of setting the column's width. Its `viewBox`
+ * already carries the aspect ratio, so a percentage width is all it needs; without this
+ * the element keeps its intrinsic size and pushes every ancestor wider than the screen.
+ */
+.chart-card svg,
+.chart svg { max-width: 100%; }
