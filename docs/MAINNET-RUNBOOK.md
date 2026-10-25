@@ -177,7 +177,7 @@ says plainly that it cannot tell you whether that is the figure you chose.
 
 ### 7. Upload the code, which is a governance vote and not a transaction
 
-**This step takes four days and 200 INJ. Start it before anything else on this list.**
+**This step takes four days and 100 INJ. Start it before anything else on this list.**
 
 Injective mainnet runs wasmd with a permissioned uploader. Measured on chain, not
 read from a doc:
@@ -193,6 +193,46 @@ raw stack trace ending `can not create code: unauthorized` at `keeper.go:175`, w
 reads like a bug in the script or a bad key rather than a chain policy that no
 amount of retrying will move. `deploy.mjs` now refuses before step 5 and prints
 these commands instead.
+
+#### Take the whitelist route, not the per-contract one
+
+Two governance messages can get code onto mainnet, and the one Injective's own guide
+documents is the worse of them:
+
+| | cost | covers a later contract change |
+|---|---|---|
+| `MsgStoreCode` | one proposal **per contract, every version** | no |
+| `MsgAddCodeUploadParamsAddresses` | **one proposal, once** | yes |
+
+Whitelist the deploy address. It is one 100 INJ deposit instead of two, and every
+upgrade after it uploads without another four-day wait. Seven teams have gone this
+way: Choice Exchange (#561), Hyper Ninja (#591), Timeworx.io (#532), Hydro (#470),
+TruFin (#463).
+
+**The whitelist is revocable and has been revoked wholesale.** Proposal 697 used
+`MsgUpdateParams`, which replaces the address list rather than appending to it, so
+every third party previously whitelisted lost upload rights on 4 Sep 2026 and none
+has been re-added since. Upload promptly once the proposal passes; do not treat the
+permission as standing.
+
+**What passes and what does not.** Abstain is normal and harmless, because it counts
+toward quorum. What loses is `no` outweighing `yes`:
+
+```
+PASSED    #561 Choice Exchange  whitelist    yes 51.6  no  0.0
+PASSED    #591 Hyper Ninja      whitelist    yes 31.1  no  3.7
+PASSED    #532 Timeworx.io      whitelist    yes 13.5  no  3.2
+REJECTED  #651 PredictINJ       whitelist    yes 11.0  no 53.2
+REJECTED  #680 Ninjucks         store code   yes  5.7  no 33.8
+REJECTED  #702 DeFi Vault       store code   yes  7.6  no 34.7
+```
+
+The two most recent third-party upload attempts were both rejected, so this is not a
+formality. Post to the Injective forum and Discord before submitting. The deposit
+comes back on a rejection - all six above drew 0% veto, and burning needs 33.4% - so
+a failed attempt costs four days and gas, not 100 INJ.
+
+#### If you upload per contract instead
 
 ```bash
 cd /path/to/injective-launchpad
