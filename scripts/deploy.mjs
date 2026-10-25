@@ -43,6 +43,7 @@ import {
 } from '@injectivelabs/sdk-ts';
 import { Network, getNetworkEndpoints } from '@injectivelabs/networks';
 import { createHash } from 'node:crypto';
+import { loadEnvLocal } from './loadEnvLocal.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ARTIFACTS = join(HERE, '..', 'target', 'wasm32-unknown-unknown', 'release');
@@ -85,55 +86,12 @@ console.log(`  rest: ${endpoints.rest}`);
 
 // ---------------------------------------------------------------- the key --
 
-/**
- * Loads `scripts/.env.local` into the environment, if it exists.
- *
- * Written out rather than taking a dependency: this script signs transactions, and a
- * package added for the convenience of reading a text file is one more thing with
- * access to the process that holds a seed phrase.
- *
- * Anything already in the environment wins, so a CI secret is not overwritten by a
- * file someone left behind locally.
+/*
+ * The loader moved to `loadEnvLocal.mjs`. It was private to this file, and
+ * `mainnet-readiness.mjs` therefore could not see the configuration it exists to
+ * report on - one piece of configuration with two readers, only one of which read it.
  */
-function loadEnvFile() {
-  const envPath = join(HERE, '.env.local');
-  if (!existsSync(envPath)) return;
-
-  /*
-   * Refused if the file is group or world readable. A seed phrase sitting at 0644 is
-   * readable by every process and every other account on the machine, and the usual
-   * way that happens is a text editor or a copy that did not preserve the mode. The
-   * fix is one chmod, so it is worth stopping for.
-   */
-  const mode = statSync(envPath).mode & 0o777;
-  if (mode & 0o077) {
-    die(
-      `scripts/.env.local is readable by others (mode ${mode.toString(8)}).`,
-      'Run: chmod 600 scripts/.env.local',
-    );
-  }
-
-  for (const line of readFileSync(envPath, 'utf8').split('\n')) {
-    const t = line.trim();
-    if (t.length === 0 || t.startsWith('#')) continue;
-    const eq = t.indexOf('=');
-    if (eq < 1) continue;
-    const key = t.slice(0, eq).trim();
-    // Surrounding quotes are stripped, because a mnemonic has spaces in it and
-    // everyone quotes it. Left in, the first word would carry a leading quote and
-    // the derived address would simply be a different, empty account.
-    let value = t.slice(eq + 1).trim();
-    if (
-      (value.startsWith('"') && value.endsWith('"')) ||
-      (value.startsWith("'") && value.endsWith("'"))
-    ) {
-      value = value.slice(1, -1);
-    }
-    if (process.env[key] === undefined) process.env[key] = value;
-  }
-}
-
-loadEnvFile();
+loadEnvLocal(die);
 
 const mnemonic = process.env.INJ_MNEMONIC?.trim();
 const rawKey = process.env.INJ_PRIVATE_KEY?.trim();

@@ -21,6 +21,16 @@ import { readFileSync, existsSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { loadEnvLocal } from './loadEnvLocal.mjs';
+
+/*
+ * READ THE SAME FILE `deploy.mjs` READS. This script reported every address as unset
+ * while they sat in `scripts/.env.local`, because the loader was private to the deploy
+ * script: the check that answers "is this configured" could not see the configuration.
+ * A loose file mode is reported rather than fatal here, so one problem does not hide
+ * the rest of the list.
+ */
+loadEnvLocal((msg, fix) => console.log(`  ! ${msg}\n      ${fix}`));
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, '..');
