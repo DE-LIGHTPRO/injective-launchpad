@@ -2912,3 +2912,23 @@ table.board .dim { color: var(--text-faint); }
   background: transparent;
   padding: var(--space-6) var(--space-4);
 }
+
+/*
+ * A CARD THAT IS A WARNING.
+ *
+ * `/risks` had four `.card` sections and "You can lose everything you put in" was the
+ * first of them, styled identically to "Costs". On a page whose entire job is to say
+ * you can lose your money, equal weight everywhere means no weight anywhere.
+ *
+ * A left edge and a wash rather than a red panel: the copy is already stark, and
+ * shouting over stark copy makes it read as boilerplate somebody was required to add.
+ * The border stays the standard line everywhere except that edge, so it is the same
+ * card with one thing said about it.
+ */
+.card-warning {
+  border-left: 3px solid var(--danger);
+  background:
+    linear-gradient(90deg, rgba(246, 70, 93, 0.06), transparent 40%),
+    var(--surface-1);
+}
+.card-warning h2 { color: var(--text); }

@@ -41,7 +41,14 @@ export default function RisksPage() {
         What this launchpad enforces, what it cannot, and how you can lose money here.
       </p>
 
-      <div className="card" style={{ marginTop: 'var(--space-5)' }}>
+      {/*
+          THE WARNING LOOKS LIKE A WARNING NOW. This was `className="card"`, identical
+          to "Costs" and "What the contracts do enforce" below it, so the most important
+          sentence in the product was styled exactly like the least. On a page whose
+          whole job is to say you can lose your money, every section carrying equal
+          visual weight means none of them carries any.
+        */}
+      <div className="card card-warning" style={{ marginTop: 'var(--space-5)' }}>
         <h2>You can lose everything you put in</h2>
         <p className="note">
           A token launched here has no business behind it, no revenue, and no promise

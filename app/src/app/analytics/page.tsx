@@ -151,29 +151,50 @@ export default async function AnalyticsPage() {
 
       {rows.length > 0 && (
         <>
-          <div className="totals" style={{ marginTop: 'var(--space-4)' }}>
-            <div>
-              <span className="v mono">{rows.length}</span>
-              <span className="k">Launches</span>
+          {/*
+              THE HEADLINE STRIP, SO IT MATCHES THE HEADLINE STRIP. This used `.totals`,
+              the pattern the per-quote breakdowns below use: value first, label under
+              it, two tiers. The hero's does the opposite - label, then value, then a
+              caption - and both are the same thing, a page's summary figures, read in
+              opposite orders on two pages of one product.
+
+              `.stats` here and `.totals` left alone below, because those two really are
+              different: this is a summary and those are a breakdown. What was wrong was
+              a summary wearing the breakdown's clothes.
+            */}
+          <dl className="stats" style={{ marginTop: 'var(--space-4)' }}>
+            <div className="stat">
+              <dt className="k">Launches</dt>
+              <dd className="v">{rows.length}</dd>
+              <dd className="stat-note">
+                {rows.filter((r) => !r.graduated).length} still on a curve
+              </dd>
             </div>
-            <div>
-              <span className="v mono">{rows.filter((r) => r.graduated).length}</span>
-              <span className="k">Graduated</span>
+            <div className="stat">
+              <dt className="k">Graduated</dt>
+              <dd className="v">{rows.filter((r) => r.graduated).length}</dd>
+              <dd className="stat-note">liquidity locked</dd>
             </div>
-            <div>
+            <div className="stat">
+              <dt className="k">Graduation rate</dt>
               {/*
                   `null` for an empty board rather than 0%: "none of zero launches
                   graduated" is not a 0% rate, and a headline reading 0% on a new
                   launchpad says something false about it.
                 */}
-              <span className="v mono">{rate === null ? 'n/a' : `${(rate * 100).toFixed(0)}%`}</span>
-              <span className="k">Graduation rate</span>
+              <dd className="v">{rate === null ? 'n/a' : `${(rate * 100).toFixed(0)}%`}</dd>
+              <dd className="stat-note">
+                {rate === null ? 'nothing has launched yet' : 'of all launches, lifetime'}
+              </dd>
             </div>
-            <div>
-              <span className="v mono">{totals.length}</span>
-              <span className="k">{totals.length === 1 ? 'Pair' : 'Pairs'}</span>
+            <div className="stat">
+              <dt className="k">{totals.length === 1 ? 'Pair' : 'Pairs'}</dt>
+              <dd className="v">{totals.length}</dd>
+              <dd className="stat-note">
+                {totals.map((t) => t.quote.label).join(' and ') || 'none yet'}
+              </dd>
             </div>
-          </div>
+          </dl>
 
           <section className="card" style={{ marginTop: 'var(--space-5)' }}>
             <h2>By pair</h2>
