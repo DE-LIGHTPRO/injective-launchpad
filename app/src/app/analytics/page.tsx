@@ -22,6 +22,8 @@ import {
   type AnalyticsRow,
 } from '@/lib/analytics';
 import { addressName } from '@/lib/addressName';
+import { EmptyState } from '@/components/EmptyState';
+import { MarkLaunches } from '@/components/EmptyMark';
 
 export const metadata: Metadata = {
   title: 'Analytics',

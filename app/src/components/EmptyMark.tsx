@@ -73,6 +73,27 @@ export function MarkHoldings() {
   );
 }
 
+/**
+ * No launches at all: the curve with nothing on it.
+ *
+ * REUSED ACROSS THREE PAGES ON PURPOSE, which is not the thing criticised above. The
+ * objection to the reference site is one mark for three DIFFERENT absences - starred
+ * nothing, held nothing, earned nothing. The home board, Analytics and a creator page
+ * with no launches are the same absence seen from three places, so one mark is the
+ * honest answer and a different drawing on each would be decoration pretending to be
+ * meaning.
+ */
+export function MarkLaunches() {
+  return (
+    <svg className="empty-mark" viewBox="0 0 120 88" aria-hidden="true">
+      <Floor id="em-launch" />
+      {/* The axes a board would be drawn on, and the curve, with no launch on it. */}
+      <path d="M22 20 V62 H98" {...LINE} opacity="0.35" />
+      <path d="M22 62 Q58 62 76 40 T98 22" {...LINE} strokeDasharray="5 4" />
+    </svg>
+  );
+}
+
 /** Nothing to claim: a fee that has not fallen into the tray yet. */
 export function MarkFees() {
   return (

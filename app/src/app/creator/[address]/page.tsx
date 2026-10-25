@@ -11,6 +11,8 @@ import { compact } from '@/lib/boardMetrics';
 import { totalsByQuote } from '@/lib/analytics';
 import { addressName as nameFor } from '@/lib/addressName';
 import { NETWORK, isDevBuild } from '@/lib/config';
+import { EmptyState } from '@/components/EmptyState';
+import { MarkLaunches } from '@/components/EmptyMark';
 
 export const dynamic = 'force-dynamic';
 

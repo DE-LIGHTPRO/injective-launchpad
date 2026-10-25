@@ -16,6 +16,8 @@ import { Hero, type HeroStats } from '@/components/Hero';
 import { loadRows, toRow, toRows, type Row } from '@/lib/boardRows';
 import { UnreadableNotice } from '@/components/UnreadableNotice';
 import { launchPath } from '@/lib/launchPath';
+import { EmptyState } from '@/components/EmptyState';
+import { MarkLaunches } from '@/components/EmptyMark';
 
 export const dynamic = 'force-dynamic';
 
@@ -81,16 +83,33 @@ export default async function Home() {
       <>
         <h1>Launches</h1>
         <p className="sub">One-sided bonding curve launches on Injective.</p>
-        <div className="empty" style={{ marginTop: 'var(--space-5)' }}>
-          <p>No launches yet. Check back shortly.</p>
+        <div style={{ marginTop: 'var(--space-5)' }}>
+          <EmptyState
+            mark={<MarkLaunches />}
+            title="No launches yet"
+            action={
+              <Link href="/create" className="go">
+                Create the first launch
+              </Link>
+            }
+          >
+            Nothing has been created on this factory. The first launch will appear here.
+          </EmptyState>
+          {/*
+              The developer's half stays OUTSIDE the empty state and still behind
+              `isDevBuild`. It names an environment variable, which is configuration
+              detail a visitor must never be shown, and it is a different kind of
+              message from the one above: that one says what happened, this one says
+              what the person running it should do about it.
+            */}
           {isDevBuild() && (
-            <>
+            <div className="empty" style={{ marginTop: 'var(--space-4)' }}>
               <p className="note">
                 Dev: nothing configured. Deploy to {NETWORK.name} and set the factory address, or
                 run with NEXT_PUBLIC_DEMO=1 to explore the interface.
               </p>
               <code>NEXT_PUBLIC_FACTORY_ADDRESS=inj1…</code>
-            </>
+            </div>
           )}
         </div>
       </>

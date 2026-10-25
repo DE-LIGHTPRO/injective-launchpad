@@ -190,15 +190,25 @@ export function ClaimFees() {
   if (rows === null) return <p className="note">Reading your launches…</p>;
 
   if (rows.length === 0) {
+    /*
+     * THE BRANCH A REAL CREATOR ACTUALLY LANDS ON. The disconnected state above got the
+     * treatment first and this one was left bare, which is the wrong way round: nobody
+     * with a wallet connected ever sees the other one. Fixing the instance in front of
+     * me rather than the class is what left it behind.
+     */
     return (
-      <div className="empty">
-        <p>This wallet has not created a launch yet.</p>
-        <p className="note">
-          Every trade on a launch you create pays you{' '}
-          {CREATOR_FEE_SHARE_BPS / 100}% of the launch&rsquo;s own fee, claimable here
-          at any time.
-        </p>
-      </div>
+      <EmptyState
+        mark={<MarkFees />}
+        title="This wallet has not created a launch yet"
+        action={
+          <Link href="/create" className="go">
+            Create a launch
+          </Link>
+        }
+      >
+        Every trade on a launch you create pays you {CREATOR_FEE_SHARE_BPS / 100}% of
+        the launch&rsquo;s own fee, claimable here at any time.
+      </EmptyState>
     );
   }
 
