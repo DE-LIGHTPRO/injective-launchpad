@@ -1,0 +1,438 @@
+[
+  {
+    "ticker": "ORBIT",
+    "curve": "inj13hx6p5zz9r9kf9m02xmcns2uaq390zj23zsh3h",
+    "config": {
+      "virtualInj": "676000000000000000000",
+      "virtualTokens": "1073000000000000000000000000",
+      "curveSupply": "800000000000000000000000000",
+      "graduationTarget": "1915000000000000000000",
+      "feeBps": "100",
+      "feeSellBps": "100"
+    },
+    "state": {
+      "injCollected": "0",
+      "tokensSold": "0",
+      "graduated": false
+    },
+    "buys": [
+      {
+        "injIn": "1000000000000",
+        "chain": {
+          "tokens_out": "1571405323142468535",
+          "fee": "10000000000",
+          "refund": "0",
+          "graduates": false
+        }
+      },
+      {
+        "injIn": "10000000000000000",
+        "chain": {
+          "tokens_out": "15713823125963096102586",
+          "fee": "100000000000000",
+          "refund": "0",
+          "graduates": false
+        }
+      },
+      {
+        "injIn": "100000000000000000",
+        "chain": {
+          "tokens_out": "157117522729659413784076",
+          "fee": "1000000000000000",
+          "refund": "0",
+          "graduates": false
+        }
+      },
+      {
+        "injIn": "1000000000000000000",
+        "chain": {
+          "tokens_out": "1569107372339325543951904",
+          "fee": "10000000000000000",
+          "refund": "0",
+          "graduates": false
+        }
+      },
+      {
+        "injIn": "10000000000000000000",
+        "chain": {
+          "tokens_out": "15487243038343781892404140",
+          "fee": "100000000000000000",
+          "refund": "0",
+          "graduates": false
+        }
+      },
+      {
+        "injIn": "1000000000000000000000",
+        "chain": {
+          "tokens_out": "637617046818727490996398559",
+          "fee": "10000000000000000000",
+          "refund": "0",
+          "graduates": false
+        }
+      }
+    ],
+    "sells": []
+  },
+  {
+    "ticker": "E2E35027",
+    "curve": "inj19y7xrtrm7jqyqtnnqcvlcacd6h99nz6qc9uynr",
+    "config": {
+      "virtualInj": "5354000000",
+      "virtualTokens": "1073000000000000000000000000",
+      "curveSupply": "800000000000000000000000000",
+      "graduationTarget": "15169000000",
+      "feeBps": "100",
+      "feeSellBps": "100"
+    },
+    "state": {
+      "injCollected": "2473857",
+      "tokensSold": "495558831487511546105114",
+      "graduated": false
+    },
+    "buys": [
+      {
+        "injIn": "1000000000000",
+        "chain": {
+          "tokens_out": "799504441168512488453894886",
+          "fee": "158453571",
+          "refund": "984154642996",
+          "graduates": true
+        }
+      },
+      {
+        "injIn": "10000000000000000",
+        "chain": {
+          "tokens_out": "799504441168512488453894886",
+          "fee": "158453571",
+          "refund": "9999984154642996",
+          "graduates": true
+        }
+      },
+      {
+        "injIn": "100000000000000000",
+        "chain": {
+          "tokens_out": "799504441168512488453894886",
+          "fee": "158453571",
+          "refund": "99999984154642996",
+          "graduates": true
+        }
+      },
+      {
+        "injIn": "1000000000000000000",
+        "chain": {
+          "tokens_out": "799504441168512488453894886",
+          "fee": "158453571",
+          "refund": "999999984154642996",
+          "graduates": true
+        }
+      },
+      {
+        "injIn": "10000000000000000000",
+        "chain": {
+          "tokens_out": "799504441168512488453894886",
+          "fee": "158453571",
+          "refund": "9999999984154642996",
+          "graduates": true
+        }
+      },
+      {
+        "injIn": "1000000000000000000000",
+        "chain": {
+          "tokens_out": "799504441168512488453894886",
+          "fee": "158453571",
+          "refund": "999999999984154642996",
+          "graduates": true
+        }
+      }
+    ],
+    "sells": [
+      {
+        "tokensIn": "495558831487511546105",
+        "chain": {
+          "inj_out": "2450",
+          "fee": "25"
+        }
+      },
+      {
+        "tokensIn": "49555883148751154610511",
+        "chain": {
+          "inj_out": "245014",
+          "fee": "2475"
+        }
+      },
+      {
+        "tokensIn": "495558831487511546105114",
+        "chain": {
+          "inj_out": "2449118",
+          "fee": "24739"
+        }
+      }
+    ]
+  },
+  {
+    "ticker": "GHDSJS",
+    "curve": "inj1k2m8aa7ezrek5skpfr9ed7uvj9c54qk7jlph6w",
+    "config": {
+      "virtualInj": "676000000000000000000",
+      "virtualTokens": "1073000000000000000000000000",
+      "curveSupply": "800000000000000000000000000",
+      "graduationTarget": "1915000000000000000000",
+      "feeBps": "300",
+      "feeSellBps": "300"
+    },
+    "state": {
+      "injCollected": "0",
+      "tokensSold": "0",
+      "graduated": false
+    },
+    "buys": [
+      {
+        "injIn": "1000000000000",
+        "chain": {
+          "tokens_out": "1539659761104334366",
+          "fee": "30000000000",
+          "refund": "0",
+          "graduates": false
+        }
+      },
+      {
+        "injIn": "10000000000000000",
+        "chain": {
+          "tokens_out": "15396376708795746569908",
+          "fee": "300000000000000",
+          "refund": "0",
+          "graduates": false
+        }
+      },
+      {
+        "injIn": "100000000000000000",
+        "chain": {
+          "tokens_out": "153943886749978183603831",
+          "fee": "3000000000000000",
+          "refund": "0",
+          "graduates": false
+        }
+      },
+      {
+        "injIn": "1000000000000000000",
+        "chain": {
+          "tokens_out": "1537453653780817466062011",
+          "fee": "30000000000000000",
+          "refund": "0",
+          "graduates": false
+        }
+      },
+      {
+        "injIn": "10000000000000000000",
+        "chain": {
+          "tokens_out": "15178795391570657722035875",
+          "fee": "300000000000000000",
+          "refund": "0",
+          "graduates": false
+        }
+      },
+      {
+        "injIn": "1000000000000000000000",
+        "chain": {
+          "tokens_out": "632326852976913730255164034",
+          "fee": "30000000000000000000",
+          "refund": "0",
+          "graduates": false
+        }
+      }
+    ],
+    "sells": []
+  },
+  {
+    "ticker": "AUDLAB7",
+    "curve": "inj13n7zrrs9469hyzxv8jmn5ulc3fn2rmgzul3llk",
+    "config": {
+      "virtualInj": "676000000000000000000",
+      "virtualTokens": "1073000000000000000000000000",
+      "curveSupply": "800000000000000000000000000",
+      "graduationTarget": "1915000000000000000000",
+      "feeBps": "100",
+      "feeSellBps": "100"
+    },
+    "state": {
+      "injCollected": "1054195382582902552",
+      "tokensSold": "1670695866336482509308372",
+      "graduated": false
+    },
+    "buys": [
+      {
+        "injIn": "1000000000000",
+        "chain": {
+          "tokens_out": "1566515674483272718",
+          "fee": "10000000000",
+          "refund": "0",
+          "graduates": false
+        }
+      },
+      {
+        "injIn": "10000000000000000",
+        "chain": {
+          "tokens_out": "15664927712538257268875",
+          "fee": "100000000000000",
+          "refund": "0",
+          "graduates": false
+        }
+      },
+      {
+        "injIn": "100000000000000000",
+        "chain": {
+          "tokens_out": "156628665171267838273302",
+          "fee": "1000000000000000",
+          "refund": "0",
+          "graduates": false
+        }
+      },
+      {
+        "injIn": "1000000000000000000",
+        "chain": {
+          "tokens_out": "1564228435720004692501867",
+          "fee": "10000000000000000",
+          "refund": "0",
+          "graduates": false
+        }
+      },
+      {
+        "injIn": "10000000000000000000",
+        "chain": {
+          "tokens_out": "15439399281951278617942878",
+          "fee": "100000000000000000",
+          "refund": "0",
+          "graduates": false
+        }
+      },
+      {
+        "injIn": "1000000000000000000000",
+        "chain": {
+          "tokens_out": "636221674154342263330751337",
+          "fee": "10000000000000000000",
+          "refund": "0",
+          "graduates": false
+        }
+      }
+    ],
+    "sells": [
+      {
+        "tokensIn": "1670695866336482509308",
+        "chain": {
+          "inj_out": "1045279335113528",
+          "fee": "10558377122359"
+        }
+      },
+      {
+        "tokensIn": "167069586633648250930837",
+        "chain": {
+          "inj_out": "104511798315116122",
+          "fee": "1055674730455719"
+        }
+      },
+      {
+        "tokensIn": "1670695866336482509308372",
+        "chain": {
+          "inj_out": "1043653428757073526",
+          "fee": "10541953825829026"
+        }
+      }
+    ]
+  },
+  {
+    "ticker": "AUDCAP8",
+    "curve": "inj1wawzh9dupwdafpwrxnrxdke9l5k8jpgzfzwgcg",
+    "config": {
+      "virtualInj": "676000000000000000000",
+      "virtualTokens": "1073000000000000000000000000",
+      "curveSupply": "800000000000000000000000000",
+      "graduationTarget": "1915000000000000000000",
+      "feeBps": "100",
+      "feeSellBps": "100"
+    },
+    "state": {
+      "injCollected": "49500000000000000",
+      "tokensSold": "78564513397317799953997",
+      "graduated": false
+    },
+    "buys": [
+      {
+        "injIn": "1000000000000",
+        "chain": {
+          "tokens_out": "1571175216572563386",
+          "fee": "10000000000",
+          "refund": "0",
+          "graduates": false
+        }
+      },
+      {
+        "injIn": "10000000000000000",
+        "chain": {
+          "tokens_out": "15711522110804711174463",
+          "fee": "100000000000000",
+          "refund": "0",
+          "graduates": false
+        }
+      },
+      {
+        "injIn": "100000000000000000",
+        "chain": {
+          "tokens_out": "157094517126302381115694",
+          "fee": "1000000000000000",
+          "refund": "0",
+          "graduates": false
+        }
+      },
+      {
+        "injIn": "1000000000000000000",
+        "chain": {
+          "tokens_out": "1568877770250829760121892",
+          "fee": "10000000000000000",
+          "refund": "0",
+          "graduates": false
+        }
+      },
+      {
+        "injIn": "10000000000000000000",
+        "chain": {
+          "tokens_out": "15484991550132140272396810",
+          "fee": "100000000000000000",
+          "refund": "0",
+          "graduates": false
+        }
+      },
+      {
+        "injIn": "1000000000000000000000",
+        "chain": {
+          "tokens_out": "637551417969115956865654677",
+          "fee": "10000000000000000000",
+          "refund": "0",
+          "graduates": false
+        }
+      }
+    ],
+    "sells": [
+      {
+        "tokensIn": "78564513397317799953",
+        "chain": {
+          "inj_out": "49008584795229",
+          "fee": "495036210053"
+        }
+      },
+      {
+        "tokensIn": "7856451339731779995399",
+        "chain": {
+          "inj_out": "4900822952184003",
+          "fee": "49503262143273"
+        }
+      },
+      {
+        "tokensIn": "78564513397317799953997",
+        "chain": {
+          "inj_out": "49005000000000000",
+          "fee": "495000000000000"
+        }
+      }
+    ]
+  }
+]
