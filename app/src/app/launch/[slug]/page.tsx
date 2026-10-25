@@ -521,9 +521,24 @@ export default async function LaunchPage({ params }: { params: Promise<{ slug: s
             <div className="bar" style={{ marginTop: 'var(--space-2)' }}>
               <i style={{ width: `${Math.min(100, progress * 100).toFixed(1)}%` }} />
             </div>
+            {/*
+                PAST TENSE ONCE IT HAS HAPPENED. Audit F-06, and it is the same defect
+                the token rows below already record: migration invalidated three rows
+                about the curve, those were fixed, and the ones on the QUOTE side were
+                left behind reading as though the launch were still climbing.
+
+                "Progress to graduation 100.0%" is a bar toward an event that is over.
+                The 100% is not even a measurement: `graduationProgress` returns 1 on
+                `st.graduated` deliberately, because the contract ZEROES `injCollected`
+                when it seeds the pool, so the figure it would otherwise derive from is
+                gone. Measured on E2E88375: target 15,169, pool 6,724.38, recorded
+                raise 0. That zero is the audit's "0 raised at 100%".
+              */}
             <div className="metric-row" style={{ marginTop: 'var(--space-3)' }}>
-              <span className="k">Progress to graduation</span>
-              <span className="v mono">{(progress * 100).toFixed(1)}%</span>
+              <span className="k">{detail.pool ? 'Status' : 'Progress to graduation'}</span>
+              <span className="v mono">
+                {detail.pool ? 'Graduated' : `${(progress * 100).toFixed(1)}%`}
+              </span>
             </div>
           </div>
 
@@ -542,11 +557,35 @@ export default async function LaunchPage({ params }: { params: Promise<{ slug: s
               </span>
             </div>
             <div className="metric-row">
-              <span className="k">Graduates at</span>
+              <span className="k">{detail.pool ? 'Graduated at' : 'Graduates at'}</span>
               <span className="v mono">
                 {fmt(detail.config.graduationTarget, quote.decimals, 0)} {quote.label}
               </span>
             </div>
+            {/*
+                THE TWO FIGURES ABOVE DO NOT ADD UP, AND THAT IS CORRECT. Audit F-06.
+                A reader sees a launch marked graduated, a target of 15,169 and a pool
+                holding 6,724, and the only available reading is that something went
+                missing. Part of the raise seeds the pool and the rest is the fees that
+                were paid out along the way, and the pool's balance then MOVES with
+                trading - selling into it takes quote out. So this is not the amount
+                raised and must not be read as one.
+
+                WHAT THE AUDIT ASKED FOR AND THE CHAIN CANNOT GIVE: "raised at
+                graduation". The contract zeroes `injCollected` when it seeds the pool,
+                so that number is not retained anywhere on chain and cannot be
+                recovered from the split either. Saying what the pool figure IS, in a
+                line a reader can act on, is the honest version. Deriving a
+                plausible-looking raise from the target and the pool would be a number
+                nobody measured, in the one place this product claims not to do that.
+              */}
+            {detail.pool && (
+              <p className="note" style={{ marginTop: 'var(--space-2)' }}>
+                The pool figure is what is in the locked pool now, not the amount
+                raised. Part of the raise seeded it and the rest was paid out as fees,
+                and the balance moves as people trade against it.
+              </p>
+            )}
             <div className="metric-row">
               <span className="k">Curve ceiling</span>
               <span className="v mono">

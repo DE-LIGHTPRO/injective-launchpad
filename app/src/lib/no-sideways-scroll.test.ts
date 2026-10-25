@@ -6,12 +6,26 @@ import { join } from 'node:path';
 /**
  * Can any layout push the page sideways on a narrow screen?
  *
- * WHY STATIC AND NOT MEASURED. A browser measurement is the better evidence and was
- * not available: the pane this session can drive is collapsed, so `innerWidth` and
- * `clientWidth` both read 0 and every element "overflows" a zero-width viewport. A
- * reading taken then is worse than none, because it looks like a result. This checks
- * the two shapes that actually cause it, which is durable in a way one measurement
- * on one viewport is not.
+ * WHY STATIC, AND THE REASON IT USED TO GIVE WAS WRONG. This said a browser
+ * measurement "was not available: the pane this session can drive is collapsed, so
+ * `innerWidth` and `clientWidth` both read 0". That stopped being true, and the audit
+ * F-14/F-15 work measured this very property in a real browser extensively, stepping
+ * the viewport through 320, 349, 359, 360, 375, 700 and 1024 with a wallet connected.
+ * A note explaining why something cannot be done is the most expensive kind to leave
+ * stale: it tells the next reader not to try.
+ *
+ * Two corrections worth keeping from that work, because they are what makes a
+ * measurement here trustworthy. `window.innerWidth` genuinely does lie in that pane -
+ * it read 405 while the layout was 375 - so the honest viewport proxy is
+ * `header.top .inner`'s own `getBoundingClientRect().width`, and page overflow is
+ * `document.documentElement.scrollWidth`. And scanning `body *` for elements past the
+ * viewport falsely flags `.board`, which lives in a deliberate horizontal scroll
+ * container.
+ *
+ * It stays static anyway, for a better reason than the old one: this checks the two
+ * CSS shapes that cause the defect, across every rule in the file, which is durable in
+ * a way that measuring a handful of viewports on the pages that happen to exist is
+ * not. The browser measurement is the right complement to it, not its replacement.
  *
  * `repeat(auto-fit, minmax(240px, 1fr))` cannot shrink below 240px, so on a 320px
  * phone with padding it forces a horizontal scrollbar. Written
