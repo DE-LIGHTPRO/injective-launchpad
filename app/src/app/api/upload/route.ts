@@ -2,6 +2,12 @@ import { NextResponse } from 'next/server';
 import { put } from '@vercel/blob';
 import { allowUploadShared, clientKey } from '@/lib/uploadLimit';
 import { MAX_UPLOAD_BYTES, MAX_UPLOAD_LABEL, oversizeMessage } from '@/lib/uploadSize';
+/*
+ * THE SNIFFER MOVED, because `/api/img` needs the same answer and a second copy of a
+ * magic-number table is two tables that can disagree about what an image is. The
+ * reasoning for sniffing rather than trusting `Content-Type` is on the module.
+ */
+import { sniffImage } from '@/lib/imageSniff';
 
 /**
  * Store a launch logo and hand back a URL the profile can hold.
@@ -33,28 +39,6 @@ import { MAX_UPLOAD_BYTES, MAX_UPLOAD_LABEL, oversizeMessage } from '@/lib/uploa
  */
 const MAX_BYTES = MAX_UPLOAD_BYTES;
 
-/*
- * Checked against the sniffed bytes, not the declared type. `Content-Type` on an
- * upload is supplied by the caller, and a file named `a.png` carrying something else
- * is the oldest trick there is. These are the magic numbers for the four formats a
- * token logo is ever actually in.
- */
-const SIGNATURES: Array<{ mime: string; ext: string; test: (b: Uint8Array) => boolean }> = [
-  { mime: 'image/png', ext: 'png', test: (b) => b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47 },
-  { mime: 'image/jpeg', ext: 'jpg', test: (b) => b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff },
-  { mime: 'image/gif', ext: 'gif', test: (b) => b[0] === 0x47 && b[1] === 0x49 && b[2] === 0x46 },
-  {
-    mime: 'image/webp',
-    ext: 'webp',
-    test: (b) =>
-      b[0] === 0x52 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x46 &&
-      b[8] === 0x57 && b[9] === 0x45 && b[10] === 0x42 && b[11] === 0x50,
-  },
-];
-
-function sniff(bytes: Uint8Array) {
-  return SIGNATURES.find((s) => s.test(bytes)) ?? null;
-}
 
 /**
  * Whether uploading is available at all.
@@ -127,7 +111,7 @@ export async function POST(req: Request) {
   }
 
   const bytes = new Uint8Array(await file.arrayBuffer());
-  const kind = sniff(bytes);
+  const kind = sniffImage(bytes);
   if (!kind) {
     return NextResponse.json({ error: 'That is not a PNG, JPEG, WEBP or GIF.' }, { status: 415 });
   }

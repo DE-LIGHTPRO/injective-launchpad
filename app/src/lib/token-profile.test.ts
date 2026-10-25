@@ -99,14 +99,42 @@ test('an ipfs URI becomes a URL a browser can actually fetch', () => {
    * Browsers do not resolve `ipfs:` natively, so `<img src="ipfs://...">` renders
    * nothing at all: the link is valid, the image is blank, and nothing reports it.
    */
+  /*
+   * TWO ASSERTIONS HERE CHANGED, AND THEY WERE NOT WEAK: they were correct about a
+   * policy that was wrong. Audit F-03. This said an `ipfs://` URI becomes a gateway URL
+   * and that "https passes through untouched rather than being routed via a gateway",
+   * both of which described the code exactly - and both of which meant every visitor's
+   * browser fetched the logo straight from an address its creator chose. That host then
+   * sees the IP of everybody who looks at the token, and the bytes stay the creator's
+   * to change after people have bought.
+   *
+   * So both forms now go through `/api/img`, and the gateway rewrite happens BEFORE the
+   * wrap rather than instead of it: ipfs.io was the same leak under a friendlier name,
+   * which `IPFS_GATEWAY`'s own note already said out loud.
+   */
   const src = imageSrc('ipfs://bafyexample/logo.png');
-  assert.equal(src, `${IPFS_GATEWAY}bafyexample/logo.png`);
+  assert.equal(src, `/api/img?u=${encodeURIComponent(`${IPFS_GATEWAY}bafyexample/logo.png`)}`);
+  assert.equal(
+    imageSrc('https://example.org/a.png'),
+    `/api/img?u=${encodeURIComponent('https://example.org/a.png')}`,
+  );
 
-  // https passes through untouched rather than being routed via a gateway.
-  assert.equal(imageSrc('https://example.org/a.png'), 'https://example.org/a.png');
-  // And a hostile value is still nothing.
+  /*
+   * ENCODED, so a creator cannot write their own `&` and have the route read what
+   * follows as its own parameter.
+   */
+  const smuggled = imageSrc('https://example.org/a.png?x=1&u=https://evil.example/b.png');
+  assert.ok(smuggled && smuggled.startsWith('/api/img?u='));
+  assert.equal(
+    new URL(`https://x.test${smuggled}`).searchParams.getAll('u').length,
+    1,
+    'a second `u` parameter was smuggled in through the creator\'s own query string',
+  );
+
+  // And a hostile value is still nothing, which is what must not have changed.
   assert.equal(imageSrc('javascript:alert(1)'), null);
   assert.equal(imageSrc('ipfs://'), null);
+  assert.equal(imageSrc('data:text/html,<script>alert(1)</script>'), null);
 });
 
 test('only the links that are safe are offered for rendering', () => {

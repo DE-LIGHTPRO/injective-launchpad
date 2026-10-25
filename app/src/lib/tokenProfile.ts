@@ -104,17 +104,42 @@ export function safeExternalUrl(raw: string | null | undefined): string | null {
  */
 export const IPFS_GATEWAY = 'https://ipfs.io/ipfs/';
 
-/** A fetchable URL for an image, or null when there is nothing safe to fetch. */
+/**
+ * A fetchable URL for an image, or null when there is nothing safe to fetch.
+ *
+ * IT GOES THROUGH OUR OWN ORIGIN NOW. Audit F-03. This returned the creator's address
+ * and every visitor's browser fetched it directly, which hands the creator's chosen
+ * host the IP of everybody who so much as looks at their token, and leaves the bytes at
+ * that address theirs to change after people have bought. `referrerPolicy="no-referrer"`
+ * on the tag denied that host the referring URL; it never denied it the address.
+ *
+ * THE IPFS GATEWAY WAS THE SAME PROBLEM WITH A FRIENDLIER NAME, which the note above
+ * already said: it "sees every request, so it learns which visitor looked at which
+ * token". Routing it through the proxy too means that is now something this server
+ * learns and ipfs.io does not. It is why the rewrite happens BEFORE the wrap rather
+ * than instead of it.
+ *
+ * Retroactive by construction, and that is the point of proxying rather than re-hosting
+ * at launch time: every launch already on chain is covered the moment this ships,
+ * where copying bytes at creation could only ever help the launches made afterwards.
+ * `imageFetch.ts` states plainly what that does and does not fix.
+ */
 export function imageSrc(raw: string | null | undefined): string | null {
   const safe = safeExternalUrl(raw);
   if (safe === null) return null;
+  let target = safe;
   if (safe.startsWith('ipfs://')) {
     const cid = safe.slice('ipfs://'.length).replace(/^ipfs\//, '');
     // A CID with a path is fine; anything with a scheme in it is not, and would have
     // been refused above, so this only has to concatenate.
-    return cid.length > 0 ? `${IPFS_GATEWAY}${cid}` : null;
+    if (cid.length === 0) return null;
+    target = `${IPFS_GATEWAY}${cid}`;
   }
-  return safe;
+  /*
+   * Encoded as a query parameter, so a creator cannot smuggle a second parameter in by
+   * writing an `&` into their own URL and have the route read it as its own.
+   */
+  return `/api/img?u=${encodeURIComponent(target)}`;
 }
 
 /** The links that are actually safe to render, in the order they should appear. */
