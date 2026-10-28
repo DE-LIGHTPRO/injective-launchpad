@@ -20,7 +20,7 @@
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 const ROOT = join(import.meta.dirname, '..', '..', '..', '..');
@@ -99,13 +99,43 @@ test('an unimplemented rule is not offered by the create form on EVM', () => {
    * reads it as a guarantee that nothing on chain enforces. The Rust comment makes
    * exactly this point about a cap that can never bind.
    */
-  const form = readFileSync(join(ROOT, 'app', 'src', 'components', 'CreateLaunch.tsx'), 'utf8');
-  if (!/maxPerWallet/.test(form)) return; // the control is gone; nothing to gate
+  /*
+   * EVERY component that renders the cap, not just the form. The first version
+   * checked CreateLaunch.tsx alone, and LaunchPreview.tsx went on printing
+   * "Max per wallet: no cap" on the live EVM site: a subtler version of the same
+   * lie, since "no cap" reads as a feature that exists and is unset.
+   */
+  /*
+   * Components that render the cap only when the DATA says there is one.
+   *
+   * TradePanel gates on `rules.maxPerWallet !== null`, and `adapt.ts` returns
+   * NO_RULES on EVM, so nothing cap-shaped ever renders there. It needs no backend
+   * check, and adding one would be a second place deciding the same thing.
+   *
+   * This list is for data-gated components only. A component that renders cap UI
+   * when the cap is null belongs in the gated set, not here: that is what
+   * LaunchPreview was doing when it printed "no cap" on the live EVM site.
+   */
+  const DATA_GATED: Record<string, string> = {
+    'TradePanel.tsx':
+      'renders the cap only when rules.maxPerWallet is non-null, which NO_RULES makes impossible on EVM',
+  };
+  for (const [file, why] of Object.entries(DATA_GATED)) {
+    assert.ok(why.length > 30, `${file} is excused with no real reason`);
+  }
 
-  assert.match(
-    form,
-    /isEvm\(\)|activeBackend\(\)|backendSupportsRules/,
-    'CreateLaunch.tsx offers a per-wallet cap and never checks the backend, so on EVM it ' +
-      'promises a protection the contract does not implement',
+  const dir = join(ROOT, 'app', 'src', 'components');
+  const offenders: string[] = [];
+  for (const file of readdirSync(dir).filter((f) => f.endsWith('.tsx'))) {
+    const src = readFileSync(join(dir, file), 'utf8');
+    if (!/maxPerWallet/.test(src)) continue;
+    if (file in DATA_GATED) continue;
+    if (!/isEvm\(\)|activeBackend\(\)|rulesSupported/.test(src)) offenders.push(file);
+  }
+  assert.deepEqual(
+    offenders,
+    [],
+    'these render a per-wallet cap without checking the backend, so on EVM they promise ' +
+      'a protection the contract does not implement',
   );
 });
