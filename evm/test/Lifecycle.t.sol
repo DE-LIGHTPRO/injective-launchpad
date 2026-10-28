@@ -47,6 +47,7 @@ contract LifecycleTest is Test {
                 earlyFeeStartBps: 0,
                 earlyFeeSecs: 0,
                 tradeStart: 0,
+                maxPerWallet: 0,
                 rewardRoute: route
             })
         );
@@ -85,7 +86,7 @@ contract LifecycleTest is Test {
         vm.prank(alice);
         vm.expectRevert(abi.encodeWithSelector(Factory.WrongLaunchFee.selector, 1 ether, 0.2 ether));
         factory.createLaunch{value: 1 ether}(
-            Factory.CreateParams("n", "S", V_INJ, TARGET, 100, 100, 0, 0, 0, Curve.RewardRoute.Creator)
+            Factory.CreateParams("n", "S", V_INJ, TARGET, 100, 100, 0, 0, 0, 0, Curve.RewardRoute.Creator)
         );
     }
 
@@ -317,6 +318,7 @@ contract LifecycleTest is Test {
                 earlyFeeStartBps: 0,
                 earlyFeeSecs: 0,
                 tradeStart: 0,
+                maxPerWallet: 0,
                 rewardRoute: Curve.RewardRoute.Creator
             })
         );
@@ -372,5 +374,143 @@ contract LifecycleTest is Test {
         assertEq(target, TARGET);
         assertEq(buyBps, 100);
         assertEq(sellBps, 250);
+    }
+
+    // ------------------------------------------------- the per wallet cap --
+
+    function _createCapped(uint256 cap) internal returns (Curve c, LaunchToken t) {
+        vm.prank(creator);
+        (, address curve, address token) = factory.createLaunch{value: 0.2 ether}(
+            Factory.CreateParams({
+                name: "Capped",
+                symbol: "CAP",
+                virtualInj: V_INJ,
+                graduationTarget: TARGET,
+                feeBps: 100,
+                feeSellBps: 100,
+                earlyFeeStartBps: 0,
+                earlyFeeSecs: 0,
+                tradeStart: 0,
+                maxPerWallet: cap,
+                rewardRoute: Curve.RewardRoute.Creator
+            })
+        );
+        return (Curve(payable(curve)), LaunchToken(token));
+    }
+
+    function test_theCapBindsAndTheErrorSaysWhatIsLeft() public {
+        (Curve c, LaunchToken t) = _createCapped(5_000_000e18);
+
+        vm.prank(alice);
+        c.buy{value: 0.05 ether}(0, address(0));
+        uint256 held = t.balanceOf(alice);
+        assertLe(held, 5_000_000e18, "the first buy already exceeded the cap");
+        assertEq(c.purchasedFromCurve(alice), held, "the cap ledger did not record the buy");
+
+        // A buy that would cross it is refused, and names the remaining allowance.
+        vm.prank(alice);
+        vm.expectRevert();
+        c.buy{value: 10 ether}(0, address(0));
+    }
+
+    function test_sellingBackFreesAllowance() public {
+        /*
+         * What makes it a cap on EXPOSURE rather than on lifetime purchases. The
+         * Rust is explicit that it counts buys minus sells, because the contract
+         * cannot see transfers and a true balance cap is unenforceable.
+         */
+        (Curve c, LaunchToken t) = _createCapped(5_000_000e18);
+        vm.prank(alice);
+        c.buy{value: 0.05 ether}(0, address(0));
+
+        uint256 held = t.balanceOf(alice);
+        assertEq(c.purchasedFromCurve(alice), held);
+
+        vm.startPrank(alice);
+        t.approve(address(c), held / 2);
+        c.sell(held / 2, 0);
+        vm.stopPrank();
+
+        assertEq(c.purchasedFromCurve(alice), held - held / 2, "selling did not free allowance");
+    }
+
+    function test_sellingTokensYouNeverBoughtHereDoesNotUnderflow() public {
+        // A holder can receive tokens by transfer and sell them. Saturating, or an
+        // ordinary sell reverts for a reason nobody could diagnose.
+        (Curve c, LaunchToken t) = _createCapped(5_000_000e18);
+        vm.prank(alice);
+        c.buy{value: 0.05 ether}(0, address(0));
+
+        uint256 held = t.balanceOf(alice);
+        vm.prank(alice);
+        t.transfer(bob, held);
+
+        assertEq(c.purchasedFromCurve(bob), 0, "bob never bought here");
+        vm.startPrank(bob);
+        t.approve(address(c), held);
+        c.sell(held, 0);
+        vm.stopPrank();
+        assertEq(c.purchasedFromCurve(bob), 0, "the ledger underflowed");
+    }
+
+    function test_aCappedCurveCannotBeGraduatedByOneWallet() public {
+        /*
+         * Not a limitation, the feature. A buy that clears the remaining supply hands
+         * one address the whole rest of the curve, which is exactly what a per-wallet
+         * cap exists to prevent. Graduating a capped launch takes many buyers, which
+         * is the distribution the cap is for.
+         *
+         * My first version of this test assumed one wallet could graduate it and
+         * called the refusal a bug.
+         */
+        (Curve c,) = _createCapped(5_000_000e18);
+        vm.prank(alice);
+        vm.expectRevert();
+        c.buy{value: 300 ether}(0, address(0));
+    }
+
+    function test_theCapExpiresWithTheCurve() public {
+        // A launch-window rule, like the start time and the opening premium. Capping
+        // pool trades would cap a market that is no longer a sale.
+        (Curve c, LaunchToken t) = _createCapped(0); // uncapped, so one buy graduates
+        vm.prank(alice);
+        c.buy{value: 300 ether}(0, address(0));
+        assertTrue(c.migrated());
+
+        uint256 before = t.balanceOf(bob);
+        vm.prank(bob);
+        c.buy{value: 50 ether}(0, address(0));
+        assertGt(t.balanceOf(bob) - before, 5_000_000e18, "a pool trade was capped");
+    }
+
+    function test_aCapThatCanNeverBindIsRefused() public {
+        /*
+         * Stored, it would be displayed as a protection the launch does not have. A
+         * buyer reads "max 1,000,000,000 per wallet" and takes it as a guarantee
+         * about distribution.
+         */
+        /*
+         * Hoisted, and that is not style. Arguments are evaluated BEFORE the call,
+         * so `factory.CURVE_SUPPLY()` written inline is itself a call, and it
+         * consumes the expectRevert: the cheatcode then watches the getter rather
+         * than createLaunch, the getter succeeds, and the test reports "next call
+         * did not revert" about a guard that works.
+         */
+        uint256 supply = factory.CURVE_SUPPLY();
+        vm.prank(creator);
+        vm.expectRevert(Factory.InvalidParams.selector);
+        factory.createLaunch{value: 0.2 ether}(
+            Factory.CreateParams(
+                "n", "S", V_INJ, TARGET, 100, 100, 0, 0, 0, supply, Curve.RewardRoute.Creator
+            )
+        );
+    }
+
+    function test_noCapMeansNoLedgerAndNoLimit() public {
+        (Curve c, LaunchToken t) = _createCapped(0);
+        vm.prank(alice);
+        c.buy{value: 30 ether}(0, address(0));
+        assertGt(t.balanceOf(alice), 5_000_000e18, "an uncapped launch was capped");
+        assertEq(c.purchasedFromCurve(alice), 0, "the ledger is written when there is no cap");
     }
 }

@@ -120,6 +120,8 @@ contract Factory {
         uint256 earlyFeeSecs;
         /// When buying opens. Zero means now.
         uint256 tradeStart;
+        /// Most one address may take from the curve, in token base units. 0 = no cap.
+        uint256 maxPerWallet;
         Curve.RewardRoute rewardRoute;
     }
 
@@ -137,6 +139,14 @@ contract Factory {
         if (p.earlyFeeSecs > 0 && p.earlyFeeStartBps > EarlyFee.MAX_EARLY_FEE_BPS) {
             revert InvalidParams();
         }
+        /*
+         * Refused rather than stored. A cap at or above the whole sellable supply can
+         * never bind, and stored it would be displayed as a protection the launch
+         * does not have, which is worse than no rule: a buyer reads
+         * "max 1,000,000,000 per wallet" and takes it as a guarantee about
+         * distribution.
+         */
+        if (p.maxPerWallet >= CURVE_SUPPLY) revert InvalidParams();
 
         uint256 start = p.tradeStart == 0 ? block.timestamp : p.tradeStart;
 
@@ -153,6 +163,7 @@ contract Factory {
                 creatorFeeShareBps: CREATOR_FEE_SHARE_BPS,
                 rewardRoute: p.rewardRoute,
                 tradeStart: start,
+                maxPerWallet: p.maxPerWallet,
                 virtualInj: p.virtualInj,
                 virtualTokens: VIRTUAL_TOKENS,
                 curveSupply: CURVE_SUPPLY,

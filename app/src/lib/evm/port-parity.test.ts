@@ -40,7 +40,7 @@ const ACCOUNTED_FOR: Record<string, string> = {
   curve: 'the nested CurveConfigStored, present as six immutables and curveParams()',
   opened_at: 'named TRADE_START, set from the launch params or the creating block',
   rules:
-    'NOT IMPLEMENTED. LaunchRules (max_per_wallet) has no EVM equivalent yet, and the create form must not offer it on this backend until it does',
+    'the cap is MAX_PER_WALLET and the ledger purchasedFromCurve; the Rust struct also holds tradeStart, which is TRADE_START here',
 };
 
 function rustFields(struct: string): string[] {
@@ -91,51 +91,20 @@ test('nothing is excused without a reason', () => {
   }
 });
 
-test('an unimplemented rule is not offered by the create form on EVM', () => {
+test('the per-wallet cap exists on both sides, not just in the Rust', () => {
   /*
-   * THE DANGEROUS HALF OF A MISSING FIELD. `rules` being absent from the contracts
-   * is a feature gap. The form still offering a per-wallet cap on this backend would
-   * be a false protection: a creator sets it, the launch page shows it, and a buyer
-   * reads it as a guarantee that nothing on chain enforces. The Rust comment makes
-   * exactly this point about a cap that can never bind.
+   * This replaced a guard that checked the create form did NOT offer a cap on EVM,
+   * which was right while the contracts had none. They have one now, so the check
+   * that matters is the opposite: that the field is really there, enforced on buys
+   * and freed on sells, rather than stored and ignored.
    */
-  /*
-   * EVERY component that renders the cap, not just the form. The first version
-   * checked CreateLaunch.tsx alone, and LaunchPreview.tsx went on printing
-   * "Max per wallet: no cap" on the live EVM site: a subtler version of the same
-   * lie, since "no cap" reads as a feature that exists and is unset.
-   */
-  /*
-   * Components that render the cap only when the DATA says there is one.
-   *
-   * TradePanel gates on `rules.maxPerWallet !== null`, and `adapt.ts` returns
-   * NO_RULES on EVM, so nothing cap-shaped ever renders there. It needs no backend
-   * check, and adding one would be a second place deciding the same thing.
-   *
-   * This list is for data-gated components only. A component that renders cap UI
-   * when the cap is null belongs in the gated set, not here: that is what
-   * LaunchPreview was doing when it printed "no cap" on the live EVM site.
-   */
-  const DATA_GATED: Record<string, string> = {
-    'TradePanel.tsx':
-      'renders the cap only when rules.maxPerWallet is non-null, which NO_RULES makes impossible on EVM',
-  };
-  for (const [file, why] of Object.entries(DATA_GATED)) {
-    assert.ok(why.length > 30, `${file} is excused with no real reason`);
-  }
-
-  const dir = join(ROOT, 'app', 'src', 'components');
-  const offenders: string[] = [];
-  for (const file of readdirSync(dir).filter((f) => f.endsWith('.tsx'))) {
-    const src = readFileSync(join(dir, file), 'utf8');
-    if (!/maxPerWallet/.test(src)) continue;
-    if (file in DATA_GATED) continue;
-    if (!/isEvm\(\)|activeBackend\(\)|rulesSupported/.test(src)) offenders.push(file);
-  }
-  assert.deepEqual(
-    offenders,
-    [],
-    'these render a per-wallet cap without checking the backend, so on EVM they promise ' +
-      'a protection the contract does not implement',
+  const sol = readFileSync(SOL, 'utf8');
+  assert.match(sol, /uint256 public immutable MAX_PER_WALLET/, 'the cap is gone');
+  assert.match(sol, /mapping\(address => uint256\) public purchasedFromCurve/, 'the ledger is gone');
+  assert.match(sol, /revert OverWalletCap/, 'the cap is stored but never enforced');
+  assert.match(
+    sol,
+    /purchasedFromCurve\[msg\.sender\] = already > tokensIn/,
+    'selling no longer frees allowance, so the cap counts lifetime purchases',
   );
 });

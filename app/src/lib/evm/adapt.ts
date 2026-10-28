@@ -69,11 +69,17 @@ export async function getLaunchDetailEvm(curveAddress: string): Promise<LaunchDe
     platformPaid: d.platformPaid,
     creatorPaid: d.creatorPaid,
     /*
-     * The EVM contracts carry no launch rules: no wallet cap, no allowlist, no
-     * start-time gate beyond `tradeStart`. NO_RULES is the honest value, not an
-     * empty object that would render as "rules: none configured" and read as though
-     * the feature existed and was switched off.
+     * REAL RULES NOW. The EVM contracts carry MAX_PER_WALLET and enforce it on every
+     * curve buy, freeing allowance on a sell, so this reads them rather than
+     * returning NO_RULES.
+     *
+     * `0` on chain means no cap, and `null` is how the app says that: zero would
+     * render as "max 0 per wallet", a cap nobody could buy under.
      */
-    rules: NO_RULES,
+    rules: {
+      ...NO_RULES,
+      maxPerWallet: d.maxPerWallet > 0n ? d.maxPerWallet : null,
+      tradeStart: d.tradeStart > 0n ? Number(d.tradeStart) : null,
+    },
   };
 }

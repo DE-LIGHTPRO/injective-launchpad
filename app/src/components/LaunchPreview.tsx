@@ -1,4 +1,3 @@
-import { isEvm } from '../lib/config.ts';
 import { fmt } from '@/lib/curve';
 import { denomLabel } from '@/lib/chain';
 import {
@@ -67,10 +66,6 @@ export function LaunchPreview({
   openingBuyShare: number | null;
   profile: TokenProfile;
 }) {
-  // See CreateLaunch.tsx: the EVM contracts carry no LaunchRules, so a cap row
-  // here would read as a feature that exists and is unset.
-  const rulesSupported = !isEvm();
-
   const route = REWARD_ROUTES.find((r) => r.value === rewardRoute);
   const links = [
     ['Website', profile.website],
@@ -138,16 +133,12 @@ export function LaunchPreview({
         <span className="v">{route?.label ?? rewardRoute}</span>
       </div>
 
-      {/*
-          ABSENT WHERE THE CHAIN CANNOT ENFORCE IT, not shown as "no cap".
-          The row exists to tell a creator who left the rules blank that the launch
-          is open to everyone from the first block, which is worth saying. But on a
-          backend with no LaunchRules at all, "no cap" reads as a feature that exists
-          and is unset, rather than one the contract does not have. The row is
-          removed there instead.
-        */}
-      {rulesSupported && (
       <div className="metric-row">
+        {/*
+            Stated even when absent, and that is the point. A creator who left the
+            rules blank has not been told the launch is open to everyone from the
+            first block; an empty field says nothing, this says what it means.
+          */}
         <span className="k">Max per wallet</span>
         <span className="v mono">
           {/* 18 is right here and must not be "fixed" to the quote: a cap is a count of
@@ -156,7 +147,6 @@ export function LaunchPreview({
           {rules.maxPerWallet ? fmt(BigInt(rules.maxPerWallet), 18, 0) : 'no cap'}
         </span>
       </div>
-      )}
       <div className="metric-row">
         <span className="k">Buying opens</span>
         <span className="v mono">

@@ -1,6 +1,5 @@
 'use client';
 
-import { isEvm } from '../lib/config.ts';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -117,15 +116,6 @@ const DEFAULTS = {
 };
 
 export function CreateLaunch() {
-  /*
-   * Whether the active backend enforces LaunchRules.
-   *
-   * The CosmWasm curve applies a per-wallet cap on every buy; the EVM port carries
-   * no rules at all. A cap the chain ignores is worse than no cap, because the
-   * launch page renders it and a buyer reads it as a protection.
-   */
-  const rulesSupported = !isEvm();
-
   const [f, setF] = useState(DEFAULTS);
   /*
    * The wallet's gas balance, so the form can refuse a launch it knows cannot land.
@@ -318,7 +308,7 @@ export function CreateLaunch() {
    */
   const builtRules = useMemo((): LaunchRules => {
     let cap: bigint | null = null;
-    if (rulesSupported && f.maxPerWallet.trim().length > 0) {
+    if (f.maxPerWallet.trim().length > 0) {
       try {
         cap = parseAmount(f.maxPerWallet);
       } catch {
@@ -1019,9 +1009,8 @@ export function CreateLaunch() {
       <div className="card">
         <h2>Launch rules</h2>
         <p className="note">
-          {rulesSupported
-            ? 'Optional. Both are enforced by the curve contract on every buy and sell until this launch graduates. Afterwards it trades against its locked pool and neither applies.'
-            : 'Not available on this network. The contracts here do not enforce a per wallet cap, and offering one that nothing enforces would read to buyers as a guarantee.'}
+          Optional. Both are enforced by the curve contract on every buy and sell until
+          this launch graduates. Afterwards it trades against its locked pool and neither applies.
         </p>
 
         {/*
@@ -1032,12 +1021,6 @@ export function CreateLaunch() {
             than present and inert.
           */}
         <div className="field-row" style={{ marginTop: 'var(--space-4)' }}>
-          {/*
-              ONLY THE CAP IS GATED, not the whole row.
-              "Buying opens" maps to TRADE_START and works on both backends; hiding
-              it with the cap would remove a control the contract does honour.
-            */}
-          {rulesSupported && (
           <div className="field">
             <label htmlFor="cl-cap">
               Max per wallet <span className="hint">tokens, blank for no cap</span>
@@ -1052,7 +1035,6 @@ export function CreateLaunch() {
             />
             {ruleError('maxPerWallet') && <p className="note err-text">{ruleError('maxPerWallet')}</p>}
           </div>
-          )}
           <div className="field">
             <label htmlFor="cl-start">
               Buying opens <span className="hint">your local time, blank for immediately</span>

@@ -42,6 +42,7 @@ export const FACTORY_ABI = [
           { name: 'earlyFeeStartBps', type: 'uint256' },
           { name: 'earlyFeeSecs', type: 'uint256' },
           { name: 'tradeStart', type: 'uint256' },
+          { name: 'maxPerWallet', type: 'uint256' },
           { name: 'rewardRoute', type: 'uint8' },
         ],
       },
@@ -73,6 +74,15 @@ export const CURVE_ABI = [
   { type: 'function', name: 'lpBonus', inputs: [], outputs: [{ type: 'uint256' }], stateMutability: 'view' },
   { type: 'function', name: 'currentFeeBps', inputs: [], outputs: [{ type: 'uint256' }], stateMutability: 'view' },
   { type: 'function', name: 'currentSellFeeBps', inputs: [], outputs: [{ type: 'uint256' }], stateMutability: 'view' },
+  { type: 'function', name: 'MAX_PER_WALLET', inputs: [], outputs: [{ type: 'uint256' }], stateMutability: 'view' },
+  { type: 'function', name: 'TRADE_START', inputs: [], outputs: [{ type: 'uint256' }], stateMutability: 'view' },
+  {
+    type: 'function',
+    name: 'purchasedFromCurve',
+    inputs: [{ type: 'address' }],
+    outputs: [{ type: 'uint256' }],
+    stateMutability: 'view',
+  },
   {
     type: 'function',
     name: 'curveParams',

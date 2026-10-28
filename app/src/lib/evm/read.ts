@@ -122,6 +122,9 @@ export interface EvmDetail {
   lpBonus: bigint;
   currentFeeBps: number;
   currentSellFeeBps: number;
+  /** 0 means no cap, which is what the contract stores for an uncapped launch. */
+  maxPerWallet: bigint;
+  tradeStart: bigint;
 }
 
 /**
@@ -156,6 +159,8 @@ export async function getEvmDetail(curve: Address): Promise<EvmDetail> {
       { ...c, functionName: 'currentFeeBps' },
       { ...c, functionName: 'currentSellFeeBps' },
       { ...c, functionName: 'curveParams' },
+      { ...c, functionName: 'MAX_PER_WALLET' },
+      { ...c, functionName: 'TRADE_START' },
     ],
     allowFailure: false,
   });
@@ -163,11 +168,11 @@ export async function getEvmDetail(curve: Address): Promise<EvmDetail> {
   const [
     token, creator, lpReserve, route, injCollected, tokensSold, graduated, migrated,
     poolQuote, poolTokens, platformOwed, creatorOwed, platformPaid, creatorPaid,
-    lpBonus, feeBps, feeSellBps, params,
+    lpBonus, feeBps, feeSellBps, params, maxPerWallet, tradeStart,
   ] = r as unknown as [
     Address, Address, bigint, number, bigint, bigint, boolean, boolean,
     bigint, bigint, bigint, bigint, bigint, bigint, bigint, bigint, bigint,
-    readonly [bigint, bigint, bigint, bigint, bigint, bigint],
+    readonly [bigint, bigint, bigint, bigint, bigint, bigint], bigint, bigint,
   ];
 
   const [virtualInj, virtualTokens, curveSupply, graduationTarget] = params;
@@ -204,5 +209,7 @@ export async function getEvmDetail(curve: Address): Promise<EvmDetail> {
     lpBonus,
     currentFeeBps: Number(feeBps),
     currentSellFeeBps: Number(feeSellBps),
+    maxPerWallet,
+    tradeStart,
   };
 }

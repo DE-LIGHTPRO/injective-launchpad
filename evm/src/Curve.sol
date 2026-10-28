@@ -62,6 +62,23 @@ contract Curve is ReentrancyGuard {
     /// When buying became possible. The early-fee decay is measured from here.
     uint256 public immutable TRADE_START;
 
+    /**
+     * Most a single address may acquire THROUGH THIS CURVE, in token base units.
+     * Zero means no cap.
+     *
+     * COUNTED AS BUYS MINUS SELLS, NOT AS A BALANCE, and the distinction is the
+     * whole honesty of the feature. The contract cannot see transfers, so a true
+     * balance cap is unenforceable: someone could buy to the cap, send the tokens
+     * elsewhere and buy again, and nothing on chain would know. What this caps is
+     * concurrent exposure acquired from the curve, which is the part that competes
+     * with other buyers for the opening price.
+     *
+     * It does not stop a determined sniper. One person with twenty addresses gets
+     * twenty times the cap, and no on-chain rule fixes that. It raises the cost and
+     * the effort of taking the opening cheaply, and claiming more would be the lie.
+     */
+    uint256 public immutable MAX_PER_WALLET;
+
     uint256 private immutable _VIRTUAL_INJ;
     uint256 private immutable _VIRTUAL_TOKENS;
     uint256 private immutable _CURVE_SUPPLY;
@@ -103,6 +120,15 @@ contract Curve is ReentrancyGuard {
     uint256 public platformPaid;
     uint256 public creatorPaid;
 
+    /**
+     * Tokens each address has taken from the curve, net of what it sold back.
+     *
+     * Only maintained while the cap is live. After graduation the launch trades
+     * against its pool and the cap no longer applies, exactly as the launch-window
+     * rules expire with the curve.
+     */
+    mapping(address => uint256) public purchasedFromCurve;
+
     /// The opening-fee premium and Pool-routed creator fees, held for the pool.
     /// Deliberately NOT in `injCollected`: adding quote without issuing tokens would
     /// move every later price on the curve.
@@ -126,6 +152,7 @@ contract Curve is ReentrancyGuard {
     error NothingToClaim();
     error TransferFailed();
     error ZeroAmount();
+    error OverWalletCap(uint256 wanted, uint256 allowance);
 
     struct Params {
         address token;
@@ -135,6 +162,7 @@ contract Curve is ReentrancyGuard {
         uint256 creatorFeeShareBps;
         RewardRoute rewardRoute;
         uint256 tradeStart;
+        uint256 maxPerWallet;
         uint256 virtualInj;
         uint256 virtualTokens;
         uint256 curveSupply;
@@ -154,6 +182,7 @@ contract Curve is ReentrancyGuard {
         CREATOR_FEE_SHARE_BPS = p.creatorFeeShareBps;
         REWARD_ROUTE = p.rewardRoute;
         TRADE_START = p.tradeStart;
+        MAX_PER_WALLET = p.maxPerWallet;
 
         _VIRTUAL_INJ = p.virtualInj;
         _VIRTUAL_TOKENS = p.virtualTokens;
@@ -329,6 +358,20 @@ contract Curve is ReentrancyGuard {
         lpBonus += premium;
         _takeFee(baseFee);
 
+        /*
+         * Enforced here and not in the pool branch. The cap is a launch-window rule
+         * and it expires with the curve, like the start time and the opening
+         * premium. Applying it to pool trades would cap a market that is no longer
+         * a sale.
+         */
+        if (MAX_PER_WALLET > 0) {
+            uint256 already = purchasedFromCurve[to];
+            if (already + q.tokensOut > MAX_PER_WALLET) {
+                revert OverWalletCap(q.tokensOut, MAX_PER_WALLET - already);
+            }
+            purchasedFromCurve[to] = already + q.tokensOut;
+        }
+
         bool nowGraduates = q.graduates;
         if (nowGraduates) {
             graduated = true;
@@ -357,6 +400,17 @@ contract Curve is ReentrancyGuard {
         uint256 gross = q.injOut + q.fee;
         uint256 baseFee = CurveMath.feeOn(gross, _FEE_SELL_BPS);
         if (baseFee > q.fee) baseFee = q.fee;
+
+        /*
+         * Selling back frees allowance, which is what makes this a cap on exposure
+         * rather than on lifetime purchases. Saturating, because a holder can sell
+         * tokens they received as a transfer and never bought here, and underflowing
+         * would make an ordinary sell revert.
+         */
+        if (MAX_PER_WALLET > 0) {
+            uint256 already = purchasedFromCurve[msg.sender];
+            purchasedFromCurve[msg.sender] = already > tokensIn ? already - tokensIn : 0;
+        }
 
         injCollected -= gross;
         tokensSold -= tokensIn;
