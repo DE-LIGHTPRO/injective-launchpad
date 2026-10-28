@@ -1,1 +1,1 @@
-{"version":1,"failures":[{"contract":"test/Parity.t.sol:ParityTest","test":"test_sellsMatchTheRust"},{"contract":"test/Parity.t.sol:ParityTest","test":"test_whatTheRustRefusesThePortRefuses"}]}
+{"version":1,"failures":[{"contract":"test/Lifecycle.t.sol:LifecycleTest","test":"test_poolRouteSendsTheCreatorShareIntoTheLiquidity"}]}

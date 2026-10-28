@@ -65,3 +65,59 @@ The math library only. Still to port: the curve contract, the factory, the ERC-2
 (which replaces the tokenfactory denom and gets simpler: no mint function and no
 owner, structurally fixed rather than fixed by an admin transfer), and the deployment
 scripts.
+
+## The contracts
+
+| | |
+|---|---|
+| `LaunchToken.sol` | ERC-20. Fixed supply, no mint, no owner, no pause, no upgrade. |
+| `Curve.sol` | One launch: bonding curve, graduation, locked pool, fee claims. |
+| `Factory.sol` | Creates launches. Sets terms for FUTURE launches only. |
+
+**No owner, no upgrade path, no withdraw, on the curve.** "Liquidity locked at
+graduation" is true because there is no function that could move it, not because a key
+was handed somewhere safe.
+
+**The ERC-20 is the piece that got simpler.** On the native side a tokenfactory denom
+has an admin who can mint, so the CosmWasm design has to move that admin to the curve
+where no code can use it, and revert the launch if the creator did not hand it over.
+Here the capability does not exist: the supply is minted once in the constructor and
+there is no other path to `_mint` anywhere. Ownable, AccessControl, Burnable, Pausable
+and Permit are all deliberately absent.
+
+**The circular dependency, honestly.** The curve needs the token's address and the
+token needs the curve's. The token is minted to the factory and transferred in the
+same call, so the factory does hold the supply, for three statements inside one atomic
+transaction. The first version passed `address(0)` to the curve under a comment saying
+it was replaced below, and nothing replaced it: `TOKEN` is immutable, so every launch
+would have been born pointing at the zero address, and it compiled without a warning.
+
+## Tests
+
+28, and they run against a fork of live Injective EVM as well as the default EVM:
+
+```bash
+forge test
+forge test --fork-url https://sentry.evm-rpc.injective.network
+```
+
+Three suites. Parity against Rust-generated vectors, the pool and fee decay against
+their own vectors, and a full lifecycle: create, buy, sell, graduate, trade the pool,
+claim. The lifecycle suite asserts solvency after every step, which is the EVM
+equivalent of `scripts/verify-solvency.mjs`.
+
+## Deploying
+
+```bash
+INJ_ADMIN=0x... INJ_PLATFORM=0x... \
+  forge script script/Deploy.s.sol --rpc-url injective --broadcast --private-key $KEY
+
+./script/verify-deployment.sh 0xFACTORY
+```
+
+Simulated against the live chain: **4,858,725 gas, about 0.00155 INJ**. No governance
+proposal, no deposit, no vote, no whitelisting.
+
+**These contracts have never executed on a chain and have had no audit.** The
+arithmetic is checked against an implementation that has, and the lifecycle is checked
+against a fork, which is not the same thing as having run.

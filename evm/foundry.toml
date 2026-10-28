@@ -13,7 +13,10 @@ via_ir = false
 # Read access for the parity vectors only. Foundry sandboxes the filesystem by
 # default, which is the right default: a test suite that can read anything can also
 # read a keystore.
-fs_permissions = [{ access = "read", path = "./test/vectors.json" }]
+fs_permissions = [
+  { access = "read", path = "./test/vectors.json" },
+  { access = "read", path = "./test/poolvectors.json" },
+]
 
 [profile.default.fuzz]
 runs = 512
