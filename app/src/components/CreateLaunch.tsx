@@ -1,5 +1,6 @@
-import { isEvm } from '../lib/config.ts';
 'use client';
+
+import { isEvm } from '../lib/config.ts';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
