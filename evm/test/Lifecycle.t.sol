@@ -43,6 +43,7 @@ contract LifecycleTest is Test {
                 virtualInj: V_INJ,
                 graduationTarget: TARGET,
                 feeBps: 100,
+                feeSellBps: 100,
                 earlyFeeStartBps: 0,
                 earlyFeeSecs: 0,
                 tradeStart: 0,
@@ -84,7 +85,7 @@ contract LifecycleTest is Test {
         vm.prank(alice);
         vm.expectRevert(abi.encodeWithSelector(Factory.WrongLaunchFee.selector, 1 ether, 0.2 ether));
         factory.createLaunch{value: 1 ether}(
-            Factory.CreateParams("n", "S", V_INJ, TARGET, 100, 0, 0, 0, Curve.RewardRoute.Creator)
+            Factory.CreateParams("n", "S", V_INJ, TARGET, 100, 100, 0, 0, 0, Curve.RewardRoute.Creator)
         );
     }
 
@@ -299,5 +300,77 @@ contract LifecycleTest is Test {
         uint256 owedTokens =
             c.migrated() ? c.poolTokens() : factory.CURVE_SUPPLY() + factory.LP_RESERVE() - c.tokensSold();
         assertGe(t.balanceOf(address(c)), owedTokens, "the contract cannot cover its token obligations");
+    }
+
+    // ------------------------------------------- the sell fee is its own --
+
+    function _createWithFees(uint256 buyBps, uint256 sellBps) internal returns (Curve c, LaunchToken t) {
+        vm.prank(creator);
+        (, address curve, address token) = factory.createLaunch{value: 0.2 ether}(
+            Factory.CreateParams({
+                name: "Asym",
+                symbol: "ASYM",
+                virtualInj: V_INJ,
+                graduationTarget: TARGET,
+                feeBps: buyBps,
+                feeSellBps: sellBps,
+                earlyFeeStartBps: 0,
+                earlyFeeSecs: 0,
+                tradeStart: 0,
+                rewardRoute: Curve.RewardRoute.Creator
+            })
+        );
+        return (Curve(payable(curve)), LaunchToken(token));
+    }
+
+    /**
+     * A sell is quoted at the SELL fee, not the buy fee.
+     *
+     * The defect this closes is recorded on the CosmWasm side: quote_sell charged
+     * the buy fee, so a launch with 1% entry and 10% exit quoted every seller
+     * 10.000% high, each seller derived their minimum from that figure, and the
+     * contract then refused the trade as slippage. The port had the same defect
+     * until the app's types named a field the contracts did not have.
+     */
+    function test_sellsAreQuotedAtTheSellFeeNotTheBuyFee() public {
+        (Curve c, LaunchToken t) = _createWithFees(100, 1000); // 1% in, 10% out
+
+        assertEq(c.currentFeeBps(), 100, "buy fee is wrong");
+        assertEq(c.currentSellFeeBps(), 1000, "sell fee is wrong");
+
+        vm.prank(alice);
+        c.buy{value: 20 ether}(0, address(0));
+
+        uint256 held = t.balanceOf(alice) / 2;
+        CurveMath.SellQuote memory q = c.quoteSell(held);
+        uint256 gross = q.injOut + q.fee;
+
+        // 10% of gross, not 1%. Charged at the buy fee the fee would be ~10x smaller
+        // and the payout ~10% too high.
+        assertApproxEqRel(q.fee, gross / 10, 1e12, "the sell was quoted at the buy fee");
+
+        // And the quote is what the trade actually honours: a minimum set at the
+        // quote must not be refused.
+        uint256 before = alice.balance;
+        vm.startPrank(alice);
+        t.approve(address(c), held);
+        c.sell(held, q.injOut);
+        vm.stopPrank();
+        assertEq(alice.balance - before, q.injOut, "the executed sell did not match its quote");
+    }
+
+    function test_theCurveShapeIsReadable() public {
+        // The app has to draw the curve it is trading against, and private
+        // immutables cannot be read. Reconstructing them off chain would let the
+        // panel price a curve differently from the curve.
+        (Curve c,) = _createWithFees(100, 250);
+        (uint256 vInj, uint256 vTok, uint256 supply, uint256 target, uint256 buyBps, uint256 sellBps) =
+            c.curveParams();
+        assertEq(vInj, V_INJ);
+        assertEq(vTok, factory.VIRTUAL_TOKENS());
+        assertEq(supply, factory.CURVE_SUPPLY());
+        assertEq(target, TARGET);
+        assertEq(buyBps, 100);
+        assertEq(sellBps, 250);
     }
 }

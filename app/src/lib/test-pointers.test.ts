@@ -55,9 +55,18 @@ function walk(dir: string, out: string[] = []): string[] {
  */
 const POINTER = /([\w./-]*\b[\w-]+\.test\.(?:ts|tsx|mjs|js))/g;
 
-/** The basenames that actually exist, read once. */
+/**
+ * The basenames that actually exist, read once.
+ *
+ * RECURSIVE, because a flat read stops at the first subdirectory that holds a test.
+ * `src/lib/evm/` was that subdirectory: a comment there cited a guard sitting beside
+ * it and this reported the guard as missing, which is the same false absence the
+ * check exists to prevent, pointed at itself.
+ */
 const existing = new Set(
-  readdirSync(join(ROOT, 'app', 'src', 'lib')).filter((f) => /\.test\.ts$/.test(f)),
+  walk(join(ROOT, 'app', 'src', 'lib'))
+    .filter((f) => /\.test\.tsx?$/.test(f))
+    .map((f) => f.split('/').pop()!),
 );
 
 /**

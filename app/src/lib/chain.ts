@@ -21,7 +21,7 @@ function openedAtSeconds(raw: unknown): number | null {
     return null;
   }
 }
-import { NETWORK, getLcdUrl, getFactoryAddress } from './config.ts';
+import { NETWORK, getLcdUrl, getFactoryAddress, isEvm} from './config.ts';
 import { isDemoMode, demoLaunches, demoDetail, demoDetailByCurve, demoTrades, DEMO_HEIGHT } from './demo.ts';
 import type { CurveConfig, CurveState, PoolReserves } from './curve.ts';
 import type { ContractFacts } from './codeCheck.ts';
@@ -352,6 +352,9 @@ const MAX_LAUNCH_PAGES = 50;
  */
 export async function listLaunches(): Promise<Launch[]> {
   if (isDemoMode()) return demoLaunches();
+  // The backend is decided in one place, `activeBackend()`, and every read branches
+  // on it here rather than each caller learning there are two chains.
+  if (isEvm()) return (await import('./evm/adapt.ts')).listLaunchesEvm();
   const factory = getFactoryAddress();
   if (!factory) return [];
 
@@ -385,6 +388,11 @@ export async function listLaunches(): Promise<Launch[]> {
 }
 
 export async function getLaunch(id: number): Promise<Launch> {
+  if (isEvm()) {
+    const found = await (await import('./evm/adapt.ts')).getLaunchEvm(id);
+    if (!found) throw new ChainError('No such launch.', undefined, true);
+    return found;
+  }
   if (isDemoMode()) {
     const found = demoLaunches().find((l) => l.id === id);
     if (!found) throw new ChainError('No such launch.', undefined, true);
@@ -455,6 +463,7 @@ export interface LaunchDetail {
 
 /** Everything the trade panel needs, in one place and already in bigint. */
 export async function getLaunchDetail(curveAddress: string): Promise<LaunchDetail> {
+  if (isEvm()) return (await import('./evm/adapt.ts')).getLaunchDetailEvm(curveAddress);
   if (isDemoMode()) {
     const d = demoDetailByCurve(curveAddress);
     if (!d) throw new ChainError('No such launch.');

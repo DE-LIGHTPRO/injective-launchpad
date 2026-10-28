@@ -67,6 +67,18 @@ contract Curve is ReentrancyGuard {
     uint256 private immutable _CURVE_SUPPLY;
     uint256 private immutable _GRADUATION_TARGET;
     uint256 private immutable _FEE_BPS;
+
+    /**
+     * The SELL fee, capped independently of the buy fee.
+     *
+     * NOT A SECOND NAME FOR THE SAME NUMBER. The CosmWasm side records what happens
+     * without it: `quote_sell` charged the buy fee, so a launch with 1% entry and
+     * 10% exit quoted every seller 10.000% high, each seller's minimum was derived
+     * from that figure, and the contract then refused the trade as slippage. The
+     * port had the same defect until the app's types named the field the contracts
+     * did not have.
+     */
+    uint256 private immutable _FEE_SELL_BPS;
     uint256 private immutable _EARLY_FEE_START_BPS;
     uint256 private immutable _EARLY_FEE_SECS;
 
@@ -128,6 +140,7 @@ contract Curve is ReentrancyGuard {
         uint256 curveSupply;
         uint256 graduationTarget;
         uint256 feeBps;
+        uint256 feeSellBps;
         uint256 earlyFeeStartBps;
         uint256 earlyFeeSecs;
     }
@@ -147,15 +160,41 @@ contract Curve is ReentrancyGuard {
         _CURVE_SUPPLY = p.curveSupply;
         _GRADUATION_TARGET = p.graduationTarget;
         _FEE_BPS = p.feeBps;
+        _FEE_SELL_BPS = p.feeSellBps;
         _EARLY_FEE_START_BPS = p.earlyFeeStartBps;
         _EARLY_FEE_SECS = p.earlyFeeSecs;
 
         // Rejects an unreachable graduation target and a curve supply at or above the
         // virtual reserve, among others. Done here so a bad launch cannot exist.
         CurveMath.validate(_cfg(p.feeBps));
+        // The sell side is capped independently and must be validated independently.
+        CurveMath.validate(_cfg(p.feeSellBps));
     }
 
     // ----------------------------------------------------------- reading --
+
+    /**
+     * The curve's shape, for anything that has to draw or price it off chain.
+     *
+     * Public because the app needs all five and private immutables are unreadable.
+     * The alternative was reconstructing them in the frontend from the factory's
+     * constants and a sample quote, which would let the panel price a curve
+     * differently from the curve.
+     */
+    function curveParams()
+        external
+        view
+        returns (
+            uint256 virtualInj,
+            uint256 virtualTokens,
+            uint256 curveSupply,
+            uint256 graduationTarget,
+            uint256 feeBps,
+            uint256 feeSellBps
+        )
+    {
+        return (_VIRTUAL_INJ, _VIRTUAL_TOKENS, _CURVE_SUPPLY, _GRADUATION_TARGET, _FEE_BPS, _FEE_SELL_BPS);
+    }
 
     function _cfg(uint256 feeBps) private view returns (CurveMath.Config memory) {
         return CurveMath.Config({
@@ -189,8 +228,23 @@ contract Curve is ReentrancyGuard {
         return CurveMath.quoteBuy(_cfg(currentFeeBps()), _state(), injIn);
     }
 
+    /**
+     * The sell fee in force now, including any opening premium still decaying.
+     *
+     * One helper, used by `quoteSell` and by `sell`, exactly as the Rust routes both
+     * through `sell_curve`. Two call sites each picking a fee is how the buy fee got
+     * charged on sells in the first place.
+     */
+    function currentSellFeeBps() public view returns (uint256) {
+        if (_EARLY_FEE_SECS == 0) return _FEE_SELL_BPS;
+        uint256 elapsed = block.timestamp > TRADE_START ? block.timestamp - TRADE_START : 0;
+        return EarlyFee.bpsAt(
+            EarlyFee.Schedule({startBps: _EARLY_FEE_START_BPS, secs: _EARLY_FEE_SECS}), _FEE_SELL_BPS, elapsed
+        );
+    }
+
     function quoteSell(uint256 tokensIn) external view returns (CurveMath.SellQuote memory) {
-        return CurveMath.quoteSell(_cfg(currentFeeBps()), _state(), tokensIn);
+        return CurveMath.quoteSell(_cfg(currentSellFeeBps()), _state(), tokensIn);
     }
 
     function poolReserves() public view returns (PoolMath.Reserves memory) {
@@ -297,12 +351,11 @@ contract Curve is ReentrancyGuard {
             return;
         }
 
-        uint256 feeBps = currentFeeBps();
-        CurveMath.SellQuote memory q = CurveMath.quoteSell(_cfg(feeBps), _state(), tokensIn);
+        CurveMath.SellQuote memory q = CurveMath.quoteSell(_cfg(currentSellFeeBps()), _state(), tokensIn);
         if (q.injOut < minInjOut) revert SlippageExceeded(q.injOut, minInjOut);
 
         uint256 gross = q.injOut + q.fee;
-        uint256 baseFee = CurveMath.feeOn(gross, _FEE_BPS);
+        uint256 baseFee = CurveMath.feeOn(gross, _FEE_SELL_BPS);
         if (baseFee > q.fee) baseFee = q.fee;
 
         injCollected -= gross;
@@ -370,7 +423,7 @@ contract Curve is ReentrancyGuard {
     }
 
     function _poolSell(uint256 tokensIn, uint256 minInjOut) private {
-        PoolMath.SellQuote memory q = PoolMath.quoteSell(poolReserves(), _FEE_BPS, tokensIn);
+        PoolMath.SellQuote memory q = PoolMath.quoteSell(poolReserves(), _FEE_SELL_BPS, tokensIn);
         if (q.quoteOut < minInjOut) revert SlippageExceeded(q.quoteOut, minInjOut);
 
         poolQuote -= (q.quoteOut + q.fee);

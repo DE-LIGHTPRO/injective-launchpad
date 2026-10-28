@@ -111,8 +111,10 @@ contract Factory {
         uint256 virtualInj;
         /// INJ collected at which the curve graduates.
         uint256 graduationTarget;
-        /// Trading fee in bps.
+        /// Buy fee in bps.
         uint256 feeBps;
+        /// Sell fee in bps, capped independently. Not a second name for feeBps.
+        uint256 feeSellBps;
         /// Opening fee premium, decaying to `feeBps`. Zero seconds disables it.
         uint256 earlyFeeStartBps;
         uint256 earlyFeeSecs;
@@ -156,6 +158,7 @@ contract Factory {
                 curveSupply: CURVE_SUPPLY,
                 graduationTarget: p.graduationTarget,
                 feeBps: p.feeBps,
+                feeSellBps: p.feeSellBps,
                 earlyFeeStartBps: p.earlyFeeStartBps,
                 earlyFeeSecs: p.earlyFeeSecs
             })

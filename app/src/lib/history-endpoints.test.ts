@@ -136,7 +136,19 @@ test('no network can fall back to another network\'s host', () => {
    * guard; this is the one that stops the wrong host being compiled in at all.
    */
   for (const [name, net] of Object.entries(NETWORKS)) {
-    const others = Object.values(NETWORKS).filter((n) => n.name !== net.name);
+    /*
+     * COSMWASM NETWORKS ONLY. History fallbacks exist because an LCD sentry prunes,
+     * so a deeper archival host is needed behind it. The EVM side is one JSON-RPC
+     * endpoint with no equivalent, and giving it a fallback to satisfy this would
+     * mean inventing a host, which is the opposite of what the rule is protecting.
+     *
+     * Scoped rather than excepted by name, so a second EVM deployment is covered
+     * without anyone remembering to add it here.
+     */
+    if ((net.backend ?? 'cosmwasm') !== 'cosmwasm') continue;
+    const others = Object.values(NETWORKS).filter(
+      (n) => n.name !== net.name && (n.backend ?? 'cosmwasm') === 'cosmwasm',
+    );
     for (const host of net.historyFallbacks) {
       assert.ok(/^https:\/\//.test(host), `${name} fallback ${host} is not https`);
       const looksTestnet = /testnet|-888/.test(host);

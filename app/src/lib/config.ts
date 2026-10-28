@@ -33,10 +33,24 @@
  * knowing before reading a 404 here as a broken link.
  */
 
-export type NetworkName = 'testnet' | 'mainnet';
+export type NetworkName = 'testnet' | 'mainnet' | 'evm';
+
+/**
+ * Which chain family a deployment lives on.
+ *
+ * ONE RESOLVER, because the two backends are not interchangeable at the call site.
+ * A CosmWasm address is bech32 and queried over LCD; an EVM address is hex and
+ * queried over JSON-RPC. Every read and write in `chain.ts` branches on this, and
+ * having a second place that decides would produce a build reading one chain and
+ * writing to the other, which is the defect this project keeps recording.
+ */
+export type Backend = 'cosmwasm' | 'evm';
 
 export interface NetworkConfig {
   name: NetworkName;
+  /** `cosmwasm` unless stated. Existing deployments are unaffected. */
+  backend?: Backend;
+  /** For EVM, the numeric id as a string. `1776` on Injective EVM mainnet. */
   chainId: string;
   /** REST (LCD) endpoint. Smart queries go over this, no SDK required. */
   lcd: string;
@@ -119,6 +133,27 @@ export const NETWORKS: Record<NetworkName, NetworkConfig> = {
     ],
     // Not testnet.explorer.injective.network: its redirect drops the path. See above.
     explorer: 'https://testnet.injscan.com',
+    quoteDenom: 'inj',
+    gasDenom: 'inj',
+    quoteSymbol: 'INJ',
+    quoteDecimals: 18,
+    gasSymbol: 'INJ',
+    gasDecimals: 18,
+  },
+  /**
+   * Injective's EVM, where contract deployment is permissionless.
+   *
+   * Measured 28 Oct 2026: x/evm reports `permissioned: false`, so no governance
+   * proposal, no deposit and no vote, unlike the CosmWasm side. The factory here was
+   * deployed and exercised end to end the same day; see `evm/DEPLOYED.md`.
+   */
+  evm: {
+    name: 'evm',
+    backend: 'evm',
+    chainId: '1776', // eth_chainId returned 0x6f0, verified 28 Oct 2026
+    lcd: 'https://sentry.evm-rpc.injective.network',
+    historyFallbacks: [],
+    explorer: 'https://injscan.com',
     quoteDenom: 'inj',
     gasDenom: 'inj',
     quoteSymbol: 'INJ',
@@ -250,6 +285,21 @@ export function getPinnedCurveCodeHashesRaw(): string {
 /** The single resolver for the factory address. */
 export function getFactoryAddress(): string {
   return process.env.NEXT_PUBLIC_FACTORY_ADDRESS?.trim() ?? '';
+}
+
+/**
+ * Which chain family the active deployment is on.
+ *
+ * Derived from the network rather than configured separately. A second variable
+ * would let `NEXT_PUBLIC_NETWORK=evm` and `NEXT_PUBLIC_BACKEND=cosmwasm` disagree,
+ * and nothing would error at the point the error is.
+ */
+export function activeBackend(): Backend {
+  return NETWORK.backend ?? 'cosmwasm';
+}
+
+export function isEvm(): boolean {
+  return activeBackend() === 'evm';
 }
 
 export function isDeployed(): boolean {
