@@ -35,4 +35,6 @@ out/
 evm/lib/
 evm/out/
 evm/cache/
-evm/broadcast/*/dry-run/
+# Broadcast records of REAL deployments are worth keeping: they are the only local
+# record of what was sent and when. Dry runs and the build cache are not.
+evm/broadcast/*/*/dry-run/

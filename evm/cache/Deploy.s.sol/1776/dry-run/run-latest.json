@@ -1,7 +1,0 @@
-{
-  "transactions": [
-    {
-      "rpc": "https://sentry.evm-rpc.injective.network"
-    }
-  ]
-}
