@@ -28,3 +28,11 @@ out/
 # and changed on every typecheck, adding noise to every diff.
 *.tsbuildinfo
 .env*
+
+# Foundry libraries, restored with `forge install` / the clone in evm/README.md.
+# Committed as an embedded git repo they are neither a submodule nor files anyone
+# can check out, which is the worst of both.
+evm/lib/
+evm/out/
+evm/cache/
+evm/broadcast/*/dry-run/
