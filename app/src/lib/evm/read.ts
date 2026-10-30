@@ -16,7 +16,7 @@
  */
 import { createPublicClient, http, type Address, type PublicClient } from 'viem';
 
-import { NETWORK, getFactoryAddress } from '../config.ts';
+import { NETWORK, getFactoryAddress, getLcdUrl } from '../config.ts';
 import type { CurveConfig, CurveState, PoolReserves } from '../curve.ts';
 import { CURVE_ABI, ERC20_ABI, FACTORY_ABI } from './abi.ts';
 
@@ -33,6 +33,23 @@ let cached: PublicClient | null = null;
  * one the reads came from would sign for a different network than the page is
  * showing. Two literals that must match is the shape of defect this project keeps
  * recording, so there is one literal.
+ *
+ * `getLcdUrl()`, NEVER `NETWORK.lcd`, AND THAT ONE WORD WAS A REAL DEFECT. `config.ts`
+ * calls `getLcdUrl` "the single resolver for the LCD endpoint" and it honours
+ * `NEXT_PUBLIC_LCD_URL`; `NETWORK.lcd` is the hardcoded default underneath it. This
+ * file read the default, so on the EVM backend the documented override did nothing:
+ * every read, every simulation and the `rpcUrls` handed to `wallet_addEthereumChain`
+ * went to the public sentry whatever the operator configured.
+ *
+ * Found by pointing a dev server at a local fork and pressing Buy: the pre-flight
+ * simulation failed with `URL: https://sentry.evm-rpc.injective.network` in its
+ * detail, against a build configured for `http://127.0.0.1:8545`. It is rule 17's
+ * two-variables-one-decision defect exactly - the runbook's variable and the one the
+ * signing path reads, each locally correct, disagreeing with nothing to say so.
+ *
+ * It matters beyond a test: the public sentry prunes per node (measured, and
+ * non-monotonically), so an operator pointing at a private archive endpoint was
+ * silently still reading the flaky shared one.
  */
 export function evmChain() {
   return {
@@ -43,7 +60,7 @@ export function evmChain() {
       symbol: NETWORK.gasSymbol,
       decimals: NETWORK.gasDecimals,
     },
-    rpcUrls: { default: { http: [NETWORK.lcd] } },
+    rpcUrls: { default: { http: [getLcdUrl()] } },
     blockExplorers: { default: { name: 'InjScan', url: NETWORK.explorer } },
     contracts: { multicall3: { address: MULTICALL3 } },
   } as const;
@@ -52,7 +69,7 @@ export function evmChain() {
 export function evmClient(): PublicClient {
   if (cached) return cached;
   cached = createPublicClient({
-    transport: http(NETWORK.lcd, { batch: true }),
+    transport: http(getLcdUrl(), { batch: true }),
     chain: evmChain(),
   }) as PublicClient;
   return cached;

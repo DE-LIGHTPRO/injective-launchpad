@@ -128,7 +128,8 @@ function chainSuggestion() {
     rpc: isTestnet
       ? 'https://testnet.sentry.tm.injective.network'
       : 'https://sentry.tm.injective.network',
-    rest: NETWORK.lcd,
+    // The configured endpoint, not the default underneath it. See `getLcdUrl`.
+    rest: getLcdUrl(),
     bip44: { coinType: 60 },
     bech32Config: {
       bech32PrefixAccAddr: 'inj',
@@ -498,7 +499,7 @@ export async function connect(name: WalletName): Promise<WalletAccount> {
       if (/could not switch to chain|4902|unrecogni[sz]ed chain|chain.*not.*added/i.test(msg)) {
         throw new WalletError(
           'wrong-chain',
-          `This wallet would not switch to Injective EVM and would not add it. Add it by hand - chain ID ${NETWORK.chainId}, RPC ${NETWORK.lcd}, currency INJ with 18 decimals - then connect again.`,
+          `This wallet would not switch to Injective EVM and would not add it. Add it by hand - chain ID ${NETWORK.chainId}, RPC ${getLcdUrl()}, currency INJ with 18 decimals - then connect again.`,
           msg,
         );
       }

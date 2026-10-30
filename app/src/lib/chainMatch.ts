@@ -1,4 +1,4 @@
-import { NETWORK, getLcdUrl } from './config.ts';
+import { NETWORK, getLcdUrl, isEvm } from './config.ts';
 
 /**
  * Does the endpoint this app reads from serve the chain this app signs for?
@@ -64,6 +64,22 @@ export async function probeServedChainId(
   timeoutMs = 8_000,
   endpoint: string = getLcdUrl(),
 ): Promise<string | null> {
+  /*
+   * THE PROBE HAS TO SPEAK THE BACKEND'S OWN PROTOCOL, and it did not.
+   *
+   * This banner exists to say when the endpoint being read is not the chain being
+   * signed for. On the EVM backend it asked a JSON-RPC host for a Cosmos route,
+   * `/cosmos/base/tendermint/v1beta1/node_info`, which fails - so the probe returned
+   * null, the verdict was `unknown`, and the banner rendered nothing. The one guard
+   * built for this class of defect was blind on the backend where the defect was live:
+   * `evmClient` was reading the hardcoded default instead of the configured endpoint,
+   * and nothing said a word.
+   *
+   * In a browser it was worse than silent - it was a CORS failure logged on every page
+   * load, which is how it was found.
+   */
+  if (isEvm()) return probeEvmChainId(endpoint, timeoutMs);
+
   try {
     const res = await fetch(`${endpoint.replace(/\/$/, '')}/cosmos/base/tendermint/v1beta1/node_info`, {
       headers: { accept: 'application/json' },
@@ -79,6 +95,34 @@ export async function probeServedChainId(
     const network = (body as { default_node_info?: { network?: unknown } })?.default_node_info
       ?.network;
     return typeof network === 'string' && network.trim() ? network.trim() : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The EVM half of the probe: `eth_chainId`, as a decimal string.
+ *
+ * Decimal because that is what `NETWORK.chainId` holds for this backend ("1776") and
+ * what `assessChainMatch` compares against. Returning the hex would make every
+ * comparison a mismatch, which is the same defect one step along - a guard that cries
+ * wolf is uninstalled as fast as one that says nothing.
+ *
+ * Shape checked, not status: a 200 from something that is not a JSON-RPC node must not
+ * become a chain id.
+ */
+async function probeEvmChainId(endpoint: string, timeoutMs: number): Promise<string | null> {
+  try {
+    const res = await fetch(endpoint.replace(/\/$/, ''), {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', accept: 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_chainId', params: [] }),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (!res.ok) return null;
+    const body = (await res.json()) as { result?: unknown };
+    if (typeof body.result !== 'string' || !/^0x[0-9a-fA-F]+$/.test(body.result)) return null;
+    return BigInt(body.result).toString();
   } catch {
     return null;
   }

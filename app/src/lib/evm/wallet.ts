@@ -15,7 +15,7 @@
  */
 import { createWalletClient, custom, getAddress, type Address, type WalletClient } from 'viem';
 
-import { NETWORK } from '../config.ts';
+import { NETWORK, getLcdUrl } from '../config.ts';
 import {
   evmProvider,
   identifyEvmProvider,
@@ -86,7 +86,9 @@ export async function ensureEvmChain(p: Eip1193): Promise<void> {
         chainId: target,
         chainName: 'Injective',
         nativeCurrency: evmChain().nativeCurrency,
-        rpcUrls: [NETWORK.lcd],
+        // The CONFIGURED endpoint, so a wallet is told to use the same node this
+        // page reads. See the note on `evmChain`.
+        rpcUrls: [getLcdUrl()],
         blockExplorerUrls: ['https://blockscout.injective.network'],
       },
     ],
