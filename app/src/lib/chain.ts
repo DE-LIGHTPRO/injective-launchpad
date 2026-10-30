@@ -717,6 +717,37 @@ export async function denomAuthority(denom: string): Promise<string | null> {
  */
 export async function denomsFromCreator(creator: string): Promise<string[] | null> {
   if (isDemoMode()) return [];
+  /*
+   * ON THE EVM BACKEND THIS IS A DIFFERENT QUESTION WITH A WEAKER ANSWER, and the
+   * difference belongs on the screen rather than hidden here.
+   *
+   * Injective's tokenfactory makes a denom globally unique and the chain refuses a
+   * duplicate, so the CosmWasm read below answers "which names are taken". An ERC-20
+   * symbol is a string field: the factory does not care, and two launches may carry
+   * the same ticker. What this can answer is "which tickers has THIS wallet already
+   * launched here", read off the factory's own registry - enough to stop a creator
+   * launching the same thing twice by accident, which is what the check is for.
+   *
+   * Keyed with `denomFor`, so the key this builds and the key `tickerAlreadyUsed`
+   * compares against come from one function. Two places deriving the same string is
+   * the defect this project keeps recording.
+   */
+  if (isEvm()) {
+    const [{ listEvmLaunches }, { denomFor }] = await Promise.all([
+      import('./evm/read.ts'),
+      import('./createLaunch.ts'),
+    ]);
+    try {
+      const rows = await listEvmLaunches();
+      return rows
+        .filter((r) => r.creator.toLowerCase() === creator.toLowerCase())
+        .map((r) => denomFor(creator, r.symbol));
+    } catch {
+      // `null` is unread, never an empty list: "this address has created nothing" is
+      // the answer that makes a taken ticker look free.
+      return null;
+    }
+  }
   try {
     const res = await fetch(
       `${getLcdUrl()}/injective/tokenfactory/v1beta1/denoms_from_creator/${encodeURIComponent(creator)}`,

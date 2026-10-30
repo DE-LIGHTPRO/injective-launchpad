@@ -191,3 +191,122 @@ test('a batch that fails part way says so, and one that fails at the start does 
 
   await assert.rejects(() => executeManyEvm([], '0xsender'), /Nothing to send/);
 });
+
+/**
+ * A LAUNCH CAN ACTUALLY BE PLANNED ON THIS BACKEND, which it could not.
+ *
+ * `/create` was dead and said the wrong thing about being dead. `validateLaunch`
+ * tested both the creator and the factory against `/^inj1[0-9a-z]{38,}$/`, so a
+ * connected `0x` wallet failed the first check and the page rendered its message:
+ * "Connect an Injective wallet first", under a header plainly showing the connected
+ * account. A page telling somebody to do the thing they have just done leaves them
+ * nothing to try.
+ */
+test('a 0x creator and a 0x factory plan a launch, and the plan is one call', async () => {
+  const { planLaunch, denomFor } = await import('../createLaunch.ts');
+  const { fixedCurveFor, FIXED_LP_RESERVE } = await import('../launchLimits.ts');
+
+  const creator = '0x7fCc735e0e473932C1F75ec163B98226E4Bcf1Bb';
+  const factory = '0x3D811414b3c578380B1D7D1a89D72907C22914c8';
+  const plan = planLaunch({
+    creator,
+    factory,
+    symbol: 'PROBE',
+    name: 'Probe Token',
+    curve: { ...fixedCurveFor(18), feeBps: 100n, feeSellBps: 100n },
+    lpReserve: FIXED_LP_RESERVE,
+    rules: { max_per_wallet: '5000000000000000000000000', trade_start: '1800000000000000000' },
+    rewardRoute: 'pool',
+    launchFee: { amount: 200_000_000_000_000_000n, denom: 'inj' },
+  });
+
+  assert.ok(plan.evm, 'the plan carries no EVM call');
+  assert.deepEqual(plan.messages, [], 'CosmWasm messages were built on an EVM plan');
+
+  const p = plan.evm.params;
+  assert.equal(p.symbol, 'PROBE');
+  assert.equal(p.name, 'Probe Token');
+  assert.equal(p.feeBps, 100n);
+  assert.equal(p.feeSellBps, 100n);
+  assert.equal(p.maxPerWallet, 5_000_000_000_000_000_000_000_000n);
+  assert.equal(plan.evm.value, 200_000_000_000_000_000n, 'the launch fee is not attached');
+
+  /*
+   * SECONDS, NOT NANOSECONDS, and this is the conversion that would have been
+   * invisible and permanent. `trade_start` is nanoseconds in the rules object because
+   * that is what CosmWasm's `Timestamp` takes; Solidity compares against
+   * `block.timestamp`, which is seconds. Sent unconverted, 1.8e18 would set a start
+   * time about 57 billion years out and the curve would refuse every buy forever,
+   * with the launch page showing the date the creator typed.
+   */
+  assert.equal(p.tradeStart, 1_800_000_000n);
+
+  /*
+   * `Pool` is 1 and `Creator` is 0 in `Factory.sol`. Backwards, a creator's share
+   * would go to the pool while the page said it was theirs, and nothing would error.
+   */
+  assert.equal(p.rewardRoute, 1);
+
+  // The ticker key is ours, not the chain's, and it is marked as such so nobody reads
+  // it as a denom.
+  assert.match(denomFor(creator, 'PROBE'), /^evm:0x7fcc/);
+});
+
+test('an opening buy is refused rather than silently dropped', async () => {
+  const { planLaunch, LaunchInputError } = await import('../createLaunch.ts');
+  const { fixedCurveFor, FIXED_LP_RESERVE } = await import('../launchLimits.ts');
+  /*
+   * The EVM factory's `createLaunch` takes eleven parameters and not one of them is an
+   * amount to spend. A figure accepted here would be collected, validated, previewed
+   * with its share of the supply, and then not sent - and the launch would SUCCEED,
+   * which is what makes silently dropping it worse than refusing it.
+   */
+  assert.throws(
+    () =>
+      planLaunch({
+        creator: '0x7fCc735e0e473932C1F75ec163B98226E4Bcf1Bb',
+        factory: '0x3D811414b3c578380B1D7D1a89D72907C22914c8',
+        symbol: 'PROBE',
+        curve: { ...fixedCurveFor(18), feeBps: 100n, feeSellBps: 100n },
+        lpReserve: FIXED_LP_RESERVE,
+        initialBuy: 1_000_000_000_000_000_000n,
+      }),
+    (e: Error) => {
+      assert.ok(e instanceof LaunchInputError);
+      assert.match(e.message, /cannot be part of the creation on this chain/);
+      return true;
+    },
+  );
+});
+
+test('the plan description says what this chain does, not what the other one does', async () => {
+  const { planLaunch, describePlan } = await import('../createLaunch.ts');
+  const { fixedCurveFor, FIXED_LP_RESERVE } = await import('../launchLimits.ts');
+  const curve = { ...fixedCurveFor(18), feeBps: 100n, feeSellBps: 100n };
+  const plan = planLaunch({
+    creator: '0x7fCc735e0e473932C1F75ec163B98226E4Bcf1Bb',
+    factory: '0x3D811414b3c578380B1D7D1a89D72907C22914c8',
+    symbol: 'PROBE',
+    curve,
+    lpReserve: FIXED_LP_RESERVE,
+  });
+  const lines = describePlan(plan, curve, FIXED_LP_RESERVE).join('\n');
+
+  /*
+   * FOUR FALSE THINGS IF THE COSMWASM LINES WERE REUSED, and the last is the one that
+   * matters: "Give up the right to mint" describes a careful safeguard - moving an
+   * admin key somewhere no code can use it - for a chain where the capability never
+   * exists. `LaunchToken` has no mint function at all, which is stronger, and should
+   * read as stronger rather than as the same promise.
+   */
+  for (const cosmwasmOnly of [
+    'Create the denom',
+    'display unit',
+    'Give up the right to mint',
+    'Mint 1,000,000,000 tokens to you',
+  ]) {
+    assert.ok(!lines.includes(cosmwasmOnly), `the EVM plan still says "${cosmwasmOnly}"`);
+  }
+  assert.match(lines, /No mint function exists/);
+  assert.match(lines, /minted once, to the launch contract/);
+});

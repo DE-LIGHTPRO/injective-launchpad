@@ -47,7 +47,42 @@ export type NetworkName = 'testnet' | 'mainnet' | 'evm';
 export type Backend = 'cosmwasm' | 'evm';
 
 export interface NetworkConfig {
+  /**
+   * The internal identifier, which is what `NEXT_PUBLIC_NETWORK` is set to and what
+   * every branch in the code tests. NOT for display: see `label`.
+   */
   name: NetworkName;
+  /**
+   * What a reader is shown.
+   *
+   * `name` WAS BEING RENDERED and the EVM build put the identifier on screen: the
+   * footer read "Injective evm explorer", the wallet picker "No wallet found in this
+   * browser that can sign on evm", and the header chip "Injective evm". A lowercase
+   * internal token in front of a user is the same class of leak as an env-var name,
+   * and it never showed up on the two networks whose identifier happens to read as a
+   * word.
+   */
+  label: string;
+  /**
+   * Whether a balance here is money.
+   *
+   * DECLARED, NOT INFERRED FROM THE NAME, and the EVM build is why. Three places
+   * tested `NETWORK.name === 'mainnet'` to decide how loud to be, and the EVM network
+   * is not called mainnet - it IS Injective mainnet, chain 1776, with real INJ. So
+   * every one of them took the cautious-sounding branch and said the opposite of the
+   * truth. The worst was `/risks`, which told a user holding real funds: "This
+   * deployment runs on Injective testnet. Tokens and balances here are test assets
+   * with no value, and the chain can be reset." A page whose whole job is to state the
+   * risk, understating it as far as it is possible to understate it.
+   *
+   * The header chip was amber for the same reason, which inverts a safety colour, and
+   * the create page withheld its mainnet caution.
+   *
+   * A field says it once. A name test spreads the decision across every caller and
+   * gets it wrong the moment a network is added that does not follow the convention -
+   * which is exactly what happened.
+   */
+  realFunds: boolean;
   /** `cosmwasm` unless stated. Existing deployments are unaffected. */
   backend?: Backend;
   /** For EVM, the numeric id as a string. `1776` on Injective EVM mainnet. */
@@ -123,6 +158,8 @@ export interface NetworkConfig {
 export const NETWORKS: Record<NetworkName, NetworkConfig> = {
   testnet: {
     name: 'testnet',
+    realFunds: false,
+    label: 'testnet',
     chainId: 'injective-888', // verified 3 Oct 2026
     lcd: 'https://testnet.sentry.lcd.injective.network',
     // Both served this factory's complete 14-transaction history on 25 Oct 2026, back
@@ -149,6 +186,8 @@ export const NETWORKS: Record<NetworkName, NetworkConfig> = {
    */
   evm: {
     name: 'evm',
+    realFunds: true,
+    label: 'EVM',
     backend: 'evm',
     chainId: '1776', // eth_chainId returned 0x6f0, verified 28 Oct 2026
     lcd: 'https://sentry.evm-rpc.injective.network',
@@ -163,6 +202,8 @@ export const NETWORKS: Record<NetworkName, NetworkConfig> = {
   },
   mainnet: {
     name: 'mainnet',
+    realFunds: true,
+    label: 'mainnet',
     chainId: 'injective-1', // verified 3 Oct 2026
     lcd: 'https://sentry.lcd.injective.network',
     /*

@@ -173,9 +173,17 @@ export default function RisksPage() {
       </div>
 
       <div className="card" style={{ marginTop: 'var(--space-4)' }}>
-        <h2>This is {NETWORK.name}</h2>
+        <h2>This is {NETWORK.label}</h2>
+        {/*
+            `realFunds`, NOT A NAME TEST, and this is the sentence that made the field
+            necessary. `NETWORK.name === 'mainnet'` is false on the EVM deployment -
+            which is Injective mainnet, chain 1776, holding real INJ - so this page told
+            a user with money on the line that their balances were test assets with no
+            value and the chain could be reset. On the one page whose entire job is to
+            state the risk, as far understated as it can be stated.
+          */}
         <p className="note">
-          {NETWORK.name === 'mainnet'
+          {NETWORK.realFunds
             ? 'Launches here involve real funds on Injective mainnet.'
             : 'This deployment runs on Injective testnet. Tokens and balances here are test assets with no value, and the chain can be reset.'}
         </p>

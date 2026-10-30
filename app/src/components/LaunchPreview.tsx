@@ -1,5 +1,6 @@
 import { fmt } from '@/lib/curve';
 import { denomLabel } from '@/lib/chain';
+import { isEvm } from '@/lib/config';
 import {
   FIXED_TOTAL_SUPPLY_TOKENS,
   CURVE_SUPPLY_TOKENS,
@@ -163,23 +164,37 @@ export function LaunchPreview({
             : 'none'}
         </span>
       </div>
-      <div className="metric-row">
-        <span className="k">Your opening buy</span>
-        <span className="v mono">
-          {openingBuy > 0n
-            ? `${fmt(openingBuy, quoteDecimals, 4)} ${quoteLabel}${
-                openingBuyShare !== null ? ` · ${(openingBuyShare * 100).toFixed(1)}% of supply` : ''
-              }`
-            : 'none'}
-        </span>
-      </div>
+      {/*
+          TWO ROWS THAT DO NOT EXIST ON THE EVM BACKEND, so they are absent rather than
+          reading "none". The factory's `createLaunch` carries no amount to spend and no
+          profile, and the form does not offer either there - so a row saying "none"
+          would describe a choice the creator was never given, on the one panel whose
+          job is to be exactly what is about to be signed. "None" for a field that
+          cannot be set is the same false reassurance as a greyed-out control.
+        */}
+      {!isEvm() && (
+        <>
+          <div className="metric-row">
+            <span className="k">Your opening buy</span>
+            <span className="v mono">
+              {openingBuy > 0n
+                ? `${fmt(openingBuy, quoteDecimals, 4)} ${quoteLabel}${
+                    openingBuyShare !== null
+                      ? ` · ${(openingBuyShare * 100).toFixed(1)}% of supply`
+                      : ''
+                  }`
+                : 'none'}
+            </span>
+          </div>
 
-      <div className="metric-row">
-        <span className="k">Links</span>
-        <span className="v">
-          {links.length === 0 ? 'none' : links.map(([k]) => k).join(', ')}
-        </span>
-      </div>
+          <div className="metric-row">
+            <span className="k">Links</span>
+            <span className="v">
+              {links.length === 0 ? 'none' : links.map(([k]) => k).join(', ')}
+            </span>
+          </div>
+        </>
+      )}
     </div>
   );
 }

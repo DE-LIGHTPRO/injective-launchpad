@@ -7,6 +7,7 @@ import {
   LAUNCH_GAS_RESERVE,
   denomCreationFeeFor,
   fetchDenomCreationFee,
+  launchGasReserveFor,
 } from './launchCost.ts';
 import { planLaunch, MSG_EXECUTE } from './createLaunch.ts';
 import { fixedCurveFor, FIXED_LP_RESERVE } from './launchLimits.ts';
@@ -140,4 +141,67 @@ test('an unreadable chain fee keeps the measured constant, never zero', async ()
    * after signing. `null` is what the caller falls back on.
    */
   assert.equal(await fetchDenomCreationFee('http://127.0.0.1:1'), null);
+});
+
+/**
+ * THE EVM BACKEND CHARGES NEITHER OF THE TWO FIGURES THIS MODULE WAS WRITTEN AROUND,
+ * and both were blocking launches it could comfortably afford.
+ *
+ * The denom fee is Injective's charge for creating a tokenfactory denom. There is no
+ * tokenfactory on the EVM side. But `fetchDenomCreationFee` asks a CosmWasm LCD route
+ * against a JSON-RPC host, gets nothing, and correctly treats that as "unread" - which
+ * correctly falls back to the measured constant, which is 1 INJ for a fee that is not
+ * charged at all. Every one of those steps is right and the answer is wrong, which is
+ * the two-halves-locally-correct shape this project keeps recording.
+ *
+ * The gas reserve was the same in the same direction. MEASURED against the live
+ * factory on 30 Oct 2026: `eth_estimateGas` on `createLaunch` returned 2,588,418 gas
+ * at 0.16 gwei, so a creation costs 0.000414 INJ. The 0.05 INJ reserve is 120x that,
+ * and it told a creator holding 0.0085 INJ - enough for twenty launches - to top up.
+ *
+ * Erring high is harmless for a fee that is real and might have changed. It is not
+ * harmless for one that is not charged, from a check written to stop somebody signing
+ * a doomed transaction.
+ */
+test('the EVM backend is charged no denom fee, because no denom is created', () => {
+  assert.equal(denomCreationFeeFor('evm'), 0n);
+  // And the chains that DO charge it keep their measured figures: this is an addition.
+  assert.equal(denomCreationFeeFor('testnet'), 1_000_000_000_000_000_000n);
+  assert.equal(denomCreationFeeFor('mainnet'), 100_000_000_000_000_000n);
+});
+
+test('the EVM gas reserve is a margin over a measurement, not the CosmWasm figure', () => {
+  const evm = launchGasReserveFor('evm');
+  const cosm = launchGasReserveFor('mainnet');
+  assert.equal(cosm, LAUNCH_GAS_RESERVE, 'the CosmWasm reserve changed');
+  assert.ok(evm < cosm, 'the EVM reserve is not smaller than the five-message one');
+
+  /*
+   * Bounded on BOTH sides against the measurement, which is what makes this a test
+   * rather than a restatement. Above the measured 0.000414 INJ, so it covers a gas
+   * price spike; under a twentieth of the CosmWasm reserve, so nobody can quietly
+   * raise it back to a figure that refuses a funded creator.
+   */
+  const measured = 414_146_880_000_000n; // 2,588,418 gas x 0.16 gwei, 30 Oct 2026
+  assert.ok(evm > measured, 'the EVM reserve is below the measured cost of a creation');
+  assert.ok(evm < cosm / 5n, 'the EVM reserve has drifted back toward the CosmWasm one');
+});
+
+test('a launch on the EVM backend costs gas and nothing else', () => {
+  const c = launchCost({
+    denomFee: denomCreationFeeFor('evm'),
+    gasReserve: launchGasReserveFor('evm'),
+    quoteDenom: 'inj',
+    gasDenom: 'inj',
+  });
+  assert.equal(c.denomFee, 0n);
+  assert.equal(c.launchFee, 0n);
+  assert.equal(c.total, launchGasReserveFor('evm'));
+
+  /*
+   * THE CASE THAT WAS ON THE SCREEN. 0.0085 INJ was refused with "Creating a token
+   * costs 0.05 INJ. Top the wallet up and this will unlock." It is twenty creations'
+   * worth of gas.
+   */
+  assert.equal(launchAffordable(8_500_000_000_000_000n, c), true);
 });

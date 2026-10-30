@@ -20,7 +20,7 @@ export default function CreatePage() {
         <>
           <h1>Create a launch</h1>
           <EmptyState mark={<MarkLaunches />} title="No factory to create against yet">
-            The launchpad is not deployed on {NETWORK.name}, so there is nothing for a
+            The launchpad is not deployed on {NETWORK.label}, so there is nothing for a
             launch to be created on. The form opens as soon as one is configured.
           </EmptyState>
         </>

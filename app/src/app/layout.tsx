@@ -98,14 +98,20 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               */}
             {isDemoMode() && <span className="chip warn hide-sm">demo</span>}
             {/*
-                It still reads whatever `NETWORK.name` is, so it follows the deployment
-                rather than being set by hand - what changed is that it now looks like
-                the safety label it is. Amber on testnet, green on mainnet.
+                It still reads whatever network the build is pointed at, so it follows
+                the deployment rather than being set by hand - what changed is that it
+                now looks like the safety label it is. Amber where balances are test
+                assets, green where they are money.
+
+                KEYED ON `realFunds`, NOT ON THE NAME. `name === 'mainnet'` painted the
+                EVM deployment amber, which is Injective mainnet with real INJ: a
+                caution colour over a chain that warrants the opposite, and the one
+                direction a safety label must never be wrong in.
               */}
             <span
-              className={`chip chip-status hide-sm ${NETWORK.name === 'mainnet' ? 'accent' : 'warn'}`}
+              className={`chip chip-status hide-sm ${NETWORK.realFunds ? 'accent' : 'warn'}`}
             >
-              {NETWORK.name}
+              {NETWORK.label}
             </span>
             {/*
                 The destination comes from the same place the footer's reads it from; the
@@ -178,7 +184,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 </Link>
               ))}
               <a href={NETWORK.explorer} target="_blank" rel="noopener noreferrer">
-                Injective {NETWORK.name} explorer
+                Injective {NETWORK.label} explorer
               </a>
             </nav>
           </div>

@@ -105,7 +105,7 @@ export default async function Home() {
           {isDevBuild() && (
             <div className="empty" style={{ marginTop: 'var(--space-4)' }}>
               <p className="note">
-                Dev: nothing configured. Deploy to {NETWORK.name} and set the factory address, or
+                Dev: nothing configured. Deploy to {NETWORK.label} and set the factory address, or
                 run with NEXT_PUBLIC_DEMO=1 to explore the interface.
               </p>
               <code>NEXT_PUBLIC_FACTORY_ADDRESS=inj1…</code>

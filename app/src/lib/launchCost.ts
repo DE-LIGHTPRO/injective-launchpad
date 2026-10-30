@@ -62,6 +62,25 @@ export const DENOM_CREATION_FEE_MAINNET = 100_000_000_000_000_000n;
  * rather than inheriting testnet's.
  */
 export function denomCreationFeeFor(network: string): bigint {
+  /*
+   * ZERO ON THE EVM BACKEND, AND THIS WAS BLOCKING LAUNCHES.
+   *
+   * The fee is Injective's charge for creating a tokenfactory denom. There is no
+   * tokenfactory on the EVM side: a launch deploys two contracts and pays gas, and
+   * nothing charges a flat amount. The fallback is reached there too, because
+   * `fetchDenomCreationFee` asks a CosmWasm LCD route against a JSON-RPC host and
+   * gets nothing - which is correctly treated as "unread" and correctly falls back to
+   * the measured constant, so this function was returning 1 INJ for a fee that does
+   * not exist. `launchAffordable` then refused every creator holding under about
+   * 1.05 INJ, with copy telling them the money was "Injective's own one-off charge
+   * for a new denom".
+   *
+   * Erring high is the safe direction for a fee that is real and might have changed.
+   * It is not safe for one that is not charged at all: there the whole number is
+   * invented, and the pre-flight check written to stop a creator signing a doomed
+   * transaction was instead stopping them signing a sound one.
+   */
+  if (network === 'evm') return 0n;
   return network === 'mainnet' ? DENOM_CREATION_FEE_MAINNET : DENOM_CREATION_FEE;
 }
 
@@ -98,6 +117,34 @@ export async function fetchDenomCreationFee(lcd: string): Promise<bigint | null>
  */
 export const LAUNCH_GAS_RESERVE = 50_000_000_000_000_000n; // 0.05 INJ
 
+/**
+ * The EVM backend's reserve, which is a hundred times smaller because the launch is.
+ *
+ * MEASURED AGAINST THE LIVE FACTORY, 30 Oct 2026. `eth_estimateGas` on `createLaunch`
+ * returned **2,588,418** gas at a **0.16 gwei** gas price, so a creation costs
+ * **0.000414 INJ**. A buy is 82,756 gas, 0.0000132 INJ.
+ *
+ * The CosmWasm reserve above is five messages including a tokenfactory denom creation,
+ * and "deliberately generous" is the right call there. Applied here it was 120x the
+ * real cost, and it did the exact thing this module exists to prevent, in the other
+ * direction: a creator holding **0.0085 INJ** - enough for twenty launches - was told
+ * "This wallet holds 0.0085 INJ. Creating a token costs 0.05 INJ. Top the wallet up
+ * and this will unlock." Erring high is harmless for a fee that might have changed;
+ * it is not harmless when it refuses a launch somebody can afford.
+ *
+ * 0.005 INJ is still a 12x margin over the measurement, which covers a gas price
+ * spike and the contract growing, without inventing two orders of magnitude.
+ */
+export const LAUNCH_GAS_RESERVE_EVM = 5_000_000_000_000_000n; // 0.005 INJ
+
+/**
+ * The reserve for a network. Same shape as `denomCreationFeeFor`, and for the same
+ * reason: the figure is per chain and a single constant was wrong on one of them.
+ */
+export function launchGasReserveFor(network: string): bigint {
+  return network === 'evm' ? LAUNCH_GAS_RESERVE_EVM : LAUNCH_GAS_RESERVE;
+}
+
 export interface LaunchCost {
   /** The chain's denom creation fee. Injective's, not the launchpad's. */
   denomFee: bigint;
@@ -124,6 +171,7 @@ export function launchCost({
   launchFee = 0n,
   launchFeeDenom,
   denomFee = DENOM_CREATION_FEE,
+  gasReserve = LAUNCH_GAS_RESERVE,
   quoteDenom,
   gasDenom,
 }: {
@@ -133,6 +181,13 @@ export function launchCost({
   launchFeeDenom?: string;
   /** The chain's denom creation fee. Differs per network; read it, do not assume. */
   denomFee?: bigint;
+  /**
+   * Held back for gas. Differs per backend by two orders of magnitude, so it is a
+   * parameter rather than the constant it used to read directly - see
+   * `launchGasReserveFor`. Defaulted to the CosmWasm figure so every existing caller
+   * and every existing test keeps its behaviour.
+   */
+  gasReserve?: bigint;
   quoteDenom: string;
   gasDenom: string;
 }): LaunchCost {
@@ -143,9 +198,9 @@ export function launchCost({
   return {
     denomFee,
     launchFee: fee,
-    gasReserve: LAUNCH_GAS_RESERVE,
+    gasReserve,
     openingBuy: buy,
-    total: denomFee + fee + LAUNCH_GAS_RESERVE + buy,
+    total: denomFee + fee + gasReserve + buy,
   };
 }
 

@@ -742,6 +742,22 @@ export async function broadcastLaunch(opts: {
   wallet: unknown;
   onStage?: (stage: TxStage) => void;
 }): Promise<BroadcastOutcome> {
+  /*
+   * ONE CALL, NOT FIVE MESSAGES. `planLaunch` puts the factory parameters on
+   * `plan.evm` and leaves `messages` empty, so this branches on the PLAN rather than
+   * on `isEvm()`: the plan already made that decision and the two cannot disagree.
+   * Reaching `composeMessages` with an empty list would build a transaction carrying
+   * nothing and broadcast it, which is a fee for no effect and would read as a launch
+   * that failed silently.
+   */
+  if (opts.plan.evm) {
+    const call = opts.plan.evm;
+    return runEvm(async () => {
+      const { createLaunchEvm } = await import('./evm/write.ts');
+      return createLaunchEvm(call.params, opts.sender, call.value, railStage(opts.onStage));
+    });
+  }
+
   return signAndBroadcast({
     msgs: composeMessages(opts.plan, opts.sender),
     sender: opts.sender,

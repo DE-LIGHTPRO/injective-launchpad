@@ -311,7 +311,7 @@ export function ConnectWallet({
                   cannot sign anything this factory accepts.
                 */}
               <p className="note">
-                No wallet found in this browser that can sign on {NETWORK.name}. Install one
+                No wallet found in this browser that can sign on {NETWORK.label}. Install one
                 of these, then reload.
               </p>
               <ul className="wallet-list">

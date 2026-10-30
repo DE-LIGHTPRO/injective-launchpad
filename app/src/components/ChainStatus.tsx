@@ -20,7 +20,7 @@ export function ChainStatus({ height }: { height: number | null }) {
     <section className="chain-status" aria-label="Network">
       <div>
         <span className="k">Network</span>
-        <span className="v">Injective {NETWORK.name}</span>
+        <span className="v">Injective {NETWORK.label}</span>
       </div>
       <div>
         <span className="k">Factory</span>

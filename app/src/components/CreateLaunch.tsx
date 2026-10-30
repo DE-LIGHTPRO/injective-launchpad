@@ -29,7 +29,7 @@ import {
   type CurveConfig,
   type CurveState,
 } from '@/lib/curve';
-import { NETWORK, getFactoryAddress, getLcdUrl, isDeployed } from '@/lib/config';
+import { NETWORK, getFactoryAddress, getLcdUrl, isDeployed, isEvm } from '@/lib/config';
 import {
   FIXED_TOTAL_SUPPLY,
   FIXED_TOTAL_SUPPLY_TOKENS,
@@ -56,6 +56,7 @@ import {
   launchAffordable,
   denomCreationFeeFor,
   fetchDenomCreationFee,
+  launchGasReserveFor,
 } from '@/lib/launchCost';
 import {
   rulesForChain,
@@ -395,6 +396,9 @@ export function CreateLaunch() {
         launchFee: launchFee.amount,
         launchFeeDenom: launchFee.denom,
         denomFee,
+        // Measured per backend: a CosmWasm launch is five messages including a denom
+        // creation, an EVM launch is one call. See `launchGasReserveFor`.
+        gasReserve: launchGasReserveFor(NETWORK.name),
         quoteDenom: activeQuote,
         gasDenom: NETWORK.gasDenom,
       }),
@@ -644,110 +648,134 @@ export function CreateLaunch() {
           />
         </div>
 
-        <div className="field">
-          <label htmlFor="cl-desc">
-            Description <span className="hint">optional, one line</span>
-          </label>
-          <input
-            id="cl-desc"
-            value={f.description}
-            onChange={(e) => set('description')(e.target.value)}
-            placeholder="What this token is for"
-            autoComplete="off"
-          />
-        </div>
+        {/*
+            THE PROFILE FIELDS ARE ABSENT ON THE EVM BACKEND, NOT DISABLED, and the
+            difference is the same one rule 14 of the Sealed notes draws about a greyed
+            control: a dead input implies a version of this product where the thing can
+            be filled in, and there is not one.
 
-        <div className="field">
-          <label htmlFor="cl-image">
-            Logo <span className="hint">https:// or ipfs:// address of an image</span>
-          </label>
-          <input
-            id="cl-image"
-            value={f.image}
-            onChange={(e) => set('image')(e.target.value)}
-            placeholder="https://… or ipfs://…"
-            autoComplete="off"
-            spellCheck={false}
-            aria-invalid={profileFieldError(f.image) !== null}
-          />
-          {/*
-              The reason is shown per field rather than once at the end. A form with
-              four URL inputs and a single "invalid" at the bottom makes the creator
-              guess which one, and these are permanent: a profile is immutable.
-            */}
-          {profileFieldError(f.image) && <p className="note err-text">{profileFieldError(f.image)}</p>}
-          {/*
-              Above the preview and below the field, because the field is still the
-              authority: an upload writes its `ipfs://` address into it, so what gets
-              launched is always the value shown, whether it was typed or pinned.
-              Renders nothing at all when the deployment has no pinning key.
-            */}
-          <LogoUpload onUploaded={set('image')} />
-          {logoPreview && (
-            <div className="logo-preview">
-              {/*
-                  A preview, because an ipfs:// address that resolves to nothing renders
-                  as an empty square forever and nothing on chain will ever say so. The
-                  src is the gateway URL, never the raw value.
-                */}
-              <img src={logoPreview} alt="" onError={(e) => { e.currentTarget.style.display = 'none'; }} />
-              <span className="note">If this stays blank the address does not resolve to an image.</span>
-            </div>
-          )}
-        </div>
-
-        <div className="field-row">
+            The EVM factory's `createLaunch` takes eleven parameters and none of them is
+            a description, an image or a link. `adapt.ts` returns every profile field as
+            null for the same reason. So a form that collected them here would take a
+            creator's writing, their logo and their socials and drop all of it on the
+            floor: the worst kind of field, because nothing errors and the launch looks
+            like it worked. Shown once, as a sentence, rather than five times as a
+            disabled box.
+          */}
+        {isEvm() ? (
+          <p className="note">
+            A description, a logo and links are not part of a launch on this chain: the
+            factory stores a name and a ticker and nothing else, so there is nowhere to
+            put them. Everything a buyer sees about this token comes off the chain.
+          </p>
+        ) : (
+          <>
           <div className="field">
-            <label htmlFor="cl-website">
-              Website <span className="hint">optional</span>
+            <label htmlFor="cl-desc">
+              Description <span className="hint">optional, one line</span>
             </label>
             <input
-              id="cl-website"
-              value={f.website}
-              onChange={(e) => set('website')(e.target.value)}
-              placeholder="https://"
+              id="cl-desc"
+              value={f.description}
+              onChange={(e) => set('description')(e.target.value)}
+              placeholder="What this token is for"
+              autoComplete="off"
+            />
+          </div>
+
+          <div className="field">
+            <label htmlFor="cl-image">
+              Logo <span className="hint">https:// or ipfs:// address of an image</span>
+            </label>
+            <input
+              id="cl-image"
+              value={f.image}
+              onChange={(e) => set('image')(e.target.value)}
+              placeholder="https://… or ipfs://…"
               autoComplete="off"
               spellCheck={false}
-              aria-invalid={profileFieldError(f.website) !== null}
+              aria-invalid={profileFieldError(f.image) !== null}
             />
-            {profileFieldError(f.website) && (
-              <p className="note err-text">{profileFieldError(f.website)}</p>
+            {/*
+                The reason is shown per field rather than once at the end. A form with
+                four URL inputs and a single "invalid" at the bottom makes the creator
+                guess which one, and these are permanent: a profile is immutable.
+              */}
+            {profileFieldError(f.image) && <p className="note err-text">{profileFieldError(f.image)}</p>}
+            {/*
+                Above the preview and below the field, because the field is still the
+                authority: an upload writes its `ipfs://` address into it, so what gets
+                launched is always the value shown, whether it was typed or pinned.
+                Renders nothing at all when the deployment has no pinning key.
+              */}
+            <LogoUpload onUploaded={set('image')} />
+            {logoPreview && (
+              <div className="logo-preview">
+                {/*
+                    A preview, because an ipfs:// address that resolves to nothing renders
+                    as an empty square forever and nothing on chain will ever say so. The
+                    src is the gateway URL, never the raw value.
+                  */}
+                <img src={logoPreview} alt="" onError={(e) => { e.currentTarget.style.display = 'none'; }} />
+                <span className="note">If this stays blank the address does not resolve to an image.</span>
+              </div>
             )}
           </div>
+
+          <div className="field-row">
+            <div className="field">
+              <label htmlFor="cl-website">
+                Website <span className="hint">optional</span>
+              </label>
+              <input
+                id="cl-website"
+                value={f.website}
+                onChange={(e) => set('website')(e.target.value)}
+                placeholder="https://"
+                autoComplete="off"
+                spellCheck={false}
+                aria-invalid={profileFieldError(f.website) !== null}
+              />
+              {profileFieldError(f.website) && (
+                <p className="note err-text">{profileFieldError(f.website)}</p>
+              )}
+            </div>
+            <div className="field">
+              <label htmlFor="cl-x">
+                X <span className="hint">optional</span>
+              </label>
+              <input
+                id="cl-x"
+                value={f.x}
+                onChange={(e) => set('x')(e.target.value)}
+                placeholder="https://x.com/"
+                autoComplete="off"
+                spellCheck={false}
+                aria-invalid={profileFieldError(f.x) !== null}
+              />
+              {profileFieldError(f.x) && <p className="note err-text">{profileFieldError(f.x)}</p>}
+            </div>
+          </div>
+
           <div className="field">
-            <label htmlFor="cl-x">
-              X <span className="hint">optional</span>
+            <label htmlFor="cl-tg">
+              Telegram <span className="hint">optional</span>
             </label>
             <input
-              id="cl-x"
-              value={f.x}
-              onChange={(e) => set('x')(e.target.value)}
-              placeholder="https://x.com/"
+              id="cl-tg"
+              value={f.telegram}
+              onChange={(e) => set('telegram')(e.target.value)}
+              placeholder="https://t.me/"
               autoComplete="off"
               spellCheck={false}
-              aria-invalid={profileFieldError(f.x) !== null}
+              aria-invalid={profileFieldError(f.telegram) !== null}
             />
-            {profileFieldError(f.x) && <p className="note err-text">{profileFieldError(f.x)}</p>}
+            {profileFieldError(f.telegram) && (
+              <p className="note err-text">{profileFieldError(f.telegram)}</p>
+            )}
           </div>
-        </div>
-
-        <div className="field">
-          <label htmlFor="cl-tg">
-            Telegram <span className="hint">optional</span>
-          </label>
-          <input
-            id="cl-tg"
-            value={f.telegram}
-            onChange={(e) => set('telegram')(e.target.value)}
-            placeholder="https://t.me/"
-            autoComplete="off"
-            spellCheck={false}
-            aria-invalid={profileFieldError(f.telegram) !== null}
-          />
-          {profileFieldError(f.telegram) && (
-            <p className="note err-text">{profileFieldError(f.telegram)}</p>
-          )}
-        </div>
+          </>
+        )}
 
         <div className="field-row">
           <div className="field">
@@ -891,9 +919,9 @@ export function CreateLaunch() {
                 whoever happened to hold at a snapshot.
               */}
             <p className="note">
-              Paying holders directly is not possible on Injective: a token transfer
-              runs no contract code, so nothing can see who holds what. The pool is
-              the closest honest version.
+              {isEvm()
+                ? 'Paying holders directly is not possible here: the token has no transfer hook, deliberately, so nothing watches who holds what. The pool is the closest honest version.'
+                : 'Paying holders directly is not possible on Injective: a token transfer runs no contract code, so nothing can see who holds what. The pool is the closest honest version.'}
             </p>
           </div>
 
@@ -1086,62 +1114,86 @@ export function CreateLaunch() {
           </div>
         </div>
 
-        <div className="field">
-          <label htmlFor="cl-devbuy">
-            Your opening buy <span className="hint">{quoteLabel}, blank for none</span>
-          </label>
-          <input
-            id="cl-devbuy"
-            value={f.initialBuy}
-            onChange={(e) => set('initialBuy')(e.target.value)}
-            placeholder="none"
-            inputMode="decimal"
-          />
-          {devBuyPreview && (
-            /*
-                The SHARE, not just the token count. A creator typing "5 INJ" cannot
-                tell whether that is 1% of the supply or 40%, and 40% is the figure
-                that decides whether anyone else buys. It is also the number the
-                launch page will show every visitor, so showing it here is showing
-                them what everyone else will see.
-              */
-            <p
-              className={`note ${
-                devBuyPreview.overCap || devBuyPreview.overWalletCap ? 'err-text' : ''
-              }`}
-            >
-              That buys about {fmt(devBuyPreview.tokens, 18, 0)}{' '}
-              {f.symbol.trim() || 'tokens'}, roughly{' '}
-              <strong>{(devBuyPreview.share * 100).toFixed(1)}% of the supply</strong>, in
-              the same transaction and before anyone else can buy.
-              {devBuyPreview.overCap && (
-                <>
-                  {' '}
-                  The contract refuses this: an opening buy cannot exceed{' '}
-                  {MAX_INITIAL_BUY_BPS / 100}% of the curve, which is about{' '}
-                  {fmt(devBuyPreview.ceiling, 18, 0)} {f.symbol.trim() || 'tokens'}.
-                  Reduce the amount.
-                </>
-              )}
-              {/*
-                  The creator's own cap refuses the creator, which is the half nothing
-                  said. Named separately from the ceiling above because they are
-                  different limits with different remedies: the ceiling is ours and
-                  fixed, this one the creator set a few fields up and can lower or
-                  raise. Both are stated rather than one standing in for the other.
-                */}
-              {devBuyPreview.overWalletCap && devBuyPreview.walletCap !== null && (
-                <>
-                  {' '}
-                  Your own wallet cap refuses it: you capped every buyer at{' '}
-                  {fmt(devBuyPreview.walletCap, 18, 0)} {f.symbol.trim() || 'tokens'}, and
-                  that cap counts against you too, so the launch would fail after you
-                  signed. Lower the opening buy or raise the cap.
-                </>
-              )}
-            </p>
-          )}
-        </div>
+        {/*
+            NO OPENING BUY ON THE EVM BACKEND, because the factory cannot do one.
+            `createLaunch` takes eleven parameters and not one of them is an amount to
+            spend, so a figure typed here would be collected, validated, previewed with
+            its share of the supply, and then not sent - and the launch would succeed,
+            which is what makes that the worst possible outcome. `validateLaunch`
+            refuses it rather than dropping it, and the field is absent rather than
+            disabled for the reason the profile fields above are.
+
+            A creator there is not prevented from buying first; they buy from their own
+            curve in a second transaction, at the opening price, like anybody else. That
+            is a fairer arrangement than this field describes, so it is worth saying
+            plainly rather than leaving as an unexplained gap.
+          */}
+        {isEvm() ? (
+          <p className="note">
+            There is no opening buy here: the launch transaction creates the curve and
+            nothing else. Once it exists you can buy from it at the opening price in a
+            second transaction, in the same queue as everyone else.
+          </p>
+        ) : (
+          <>
+          <div className="field">
+            <label htmlFor="cl-devbuy">
+              Your opening buy <span className="hint">{quoteLabel}, blank for none</span>
+            </label>
+            <input
+              id="cl-devbuy"
+              value={f.initialBuy}
+              onChange={(e) => set('initialBuy')(e.target.value)}
+              placeholder="none"
+              inputMode="decimal"
+            />
+            {devBuyPreview && (
+              /*
+                  The SHARE, not just the token count. A creator typing "5 INJ" cannot
+                  tell whether that is 1% of the supply or 40%, and 40% is the figure
+                  that decides whether anyone else buys. It is also the number the
+                  launch page will show every visitor, so showing it here is showing
+                  them what everyone else will see.
+                */
+              <p
+                className={`note ${
+                  devBuyPreview.overCap || devBuyPreview.overWalletCap ? 'err-text' : ''
+                }`}
+              >
+                That buys about {fmt(devBuyPreview.tokens, 18, 0)}{' '}
+                {f.symbol.trim() || 'tokens'}, roughly{' '}
+                <strong>{(devBuyPreview.share * 100).toFixed(1)}% of the supply</strong>, in
+                the same transaction and before anyone else can buy.
+                {devBuyPreview.overCap && (
+                  <>
+                    {' '}
+                    The contract refuses this: an opening buy cannot exceed{' '}
+                    {MAX_INITIAL_BUY_BPS / 100}% of the curve, which is about{' '}
+                    {fmt(devBuyPreview.ceiling, 18, 0)} {f.symbol.trim() || 'tokens'}.
+                    Reduce the amount.
+                  </>
+                )}
+                {/*
+                    The creator's own cap refuses the creator, which is the half nothing
+                    said. Named separately from the ceiling above because they are
+                    different limits with different remedies: the ceiling is ours and
+                    fixed, this one the creator set a few fields up and can lower or
+                    raise. Both are stated rather than one standing in for the other.
+                  */}
+                {devBuyPreview.overWalletCap && devBuyPreview.walletCap !== null && (
+                  <>
+                    {' '}
+                    Your own wallet cap refuses it: you capped every buyer at{' '}
+                    {fmt(devBuyPreview.walletCap, 18, 0)} {f.symbol.trim() || 'tokens'}, and
+                    that cap counts against you too, so the launch would fail after you
+                    signed. Lower the opening buy or raise the cap.
+                  </>
+                )}
+              </p>
+            )}
+          </div>
+          </>
+        )}
 
         {hasAnyRule(builtRules) && ruleProblems.length === 0 && (
           <div style={{ marginTop: 'var(--space-4)' }}>
@@ -1168,14 +1220,21 @@ export function CreateLaunch() {
 
         {/*
             There is no transfer rule here, and the reason is worth stating once on the
-            page rather than letting a creator look for one. On Solana a token can carry
-            a transfer hook; an Injective tokenfactory denom is a bank denom and a bank
-            send runs no contract code, so nothing can run on a transfer.
+            page rather than letting a creator look for one.
+
+            IT IS A DIFFERENT REASON ON EACH BACKEND, and only one of them is about the
+            chain. An Injective tokenfactory denom is a bank denom and a bank send runs
+            no contract code, so nothing CAN run on a transfer. An ERC-20 transfer runs
+            plenty of contract code and a hook is perfectly possible: `LaunchToken`
+            simply does not have one, and overrides nothing, because "nobody can change
+            the supply and nothing watches your transfers" is a simpler promise than a
+            list of what the hook does and does not do. Calling that a limit of the
+            chain would be a convenient untruth - it is a choice, and it is ours.
           */}
         <p className="note">
-          Rules cannot be attached to transfers on Injective: a tokenfactory denom is a
-          bank denom, and a bank send runs no contract code. What the curve can enforce
-          is every trade it settles, which is every trade until graduation.
+          {isEvm()
+            ? 'Rules are not attached to transfers here, by choice: the token inherits a plain ERC-20 and overrides nothing, so no code of ours runs when you move it. What the curve enforces is every trade it settles, which is every trade until graduation.'
+            : 'Rules cannot be attached to transfers on Injective: a tokenfactory denom is a bank denom, and a bank send runs no contract code. What the curve can enforce is every trade it settles, which is every trade until graduation.'}
         </p>
       </div>
 
@@ -1224,7 +1283,7 @@ export function CreateLaunch() {
           */}
         {!isDeployed() && (
           <p className="note warn-text">
-            No launchpad contracts are deployed on {NETWORK.name} yet, so nothing here
+            No launchpad contracts are deployed on {NETWORK.label} yet, so nothing here
             can be submitted. The curve above is real arithmetic and the messages below
             are the ones that will be sent once there is a factory to send them to.
           </p>
@@ -1264,10 +1323,32 @@ export function CreateLaunch() {
                 ))}
             </ul>
 
+            {/*
+                WHATEVER IS ACTUALLY GOING TO BE SENT, which is five CosmWasm messages
+                on one backend and one factory call on the other. The summary counted
+                the messages and the body printed `plan.messages`, so on the EVM build
+                it promised five messages and rendered `[]` - a disclosure panel that
+                disclosed nothing, under a heading that was wrong about what it was
+                hiding. Both read off the plan, so neither can be wrong about the other.
+
+                `bigint` does not survive `JSON.stringify`, which throws on it rather
+                than skipping it: without the replacer this panel took the whole page
+                to the error boundary the moment an EVM plan existed.
+              */}
             <details className="raw">
-              <summary>The five messages, exactly as they will be sent</summary>
+              <summary>
+                {plan.plan.evm
+                  ? 'The call, exactly as it will be sent'
+                  : 'The five messages, exactly as they will be sent'}
+              </summary>
               {/* Focusable because it scrolls in both axes: see `.raw pre:focus-visible`. */}
-              <pre tabIndex={0}>{JSON.stringify(plan.plan.messages, null, 2)}</pre>
+              <pre tabIndex={0}>
+                {JSON.stringify(
+                  plan.plan.evm ?? plan.plan.messages,
+                  (_k, v) => (typeof v === 'bigint' ? v.toString() : v),
+                  2,
+                )}
+              </pre>
             </details>
 
             <label className="toggle" style={{ marginTop: 'var(--space-4)' }}>
@@ -1277,9 +1358,20 @@ export function CreateLaunch() {
                 checked={confirmed}
                 onChange={(e) => setConfirmed(e.target.checked)}
               />
+              {/*
+                  "THE RIGHT TO MINT MORE IS GIVEN UP" IS NOT TRUE ON THE EVM BACKEND,
+                  and it is the one sentence a creator ticks a box to say they have read.
+                  There is no such right there to give up: `LaunchToken` has no mint
+                  function, so the supply is fixed by the absence of code rather than by
+                  a key being handed over. Nor does the supply leave the creator's
+                  wallet - it is minted straight to the curve and never touches them.
+                  Two false clauses in the one place on the page where being exact is
+                  the whole point of the control.
+                */}
               <span>
-                I understand the supply is fixed, all of it leaves my wallet, the right to mint more
-                is given up for good, and none of this can be changed afterwards.
+                {plan.plan.evm
+                  ? 'I understand the supply is fixed at creation and goes straight to the launch contract, that no mint function exists so none can ever be added, and that none of this can be changed afterwards.'
+                  : 'I understand the supply is fixed, all of it leaves my wallet, the right to mint more is given up for good, and none of this can be changed afterwards.'}
               </span>
             </label>
 
@@ -1299,15 +1391,24 @@ export function CreateLaunch() {
             <div className="metric-row">
               <span className="k">
                 Costs to create{' '}
+                {/*
+                    THE DENOM FEE IS NOT ITEMISED WHERE IT IS NOT CHARGED. There is no
+                    tokenfactory on the EVM backend, so `denomCreationFeeFor` returns
+                    zero there and naming a "0.00 Injective denom fee" would invent a
+                    line item for a charge that does not exist on that chain.
+                  */}
                 <span className="note">
-                  ({fmt(cost.denomFee, NETWORK.gasDecimals, 2)} Injective denom fee
+                  (
+                  {cost.denomFee > 0n
+                    ? `${fmt(cost.denomFee, NETWORK.gasDecimals, 2)} Injective denom fee`
+                    : 'gas'}
                   {cost.launchFee > 0n
                     ? `, ${fmt(cost.launchFee, NETWORK.gasDecimals, 2)} launchpad fee`
                     : ''}
                   {cost.openingBuy > 0n
                     ? `, ${fmt(cost.openingBuy, NETWORK.gasDecimals, 4)} opening buy`
                     : ''}
-                  , plus gas)
+                  {cost.denomFee > 0n ? ', plus gas' : ''})
                 </span>
               </span>
               <span className="v mono">
@@ -1318,9 +1419,11 @@ export function CreateLaunch() {
               <p className="note err-text">
                 This wallet holds {fmt(gasBalance ?? 0n, NETWORK.gasDecimals, 4)}{' '}
                 {NETWORK.gasSymbol}. Creating a token costs{' '}
-                {fmt(cost.total, NETWORK.gasDecimals, 4)} {NETWORK.gasSymbol}, most of
-                it Injective&rsquo;s own one-off charge for a new denom. Top the wallet up
-                and this will unlock.
+                {fmt(cost.total, NETWORK.gasDecimals, 4)} {NETWORK.gasSymbol}
+                {cost.denomFee > 0n
+                  ? ", most of it Injective\u2019s own one-off charge for a new denom"
+                  : ''}
+                . Top the wallet up and this will unlock.
               </p>
             )}
 
@@ -1332,10 +1435,25 @@ export function CreateLaunch() {
                * wallet did this at some point", and the second is the one that needs a
                * new ticker rather than a reload.
                */
+              /*
+               * BOTH SENTENCES MAKE A CLAIM ABOUT THE CHAIN, and on the EVM backend both
+               * were false. A tokenfactory denom is globally unique and `MsgCreateDenom`
+               * refuses a duplicate, which is what "would be refused by the chain" and
+               * "a ticker can only be used once per wallet" describe. An ERC-20 symbol is
+               * a string in storage and the factory does not look at it: a second launch
+               * with the same ticker is accepted, deploys, and works. So there the block
+               * is ours, to stop an accident, and it has to say so - telling a creator
+               * the chain will refuse something it will happily do is the kind of claim
+               * this project writes guards for.
+               */
               <p className="note warn-text">
                 {createdSymbol !== null && createdSymbol === f.symbol.trim()
-                  ? `${f.symbol.trim()} was just created from this wallet. Change the ticker to launch another token: sending this one again would be refused by the chain and the gas would be spent.`
-                  : `This wallet has already created ${f.symbol.trim()}. A ticker can only be used once per wallet, so pick another one.`}
+                  ? isEvm()
+                    ? `${f.symbol.trim()} was just created from this wallet. Change the ticker to launch another token: this chain would let you launch a second ${f.symbol.trim()}, which is almost never what anyone means.`
+                    : `${f.symbol.trim()} was just created from this wallet. Change the ticker to launch another token: sending this one again would be refused by the chain and the gas would be spent.`
+                  : isEvm()
+                    ? `This wallet has already launched ${f.symbol.trim()} here. This chain does not reserve tickers, so a second one would deploy and trade alongside the first. Pick another unless that is really what you want.`
+                    : `This wallet has already created ${f.symbol.trim()}. A ticker can only be used once per wallet, so pick another one.`}
               </p>
             )}
 
@@ -1369,11 +1487,29 @@ export function CreateLaunch() {
                 reassurance is unchanged and is why this was safe to offer either way:
                 all five messages are one transaction, so a mis-built launch is a
                 refused transaction rather than a denom with no curve behind it.
+
+                THE EVM BACKEND IS A THIRD CASE AND NEITHER SENTENCE FITS IT. It is one
+                call, not five messages; it has been exercised on that chain's mainnet,
+                because that is the only chain it has (Injective EVM is 1776 and there
+                is no testnet deployment of this factory), so the mainnet caution would
+                be both wrong and permanently stuck on. What IS worth saying is that the
+                call is simulated before anything is signed, which the other backend
+                does too and which is new on this one.
+
+                AND THIS ONE STAYS A NAME TEST, unlike the chip in the header and the
+                sentence on /risks, which moved to `NETWORK.realFunds`. Those ask "is a
+                balance here money". This asks something narrower and unrelated: has
+                THIS signing path been exercised on Injective's CosmWasm mainnet. The
+                two answers coincide today and they are not the same question, so
+                `realFunds` would be the right value for the wrong reason - and would
+                stop being the right value the moment a fourth network appeared.
               */}
             <p className="note">
-              {NETWORK.name === 'mainnet'
-                ? 'This signing path has been exercised on testnet and not yet on mainnet. All five messages go in a single transaction, so if anything is wrong the chain refuses the whole thing and nothing is created.'
-                : 'All five messages go in a single transaction, so if anything is wrong the chain refuses the whole thing and nothing is created.'}
+              {isEvm()
+                ? 'The launch is one call, run against the chain first so a mis-built one is refused before your wallet opens and costs nothing. It deploys the token and the curve together: either both exist or neither does.'
+                : NETWORK.name === 'mainnet'
+                  ? 'This signing path has been exercised on testnet and not yet on mainnet. All five messages go in a single transaction, so if anything is wrong the chain refuses the whole thing and nothing is created.'
+                  : 'All five messages go in a single transaction, so if anything is wrong the chain refuses the whole thing and nothing is created.'}
             </p>
           </>
         )}

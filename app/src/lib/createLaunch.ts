@@ -1,5 +1,5 @@
 import { validate, type CurveConfig } from './curve.ts';
-import { NETWORK } from './config.ts';
+import { isEvm, NETWORK } from './config.ts';
 import { profileFieldError } from './tokenProfile.ts';
 
 /**
@@ -49,12 +49,52 @@ export const MSG_EXECUTE = '/cosmwasm.wasm.v1.MsgExecuteContract';
  */
 export const TOKEN_DECIMALS = 18;
 
+/**
+ * The single factory call a launch is on the EVM backend.
+ *
+ * Mirrors `Factory.CreateParams` field for field and in order. Written out rather
+ * than reusing `EvmCreateParams` from `evm/write.ts`: that module imports viem, and
+ * this one is on the CosmWasm bundle's path too.
+ */
+export interface EvmLaunchCall {
+  params: {
+    name: string;
+    symbol: string;
+    virtualInj: bigint;
+    graduationTarget: bigint;
+    feeBps: bigint;
+    feeSellBps: bigint;
+    earlyFeeStartBps: bigint;
+    earlyFeeSecs: bigint;
+    tradeStart: bigint;
+    maxPerWallet: bigint;
+    rewardRoute: 0 | 1;
+  };
+  /** The launch fee, attached as `value`. */
+  value: bigint;
+}
+
 export interface LaunchPlan {
-  /** `factory/<creator>/<subdenom>`, which the chain derives and we must match. */
+  /**
+   * What identifies the token.
+   *
+   * `factory/<creator>/<subdenom>` on CosmWasm, which the chain derives and we must
+   * match. On the EVM backend there is no such string before the creation lands, so
+   * this carries the `evm:` key `denomFor` builds and the plan description does not
+   * put it in front of anybody.
+   */
   denom: string;
   /** Exactly what the factory will require to be attached. */
   seedAmount: bigint;
+  /**
+   * The CosmWasm messages. EMPTY ON THE EVM BACKEND, where `evm` below carries the
+   * one call instead. Left as an empty array rather than made optional so
+   * `composeMessages` cannot be reached with a plan it would silently turn into a
+   * transaction with no messages in it.
+   */
   messages: Array<{ typeUrl: string; value: Record<string, unknown> }>;
+  /** Set on the EVM backend only, and then `messages` is empty. */
+  evm?: EvmLaunchCall;
 }
 
 export interface LaunchInput {
@@ -137,8 +177,44 @@ export class LaunchInputError extends Error {
  */
 const SUBDENOM_OK = /^[a-zA-Z0-9][a-zA-Z0-9._-]{1,43}$/;
 
+/**
+ * The identity of a launch's token BEFORE it exists, which is a different thing on
+ * each backend and has to be.
+ *
+ * On the CosmWasm side the chain derives `factory/<creator>/<subdenom>` and we must
+ * match it exactly: that string is what `MsgCreateDenom` creates and what the whole
+ * app then addresses the token by.
+ *
+ * On the EVM side there is NO SUCH STRING. The token is a contract whose address
+ * nobody knows until the creation lands, so there is nothing to derive. What this
+ * returns there is a key for one question only - has this wallet already launched
+ * this ticker on this launchpad - and `evm:` marks it as ours rather than the
+ * chain's. The address is lowercased because a wallet may hand back any casing and
+ * this is compared as a string.
+ *
+ * AND THE GUARANTEE IS WEAKER THERE, which the copy has to say. A tokenfactory denom
+ * is globally unique and the chain refuses a duplicate; an ERC-20 symbol is a string
+ * field and the factory does not care. So on EVM this is a courtesy that stops a
+ * creator launching the same ticker twice by accident, not a rule the chain enforces.
+ */
 export function denomFor(creator: string, symbol: string): string {
-  return `factory/${creator}/${symbol}`;
+  return isEvm()
+    ? `evm:${creator.toLowerCase()}/${symbol}`
+    : `factory/${creator}/${symbol}`;
+}
+
+/**
+ * An address this backend can sign with.
+ *
+ * `/create` WAS DEAD ON THE EVM BUILD AND SAID THE WRONG THING ABOUT IT. The checks
+ * below were `/^inj1[0-9a-z]{38,}$/` against both the creator and the factory, so a
+ * connected `0x` wallet failed the first one and the form rendered its message:
+ * "Connect an Injective wallet first", under a header showing the connected account.
+ * A page telling somebody to do the thing they have plainly done is worse than an
+ * error, because there is no action it leaves them.
+ */
+function addressOk(addr: string): boolean {
+  return isEvm() ? /^0x[0-9a-fA-F]{40}$/.test(addr) : /^inj1[0-9a-z]{38,}$/.test(addr);
 }
 
 /**
@@ -175,8 +251,8 @@ export function tickerAlreadyUsed(
  * defaults.
  */
 export function validateLaunch(input: LaunchInput): void {
-  if (!/^inj1[0-9a-z]{38,}$/.test(input.creator)) {
-    throw new LaunchInputError('creator', 'Connect an Injective wallet first.');
+  if (!addressOk(input.creator)) {
+    throw new LaunchInputError('creator', 'Connect a wallet first.');
   }
   if (!SUBDENOM_OK.test(input.symbol)) {
     throw new LaunchInputError(
@@ -184,10 +260,18 @@ export function validateLaunch(input: LaunchInput): void {
       'A ticker can use letters, digits, dot, dash and underscore, must start with a letter or digit, and is 2 to 44 characters.',
     );
   }
-  const denom = denomFor(input.creator, input.symbol);
-  // The chain's own limit. A denom over it is rejected at MsgCreateDenom.
-  if (new TextEncoder().encode(denom).length > 128) {
-    throw new LaunchInputError('symbol', 'That ticker makes the denom longer than the chain allows.');
+  /*
+   * The CHAIN's limit, and only one chain has it: 128 bytes is the cap on a
+   * tokenfactory denom, rejected at `MsgCreateDenom`. An ERC-20 symbol is a string in
+   * contract storage with no such bound, so applying this on the EVM backend would
+   * refuse a ticker that chain accepts - a pre-check must never be stricter than the
+   * thing it is predicting.
+   */
+  if (!isEvm()) {
+    const denom = denomFor(input.creator, input.symbol);
+    if (new TextEncoder().encode(denom).length > 128) {
+      throw new LaunchInputError('symbol', 'That ticker makes the denom longer than the chain allows.');
+    }
   }
   for (const [field, value] of Object.entries(input.profile ?? {})) {
     /*
@@ -200,7 +284,7 @@ export function validateLaunch(input: LaunchInput): void {
     const problem = profileFieldError(value, field);
     if (problem) throw new LaunchInputError('profile', `${field}: ${problem}`);
   }
-  if (!/^inj1[0-9a-z]{38,}$/.test(input.factory)) {
+  if (!addressOk(input.factory)) {
     throw new LaunchInputError('factory', 'This launchpad has no factory configured.');
   }
   if (input.lpReserve < 0n) {
@@ -225,6 +309,20 @@ export function validateLaunch(input: LaunchInput): void {
    * The factory refuses this too (InitialBuyBeforeStart); saying it here means the form
    * says so while the creator is still typing.
    */
+  /*
+   * THE EVM FACTORY HAS NO OPENING BUY, so one asked for here would be collected by
+   * the form and dropped on the floor. `createLaunch` takes eleven parameters and
+   * none of them is an amount to spend; a creator there buys from their own curve in
+   * a second transaction, like anybody else. Refused rather than ignored, because a
+   * field that silently does nothing is the defect `.env.example` has a guard for.
+   */
+  if (isEvm() && input.initialBuy && input.initialBuy > 0n) {
+    throw new LaunchInputError(
+      'initialBuy',
+      'An opening buy cannot be part of the creation on this chain. Create the launch, then buy from its curve like anyone else.',
+    );
+  }
+
   const start = input.rules?.trade_start;
   if (input.initialBuy && input.initialBuy > 0n && typeof start === 'string' && /^[0-9]+$/.test(start)) {
     const startMs = Number(BigInt(start) / 1_000_000n);
@@ -266,11 +364,81 @@ export function seedAmount(curve: CurveConfig, lpReserve: bigint): bigint {
   return curve.curveSupply + lpReserve;
 }
 
+/** A `Uint128` decimal string out of the rules object, or zero. */
+function ruleAmount(rules: LaunchInput['rules'], key: string): bigint {
+  const v = rules?.[key];
+  return typeof v === 'string' && /^[0-9]+$/.test(v) ? BigInt(v) : 0n;
+}
+
+/**
+ * The EVM factory's eleven parameters, out of the same form the CosmWasm plan reads.
+ *
+ * THE UNITS ARE THE WHOLE RISK HERE, and there are two conversions.
+ *
+ *  - `trade_start` is NANOSECONDS in the rules object, because that is what CosmWasm's
+ *    `Timestamp` takes. Solidity compares against `block.timestamp`, which is SECONDS.
+ *    Passing the nanosecond figure would set a start time roughly 31 billion years out
+ *    and the curve would refuse every buy forever, with the form showing the date the
+ *    creator typed. Divided here, once, where both conventions are visible.
+ *  - `rewardRoute` is an enum ordinal on chain and a word in the form. `Creator` is 0
+ *    and `Pool` is 1 in `Factory.sol`; getting it backwards would send a creator's
+ *    share to the pool while the page said it was theirs, and nothing would error.
+ *
+ * `maxPerWallet` of zero means NO CAP, which is what the contract reads it as, and is
+ * also what an absent rule produces. Those agree by construction rather than by
+ * coincidence: `rulesForChain` omits the key entirely when there is no cap.
+ */
+function evmCallFor(input: LaunchInput, launchFee: bigint): EvmLaunchCall {
+  const ef = input.rules?.early_fee as { start_bps?: number; seconds?: number } | undefined;
+  const startNanos = ruleAmount(input.rules, 'trade_start');
+  return {
+    params: {
+      name: (input.name ?? '').trim() || input.symbol,
+      symbol: input.symbol,
+      virtualInj: input.curve.virtualInj,
+      graduationTarget: input.curve.graduationTarget,
+      feeBps: BigInt(input.curve.feeBps),
+      feeSellBps: BigInt(input.curve.feeSellBps),
+      earlyFeeStartBps: BigInt(ef?.start_bps ?? 0),
+      earlyFeeSecs: BigInt(ef?.seconds ?? 0),
+      // Nanoseconds to seconds. See the note above; this is the conversion that would
+      // have been invisible and permanent.
+      tradeStart: startNanos / 1_000_000_000n,
+      maxPerWallet: ruleAmount(input.rules, 'max_per_wallet'),
+      rewardRoute: input.rewardRoute === 'pool' ? 1 : 0,
+    },
+    value: launchFee,
+  };
+}
+
 export function planLaunch(input: LaunchInput): LaunchPlan {
   validateLaunch(input);
 
   const denom = denomFor(input.creator, input.symbol);
   const seed = seedAmount(input.curve, input.lpReserve);
+
+  /*
+   * ONE CALL ON THE EVM BACKEND, where the CosmWasm side is five messages.
+   *
+   * The difference is not a simplification, it is a different set of guarantees. There
+   * is no denom to create, no supply to mint to the creator and hand over, no bank
+   * metadata to set and no mint key to transfer - the factory deploys the token with
+   * its whole supply minted to the curve in one transaction, and `LaunchToken` has no
+   * mint function for anybody to hold a key to. `describePlan` says that rather than
+   * reusing the five-step description, which would describe safeguards that do not
+   * exist here for a property that is in fact stronger.
+   *
+   * `messages` stays empty rather than being made optional: `composeMessages` would
+   * otherwise be reachable with a plan it turns into a transaction carrying nothing.
+   */
+  if (isEvm()) {
+    return {
+      denom,
+      seedAmount: seed,
+      messages: [],
+      evm: evmCallFor(input, input.launchFee?.amount ?? 0n),
+    };
+  }
 
   /*
    * The curve is no longer sent. It used to go on the wire as decimal strings, since
@@ -469,6 +637,36 @@ export function describePlan(
   },
 ): string[] {
   const whole = (v: bigint) => (v / 10n ** 18n).toLocaleString('en-US');
+
+  /*
+   * THE EVM PLAN IS NOT THE COSMWASM PLAN WITH FEWER STEPS, and reusing those lines
+   * would have said four false things: there is no denom to create, no bank metadata
+   * to name a display unit in, no supply minted to the creator, and no mint key to
+   * give up. The last is the one that matters most, because it describes a careful
+   * safeguard - moving an admin key somewhere no code can use it - for a chain where
+   * the capability never exists. `LaunchToken` has no mint function at all, which is
+   * a stronger promise than a key having been handed over, and it should be read as
+   * one. See the comment at the top of `evm/src/LaunchToken.sol`.
+   *
+   * No opening-buy line either: the EVM factory takes no amount to spend, and
+   * `validateLaunch` refuses one rather than dropping it silently.
+   */
+  if (plan.evm) {
+    const p = plan.evm.params;
+    const evmLines = [
+      `Deploy ${p.symbol} with its entire supply of ${whole(plan.seedAmount)} minted once, to the launch contract`,
+      `No mint function exists in the token, so the supply is fixed for good: not by a key being given up, but by there being none`,
+      `${whole(curve.curveSupply)} goes onto the curve and ${whole(lpReserve)} is held back to pair at graduation`,
+      `Buyers pay ${quote.label} and the curve prices every trade until it reaches the target`,
+    ];
+    if (plan.evm.value > 0n) {
+      evmLines.push(
+        `Pay this launchpad's one-off fee of ${fmtQuote(plan.evm.value, quote.decimals)} ${quote.label}, forwarded in the same transaction`,
+      );
+    }
+    return evmLines;
+  }
+
   const lines = [
     `Create the denom ${plan.denom}`,
     `Name it, with a display unit at ${TOKEN_DECIMALS} decimals so wallets show whole tokens`,
