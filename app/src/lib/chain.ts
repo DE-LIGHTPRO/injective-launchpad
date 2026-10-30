@@ -948,10 +948,52 @@ function tradeFromAttrs(attrs: Array<{ key: string; value: string }>): Trade | n
   };
 }
 
+/**
+ * The EVM trade history WITH the window it was read over.
+ *
+ * Separate from `listTrades` because the window is the thing the UI has to say. A
+ * prefix and a complete history are the same array, and a page that renders the first
+ * without saying so is the partial-read-as-absence defect: a reader cannot tell a
+ * launch with three trades from one whose first fifty are older than the scan. See
+ * `evm/trades.ts` for the 10,000-block cap that makes a full scan impossible.
+ *
+ * The creation block is resolved from the factory's timestamp by `blockAtOrBefore`,
+ * which returns a block whose own timestamp the node reported - so `complete` rests on
+ * a measurement, not on an assumed block time.
+ */
+export async function listTradeHistoryEvm(
+  curve: string,
+  limit = 20,
+): Promise<import('./evm/trades.ts').EvmTradeHistory> {
+  const [{ listTradesEvm, blockAtOrBefore }, { createdAtOf, evmClient }] = await Promise.all([
+    import('./evm/trades.ts'),
+    import('./evm/read.ts'),
+  ]);
+  const createdAt = await createdAtOf(curve as `0x${string}`);
+  let birth: number | undefined;
+  if (createdAt !== null) {
+    const head = await evmClient().getBlockNumber();
+    const b = await blockAtOrBefore(createdAt, head);
+    if (b !== null) birth = Number(b);
+  }
+  return listTradesEvm(curve, limit, birth);
+}
+
 export async function listTrades(curve: string, limit = 20): Promise<Trade[]> {
   // Demo trades exist so the ticker and the fills chart can be looked at before a
   // real launch exists. Without them those components render on nobody's machine.
   if (isDemoMode()) return demoTrades(curve, limit);
+
+  /*
+   * EVENT LOGS ON THE EVM BACKEND. The query built below is a CosmWasm transaction
+   * search sent to a JSON-RPC host, and the error it produced was translated as "That
+   * contract was not found on this network" - on a page about a contract that is on
+   * this network. See `evm/trades.ts` for the 10,000-block range cap that shapes the
+   * replacement, and `listTradeHistory` for the window the UI needs to be told about.
+   */
+  if (isEvm()) {
+    return (await listTradeHistoryEvm(curve, limit)).trades;
+  }
 
   const q = encodeURIComponent(`wasm._contract_address='${curve}'`);
   /*
@@ -1067,6 +1109,21 @@ export async function currentHeight(): Promise<number | null> {
    * surface rather than to introduce.
    */
   if (isDemoMode()) return DEMO_HEIGHT;
+
+  /*
+   * `eth_blockNumber` on the EVM backend. The Tendermint route below is a CosmWasm LCD
+   * path sent to a JSON-RPC host, so it returned null there - and a null height makes
+   * every windowed figure on the trade card unknown: 24h volume, the age column, the
+   * opening-concentration window. All of them read as "not measured" for a chain that
+   * answers a height in one call.
+   */
+  if (isEvm()) {
+    try {
+      return Number(await (await import('./evm/read.ts')).evmClient().getBlockNumber());
+    } catch {
+      return null;
+    }
+  }
 
   try {
     const res = await fetch(`${getLcdUrl()}/cosmos/base/tendermint/v1beta1/blocks/latest`, {

@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { isEvm } from '@/lib/config';
 import {
   readCreatorHolding,
   describeCreatorHolding,
@@ -62,10 +63,23 @@ export function CreatorPosition({
           somewhere else, and a reader who takes this as the whole picture has been
           misled by a true number.
         */}
+      {/*
+          THE LAST CLAUSE NAMES A REASON, so it has to name the right one. "Not
+          available on Injective for tokenfactory denoms" is about `denom_owners`
+          answering 501 for a bank denom. On the EVM backend there is no tokenfactory
+          and no `denom_owners`: an ERC-20 keeps balances in a mapping, which has no
+          enumeration, so a holder list needs every `Transfer` log since deployment
+          indexed - and this chain caps a log query at 10,000 blocks (see
+          `evm/trades.ts`). Same conclusion, a different and real reason, and stating
+          the wrong one invites somebody to go looking for the route that does not
+          exist.
+        */}
       <p className="note">
         Read from the launch address only. A creator can hold more in another wallet, so
-        this is a floor on their position rather than the whole of it. A full holder
-        list is not available on Injective for tokenfactory denoms.
+        this is a floor on their position rather than the whole of it.{' '}
+        {isEvm()
+          ? 'A full holder list would mean indexing every transfer since the token was deployed, which this chain does not let a page do in one read.'
+          : 'A full holder list is not available on Injective for tokenfactory denoms.'}
       </p>
     </div>
   );

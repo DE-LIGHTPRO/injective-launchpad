@@ -213,3 +213,127 @@ test('the factory ABI declares every error a creation can revert with', () => {
     'factory',
   );
 });
+
+/**
+ * Events the Solidity declares, with their types AND which of them are indexed.
+ *
+ * `indexed` is not decoration: an indexed argument travels in `topics` and an
+ * unindexed one in `data`, so getting it wrong does not fail - it reads the wrong
+ * bytes as the wrong field, and a trade feed shows plausible nonsense.
+ */
+function declaredEvents(src: string): Map<string, Array<{ type: string; indexed: boolean }>> {
+  const out = new Map<string, Array<{ type: string; indexed: boolean }>>();
+  /*
+   * MULTI-LINE DECLARATIONS ARE THE COMMON CASE HERE. `Factory.sol` declares
+   * `LaunchCreated` across eight lines, and `Curve.sol`'s are single-line.
+   *
+   * Checked rather than assumed, because I nearly left a false claim here: when this
+   * guard first failed I wrote that `[^)]*` had skipped `LaunchCreated` and "fixed"
+   * the pattern. Running both against the source says otherwise - `[^)]*` matches
+   * newlines, and both patterns find all five of the factory's events. The failure was
+   * mine: I had asserted contract-subset-of-ABI for the factory, which demanded four
+   * admin events no screen reads. `[\s\S]*?` with the `;` anchor is kept as a
+   * tightening (it cannot run past a declaration into the next one), not as a fix for
+   * something that was broken.
+   */
+  for (const m of src.matchAll(/^\s*event\s+(\w+)\s*\(([\s\S]*?)\)\s*;/gm)) {
+    const [, name, params] = m;
+    const args = params
+      .split(',')
+      .map((p) => p.trim())
+      .filter((p) => p.length > 0)
+      .map((p) => ({ type: p.split(/\s+/)[0], indexed: /\bindexed\b/.test(p) }));
+    out.set(name, args);
+  }
+  return out;
+}
+
+/** The event shapes an ABI declares, in the same form `declaredEvents` returns. */
+function eventShapes(
+  abi: readonly { type: string; name?: string; inputs?: readonly { type: string; indexed?: boolean }[] }[],
+): Map<string, Array<{ type: string; indexed: boolean }>> {
+  return new Map(
+    abi
+      .filter((e) => e.type === 'event')
+      .map((e) => [
+        e.name!,
+        (e.inputs ?? []).map((i) => ({ type: i.type, indexed: i.indexed === true })),
+      ]),
+  );
+}
+
+/**
+ * EVERY event the curve emits is declared on the ABI, with the right shape.
+ *
+ * THE DEFECT, AND IT IS THE MISSING-ERRORS DEFECT AGAIN ONE FILE LATER. The ABI
+ * carried functions and nothing else. A log reaches the client as a topic hash plus
+ * data, and viem can only name it if the ABI declares the event - so
+ * `parseEventLogs` returned an empty array for every log it was handed, and
+ * `evm/trades.ts` reported zero trades for a launch whose own state says it has
+ * traded. It reported that over a window it genuinely had read, which is the worst
+ * version: a measured-looking absence.
+ *
+ * Measured on the live PAD curve, 30 Oct 2026: `eth_getLogs` over the page after its
+ * creation returns one log, and with the events declared the reader decodes it as a
+ * buy of 0.004 INJ for 141,617.306 tokens with a 0.00004 INJ fee - every figure
+ * matching what the page already showed from the curve's own state.
+ *
+ * I had written a test for the trade reader that fed it already-decoded shapes. It
+ * would have passed over a reader that could never decode anything, which is exactly
+ * the trap the error-copy test fell into and the reason both now read the source.
+ */
+test('the curve ABI declares every event the curve emits', () => {
+  const src = source('Curve.sol');
+  const events = declaredEvents(src);
+  assert.ok(events.size >= 5, `only ${events.size} events found in Curve.sol`);
+
+  const onAbi = eventShapes(CURVE_ABI as never);
+
+  for (const [name, args] of events) {
+    const declared = onAbi.get(name);
+    assert.ok(
+      declared !== undefined,
+      `the curve emits \`${name}\` and the ABI does not declare it, so no log of it can be decoded`,
+    );
+    assert.deepEqual(
+      declared,
+      args,
+      `\`${name}\` has a different shape on the ABI than in the contract, so its fields decode wrong`,
+    );
+  }
+
+  for (const name of onAbi.keys()) {
+    assert.ok(events.has(name), `the ABI declares event \`${name}\`, which the curve does not emit`);
+  }
+});
+
+test('the factory ABI declares the event a creation is read back from', () => {
+  /*
+   * `createLaunchEvm` takes the new curve and token addresses out of `LaunchCreated`
+   * rather than from `launchCount() - 1`, because two creations in one block would
+   * make that read name somebody else's launch and send the person who just paid to
+   * it. That only works if the event decodes.
+   *
+   * ONE DIRECTION HERE, UNLIKE THE CURVE. The curve's reader decodes every log the
+   * contract emits, so every event it emits has to be declared. The factory's four
+   * admin events (`LaunchFeeSet`, `PlatformSet`, the two admin transfers) are not read
+   * by any screen, and demanding them would be requiring an ABI entry for a log
+   * nothing looks at - the mirror of rule 40's "do not declare a variable nothing
+   * reads". What is required is that `LaunchCreated` is there and that whatever IS
+   * declared matches the contract.
+   */
+  const events = declaredEvents(source('Factory.sol'));
+  assert.ok(
+    events.has('LaunchCreated'),
+    'Factory.sol no longer declares LaunchCreated, which createLaunchEvm reads the new addresses from',
+  );
+
+  const onAbi = eventShapes(FACTORY_ABI as never);
+  assert.ok(onAbi.has('LaunchCreated'), 'the ABI does not declare LaunchCreated, so a creation cannot be read back');
+
+  for (const [name, declared] of onAbi) {
+    const actual = events.get(name);
+    assert.ok(actual !== undefined, `the ABI declares event \`${name}\`, which the factory does not emit`);
+    assert.deepEqual(declared, actual, `\`${name}\` decodes with the wrong shape`);
+  }
+});

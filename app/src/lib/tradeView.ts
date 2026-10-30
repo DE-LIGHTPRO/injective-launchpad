@@ -1,5 +1,6 @@
 import {
   listTrades,
+  listTradeHistoryEvm,
   currentHeight,
   symbolOf,
   type LaunchDetail,
@@ -9,6 +10,7 @@ import {
 import { firstBlockShare } from './creatorHolding.ts';
 import { buildSeries, changeBps, type Series } from './priceSeries.ts';
 import { isDemoMode } from './demo.ts';
+import { isEvm } from './config.ts';
 import {
   uniqueTraders,
   volumeWithin,
@@ -52,6 +54,22 @@ export interface TradeView {
   openingPct: number | null;
   /** Blocks the opening-share window covers, for the copy that reports it. */
   openingBlocks: number | null;
+  /**
+   * Which blocks the history was actually read over, on a backend that reads a window.
+   *
+   * `null` ON THE COSMWASM BACKEND, where history comes from a transaction search that
+   * either answers or does not, and its partiality is already reported by the error
+   * branch and by `volPartial`. On the EVM backend `eth_getLogs` is capped at 10,000
+   * blocks a request, so a full history cannot be scanned and the list is a window -
+   * which the UI has to SAY, because a prefix and a complete history are the same
+   * array. See `evm/trades.ts`.
+   */
+  coverage: {
+    complete: boolean | null;
+    scannedFrom: number;
+    head: number;
+    openingWindow: { from: number; to: number } | null;
+  } | null;
 }
 
 export type TradeViewResult =
@@ -138,8 +156,26 @@ export async function loadTradeView({
   if (isDemoMode()) return { kind: 'demo' };
 
   let trades: Trade[];
+  let coverage: TradeView['coverage'] = null;
   try {
-    trades = await listTrades(curve, TRADE_LIMIT);
+    if (isEvm()) {
+      /*
+       * THE WINDOW COMES BACK WITH THE TRADES, because the UI has to report it. Read
+       * through `listTradeHistoryEvm` rather than `listTrades` for exactly that: the
+       * plain call returns the array and drops which blocks produced it, and a page
+       * that renders a window as a history is the partial-read-as-absence defect.
+       */
+      const h = await listTradeHistoryEvm(curve, TRADE_LIMIT);
+      trades = h.trades;
+      coverage = {
+        complete: h.complete,
+        scannedFrom: h.scannedFrom,
+        head: h.head,
+        openingWindow: h.openingWindow,
+      };
+    } else {
+      trades = await listTrades(curve, TRADE_LIMIT);
+    }
   } catch (e) {
     return { kind: 'error', message: (e as Error).message, tradedOnChain };
   }
@@ -167,6 +203,7 @@ export async function loadTradeView({
       change: changeBps(series),
       openingPct: opening?.share != null ? opening.share * 100 : null,
       openingBlocks: opening?.blocks ?? null,
+      coverage,
     },
   };
 }

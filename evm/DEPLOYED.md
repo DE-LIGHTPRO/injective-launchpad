@@ -1,59 +1,126 @@
 # Live on Injective EVM
 
-Deployed and exercised on mainnet, **28 Oct 2026**. Every figure below was read back
-off the chain, not taken from a deployment log.
+Deployed and exercised on mainnet. Every figure below was read back off the chain, not
+taken from a deployment log.
 
 ```
-chain id   1776
+chain id   1776                                          (eth_chainId -> 0x6f0)
 rpc        https://sentry.evm-rpc.injective.network
-
-factory    0xD31966ef9d26C589996935359A567eeF9Ef1a59D
+factory    0x3D811414b3c578380B1D7D1a89D72907C22914c8     18,135 bytes of code
 admin      0x7fCc735e0e473932C1F75ec163B98226E4Bcf1Bb
 platform   0xd35EAA1b1161F47e5dBf607DE8E306501c1e3BD6
-launch fee 0.2 INJ
+launch fee 0                                              (waived; `launchFee()`)
 ```
 
-No governance proposal, no deposit, no vote. Deployment cost **0.001555 INJ**.
+No governance proposal, no deposit, no vote, unlike the CosmWasm side. A deployment
+costs gas and nothing else.
 
-## First launch, end to end
+## Three factories, and this is the third
+
+**This file named `0xD31966ef…` for two days after it stopped being the deployed one,
+and that is the failure worth recording here rather than quietly correcting.** Defects
+were found and fixed while the EVM port was being wired up - a missing independent sell
+fee, a per-wallet cap, a `token: address(0)` the factory never replaced - and each fix
+meant a new factory, because these contracts are immutable by design. The document that
+tells the next person which address is live was not part of that loop.
+
+The superseded one, written out in full so an old note can be recognised:
 
 ```
-curve      0xDe726DbA03730efCdc7529396A56E48d746965b7
-token      0xB0EF95c2C1929f778EdE88815E65C67A02858533   "injpad genesis" / GENESIS
-create tx  0x6a57a7a11640bb7fa103761f2618733b0929b15cd11984558e716658cb5b1110
-buy tx     0xb375e573640df92baac8f6f8d031c1a394b8f347577712b1f6817c217c5e4e84
+superseded 0xD31966ef9d26C589996935359A567eeF9Ef1a59D     16,773 bytes of code
 ```
 
-**Supply.** 1,000,000,000 minted, and the curve holds all of it. `owner()` reverts and
-`mint()` reverts, because neither function exists.
+It still holds code and still answers every call, which is what makes a stale address
+in a document dangerous rather than merely wrong: it is not a dead link, it is a
+working launchpad running an older contract. Verified 30 Oct 2026 that both addresses
+are deployed.
 
-**The curve points at the right token.** `curve.TOKEN()` returns the deployed token.
-That is checked specifically because the first version of the factory passed
-`address(0)` there under a comment claiming it was replaced below, and nothing
-replaced it: `TOKEN` is immutable and it compiled without a warning.
+**The live address is established by reading the production bundle, not this file.**
+`injpad.vercel.app`'s chunks carry exactly one `0x…40` address and it is
+`0x3D811414b3c578380B1D7D1a89D72907C22914c8` - the deployment's own answer to "what is
+configured", which no document can drift from.
 
-**The quote is what arrives.** A 0.1 INJ buy quoted 3,529,253,463,570,218,279,677,065
-tokens and transferred exactly that. `injCollected` is 9.9e16, exactly the quoted net.
+## Factory constants
 
-**The fee split is exact.** `creatorOwed` 7e14 and `platformOwed` 3e14 against a 1e15
-fee: 70/30 with nothing lost to rounding.
+```
+CURVE_SUPPLY     800,000,000 x 1e18     on the curve
+LP_RESERVE       200,000,000 x 1e18     held back to pair at graduation
+VIRTUAL_TOKENS   1,073,000,000 x 1e18   the virtual reserve the curve prices against
+```
 
-**Solvency, zero drift.** The contract holds 0.100000000 INJ against 0.099 collected
-plus 0.001 owed in fees. Balance equals obligations exactly, which is the same
-invariant `scripts/verify-solvency.mjs` measures on the CosmWasm side.
+These match `FIXED_CURVE` in `app/src/lib/launchLimits.ts` exactly. They have to: the
+create form draws the curve and quotes the opening price from its own copy, so a
+divergence would quote one curve and create another with nothing on the page saying so.
+
+## The launch on it, end to end
+
+```
+launch 0   PAD
+curve      0x1EA823E09dB42Ca472182D8898bfaA40A64020F9
+token      0x97bc455e526D77E58fE78D22f49E20e96ed3deEA
+creator    0x7fCc735e0e473932C1F75ec163B98226E4Bcf1Bb
+created    1793184889   2026-10-28T10:54:49Z
+```
+
+**Supply.** 1,000,000,000 x 1e18 minted, and the curve holds
+999,858,382.693484460051273232 of it - the whole supply less what has been bought.
+
+**No mint, no owner, no burn, no pause.** The token's deployed bytecode is 1,813 bytes
+and contains none of the selectors `mint(address,uint256)` `40c10f19`, `owner()`
+`8da5cb5b`, `transferOwnership(address)` `f2fde38b`, `burn(uint256)` `42966c68`, or
+`pause()` `8456cb59`. Checked against the bytecode rather than against the source,
+because the source is not what is running.
+
+**The curve points at the right token.** `curve.TOKEN()` returns
+`0x97bc455e…`, the deployed token. That is checked specifically because the first
+version of the factory passed `address(0)` there under a comment claiming it was
+replaced below, and nothing replaced it: `TOKEN` is immutable and it compiled without a
+warning.
+
+**One trade, and it reconciles.** `eth_getLogs` over the page after creation returns one
+`Bought`, decoded as 0.004 INJ in for 141,617.306515539948726768 PAD with a
+0.00004 INJ fee, in block 189,281,250 at 2026-10-28T10:54:56Z. Against the curve's own
+state: `tokensSold` 141,617.306515539948726768 and `injCollected` 0.00396 INJ, which is
+the 0.004 paid less the 0.00004 fee. The event and the state agree to the unit.
+
+**The fee split is exact.** `creatorOwed` 0.000028 INJ and `platformOwed` 0.000012 INJ
+against a 0.00004 INJ fee: 70/30 with nothing lost to rounding.
+
+**The wallet cap is live.** `MAX_PER_WALLET` is 5,000,000 x 1e18, enforced on every
+curve buy and freed again by a sell.
+
+**Gas, measured 30 Oct 2026.** `eth_estimateGas` on `createLaunch` returns 2,588,418 at
+a 0.16 gwei gas price: **0.000414 INJ** for a launch. A buy is 82,756 gas, 0.0000132
+INJ. The app's pre-flight reserve is sized against these; see `launchGasReserveFor`.
+
+## What this endpoint will and will not serve
+
+**`eth_getLogs` is capped at 10,000 blocks per request**, measured:
+
+```
+span 1       0 logs           span 100,000    ERROR -32000
+span 1,000   0 logs           span 1,000,000  ERROR -32000
+span 10,000  0 logs           from genesis    ERROR -32000
+
+-32000 maximum [from, to] blocks distance: 10000
+```
+
+Blocks are sub-second, so one page is under two hours of chain time. PAD sits 256,818
+blocks behind the head - twenty-six requests - which is why `app/src/lib/evm/trades.ts`
+reads a window at the head and a window at the launch's creation rather than scanning,
+and why the trade card states which blocks it read.
 
 ## Verify it yourself
 
 ```bash
-cd evm && ./script/verify-deployment.sh 0xD31966ef9d26C589996935359A567eeF9Ef1a59D
+cd evm && ./script/verify-deployment.sh 0x3D811414b3c578380B1D7D1a89D72907C22914c8
 ```
 
 ## What is still true
 
-**No audit, and now live.** The arithmetic is checked against the CosmWasm
-implementation that has run on chain, and the contracts are checked against a fork,
-but neither is an audit. The factory existing endangers nobody; people using it is
-where the risk starts.
+**No audit, and live.** The arithmetic is checked against the CosmWasm implementation
+that has run on chain, and the contracts are checked against a fork, but neither is an
+audit. The factory existing endangers nobody; people using it is where the risk starts.
 
 The CosmWasm deployment remains the other path and is not abandoned: see
 [../docs/GOVERNANCE-PROPOSAL.md](../docs/GOVERNANCE-PROPOSAL.md).

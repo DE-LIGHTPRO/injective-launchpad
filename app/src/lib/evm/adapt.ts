@@ -11,7 +11,7 @@ import type { Address } from 'viem';
 import type { Launch, LaunchDetail } from '../chain.ts';
 import { NO_RULES } from '../launchRules.ts';
 
-import { getEvmDetail, listEvmLaunches } from './read.ts';
+import { createdAtOf, getEvmDetail, listEvmLaunches } from './read.ts';
 import { evmDenom } from './denom.ts';
 
 /**
@@ -54,7 +54,14 @@ export async function getLaunchEvm(id: number): Promise<Launch | null> {
 }
 
 export async function getLaunchDetailEvm(curveAddress: string): Promise<LaunchDetail> {
-  const d = await getEvmDetail(curveAddress as Address);
+  /*
+   * In parallel: the detail comes off the curve and the creation time off the factory,
+   * and neither needs the other. Serial they would be two round trips for one page.
+   */
+  const [d, createdAt] = await Promise.all([
+    getEvmDetail(curveAddress as Address),
+    createdAtOf(curveAddress as Address),
+  ]);
   return {
     /*
      * THE SAME FORM THE BOARD USES. This returned the bare address, so the board
@@ -86,6 +93,13 @@ export async function getLaunchDetailEvm(curveAddress: string): Promise<LaunchDe
       ...NO_RULES,
       maxPerWallet: d.maxPerWallet > 0n ? d.maxPerWallet : null,
       tradeStart: d.tradeStart > 0n ? Number(d.tradeStart) : null,
+      /*
+       * From the FACTORY's row, not the curve, which is why it needed a second read:
+       * the curve contract has no creation timestamp and the factory's `launches`
+       * struct does. The page was showing "not recorded" for an age the chain records.
+       * `null` on a failed read, which that fallback is the right answer for.
+       */
+      openedAt: createdAt,
     },
   };
 }

@@ -242,6 +242,80 @@ export const CURVE_ABI = [
   { type: 'function', name: 'claimFees', inputs: [], outputs: [], stateMutability: 'nonpayable' },
   { type: 'function', name: 'graduate', inputs: [], outputs: [], stateMutability: 'nonpayable' },
   /*
+   * THE CURVE'S EVENTS, and their absence was the same defect as the missing errors
+   * one block below: a log arrives as a topic hash plus data, and viem can only turn
+   * it into a name and arguments if the ABI declares the event. With none,
+   * `parseEventLogs` returned an empty array for every log it was given, so
+   * `evm/trades.ts` reported zero trades for a launch whose own state says it has
+   * traded - and it reported that confidently, over a window it really had read.
+   *
+   * Measured on the live PAD curve, 30 Oct 2026: `eth_getLogs` over the page after its
+   * creation returns one log, and the trade reader saw none of it.
+   *
+   * `indexed` IS PART OF THE DECODING, not decoration: an indexed argument is in
+   * `topics` and an unindexed one is in `data`, so getting it wrong does not fail, it
+   * reads the wrong bytes as the wrong field. Taken from `Curve.sol` one for one, and
+   * `abi-matches-contracts.test.ts` derives the list from that source.
+   */
+  {
+    type: 'event',
+    name: 'Bought',
+    inputs: [
+      { name: 'buyer', type: 'address', indexed: true },
+      { name: 'injIn', type: 'uint256', indexed: false },
+      { name: 'tokensOut', type: 'uint256', indexed: false },
+      { name: 'fee', type: 'uint256', indexed: false },
+      { name: 'refund', type: 'uint256', indexed: false },
+    ],
+  },
+  {
+    type: 'event',
+    name: 'Sold',
+    inputs: [
+      { name: 'seller', type: 'address', indexed: true },
+      { name: 'tokensIn', type: 'uint256', indexed: false },
+      { name: 'injOut', type: 'uint256', indexed: false },
+      { name: 'fee', type: 'uint256', indexed: false },
+    ],
+  },
+  {
+    type: 'event',
+    name: 'Graduated',
+    inputs: [
+      { name: 'poolQuote', type: 'uint256', indexed: false },
+      { name: 'poolTokens', type: 'uint256', indexed: false },
+      { name: 'earlyFeePremium', type: 'uint256', indexed: false },
+    ],
+  },
+  {
+    type: 'event',
+    name: 'PoolBought',
+    inputs: [
+      { name: 'buyer', type: 'address', indexed: true },
+      { name: 'injIn', type: 'uint256', indexed: false },
+      { name: 'tokensOut', type: 'uint256', indexed: false },
+      { name: 'fee', type: 'uint256', indexed: false },
+    ],
+  },
+  {
+    type: 'event',
+    name: 'PoolSold',
+    inputs: [
+      { name: 'seller', type: 'address', indexed: true },
+      { name: 'tokensIn', type: 'uint256', indexed: false },
+      { name: 'injOut', type: 'uint256', indexed: false },
+      { name: 'fee', type: 'uint256', indexed: false },
+    ],
+  },
+  {
+    type: 'event',
+    name: 'FeesClaimed',
+    inputs: [
+      { name: 'toCreator', type: 'uint256', indexed: false },
+      { name: 'toPlatform', type: 'uint256', indexed: false },
+    ],
+  },
+  /*
    * The curve's own errors, so viem can decode a revert into a name rather than hex.
    * `abi-matches-contracts.test.ts` reads these out of the Solidity, so an error
    * renamed there fails rather than silently going generic in `errors.ts`.

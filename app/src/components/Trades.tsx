@@ -71,8 +71,18 @@ export function Trades({ result, quote }: { result: TradeViewResult; quote: Quot
     );
   }
 
-  const { trades, series, sym, vol24, volPartial, traders, openingPct, openingBlocks } =
+  const { trades, series, sym, vol24, volPartial, traders, openingPct, openingBlocks, coverage } =
     result.view;
+
+  /*
+   * "N total" IS A COMPLETENESS CLAIM, and on the EVM backend it was a false one.
+   * `eth_getLogs` is capped at 10,000 blocks a request, so history there is read over
+   * two windows and `coverage.complete` says whether they cover everything since the
+   * launch existed. With one trade found and a gap in the middle, "1 total" tells a
+   * reader there has only ever been one. `coverage` is null on the CosmWasm backend,
+   * where the count label keeps the behaviour it had.
+   */
+  const countIsAll = coverage === null ? trades.length < TRADE_LIMIT : coverage.complete === true;
 
   /*
    * NO CHART HERE. There was a 60-pixel candle strip at the top of this card, under a
@@ -92,10 +102,57 @@ export function Trades({ result, quote }: { result: TradeViewResult; quote: Quot
           */}
         {trades.length > 0 && (
           <span className="note">
-            {trades.length >= TRADE_LIMIT ? `newest ${trades.length}` : `${trades.length} total`}
+            {countIsAll ? `${trades.length} total` : `newest ${trades.length}`}
           </span>
         )}
       </div>
+
+      {/*
+          WHICH BLOCKS THIS ACTUALLY READ, said plainly, because the list is a window
+          and not a history. `eth_getLogs` on Injective's EVM refuses a range over
+          10,000 blocks - measured, `-32000 maximum [from, to] blocks distance: 10000` -
+          and at sub-second blocks a launch two days old is twenty-six requests away.
+          So the reader walks a window at the head and a window at the launch's
+          creation, which is where a bonding curve's trades actually are, and this says
+          so rather than letting a prefix pass for the whole thing.
+
+          Only when there IS a gap. A complete read needs no caveat, and printing one
+          anyway would train a reader to skip it.
+        */}
+      {coverage !== null && coverage.complete !== true && trades.length > 0 && (
+        <p className="note">
+          Read from the chain&rsquo;s event log over{' '}
+          {(coverage.head - coverage.scannedFrom).toLocaleString('en-US')} blocks up to the
+          present
+          {coverage.openingWindow !== null
+            ? `, plus ${(
+                coverage.openingWindow.to - coverage.openingWindow.from
+              ).toLocaleString('en-US')} blocks from when this launch was created`
+            : ''}
+          . Trades between those two windows are not shown: this chain caps a log query
+          at 10,000 blocks, so reading every block since the launch is not something a
+          page load can do.
+        </p>
+      )}
+
+      {/*
+          NOTHING FOUND IS NOT NOTHING HAPPENED, where the read was a window. The
+          curve's own state is on the page above and settles whether it has traded.
+        */}
+      {coverage !== null && coverage.complete !== true && trades.length === 0 && (
+        <p className="note">
+          No trades in the{' '}
+          {(coverage.head - coverage.scannedFrom).toLocaleString('en-US')} blocks read up to
+          the present
+          {coverage.openingWindow !== null
+            ? `, nor in the ${(
+                coverage.openingWindow.to - coverage.openingWindow.from
+              ).toLocaleString('en-US')} blocks after this launch was created`
+            : ''}
+          . That is a window, not the whole history: this chain caps a log query at
+          10,000 blocks. What the curve itself reports about what has been sold is above.
+        </p>
+      )}
 
       {openingPct !== null && openingPct >= 20 && (
         <p className="note warn-text">

@@ -80,6 +80,34 @@ export async function launchCount(): Promise<number> {
 }
 
 /**
+ * When a curve was created, from the factory's own row for it.
+ *
+ * THE FACTORY KNOWS AND THE CURVE DOES NOT. `launches(id)` carries a `createdAt`
+ * block timestamp; the curve contract has no such field, so `getEvmDetail` - which
+ * reads the curve - cannot answer it. The launch page was rendering "not recorded"
+ * for an age the chain records, which is the honest fallback doing its job over a
+ * read nobody had wired. Registration is not wiring, one more time.
+ *
+ * Found by the row's lookup rather than by scanning: the board already pages the
+ * factory's rows, and `getLaunchEvm` already resolves a launch this way, so this adds
+ * a lookup the code was shaped for rather than a second mechanism.
+ *
+ * `null` ON ANY FAILURE, never a guess. The page renders null as "not recorded",
+ * which is exactly right for a read that did not land - and a plausible timestamp
+ * here would put an age on the screen that nothing measured.
+ */
+export async function createdAtOf(curve: Address): Promise<number | null> {
+  try {
+    const rows = await listEvmLaunches();
+    const hit = rows.find((r) => r.curve.toLowerCase() === curve.toLowerCase());
+    // A zero timestamp is the struct's default, which means the row is not there.
+    return hit && hit.createdAt > 0 ? hit.createdAt : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Every launch on the factory, newest first.
  *
  * Reads the rows AND each token's name and symbol, because a board row with an
