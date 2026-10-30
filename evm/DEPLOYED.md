@@ -6,16 +6,43 @@ taken from a deployment log.
 ```
 chain id   1776                                          (eth_chainId -> 0x6f0)
 rpc        https://sentry.evm-rpc.injective.network
-factory    0x3D811414b3c578380B1D7D1a89D72907C22914c8     18,135 bytes of code
+factory    0xe24adc45439a787e38b10bFD4AD4f51B636a1B50     18,563 bytes of code
 admin      0x7fCc735e0e473932C1F75ec163B98226E4Bcf1Bb
 platform   0xd35EAA1b1161F47e5dBf607DE8E306501c1e3BD6
-launch fee 0                                              (waived; `launchFee()`)
+launch fee 0.2 INJ                                        (`launchFee()`)
 ```
 
 No governance proposal, no deposit, no vote, unlike the CosmWasm side. A deployment
 costs gas and nothing else.
 
-## Three factories, and this is the third
+## Four factories, and this is the fourth
+
+**This one carries the audit fixes and the earlier three do not**, which is the whole
+reason it exists. V-01 (an opening fee over 10% made every trade revert), V-03 (one
+fee recipient could block the other's payout) and V-04 (plain INJ sent to a curve was
+unrecoverable) are fixed here and are permanent on the others, because these contracts
+are immutable.
+
+Verified against the DEPLOYED bytecode rather than against `src/`:
+`evm/test/DeployedFactory.t.sol`, forked onto mainnet, creates a launch with a 15%
+opening fee and trades it, refuses a 20% standing fee, pays the platform while the
+creator cannot receive, and has a bare transfer rejected. A compile proves what the
+source says; only a fork proves what was deployed.
+
+**Run it at `--evm-version cancun`, and that is not the same answer as for anvil.**
+Injective's block headers are pre-Shanghai, so `anvil --fork-url` must be pinned to
+`--hardfork shanghai` or every `eth_call` fails with "Excess blob gas not set". Its EVM
+nevertheless EXECUTES Cancun opcodes - solc 0.8.28 defaults to cancun and emits MCOPY,
+which is how these contracts run at all. Forked at shanghai the tests failed consuming
+the whole block's gas, which is an invalid opcode and not a contract bug. Header
+support and opcode support are two different questions about a chain.
+
+Fork from `https://injectiveevm-rpc.polkachu.com`, not the sentry: that hostname is a
+load balancer whose nodes prune differently, measured and non-monotonically (500 and
+5,000 blocks back refused, 50,000 and 500,000 served), so a fork from it dies part way
+through on state it answered for a moment earlier.
+
+## The earlier three
 
 **This file named `0xD31966ef…` for two days after it stopped being the deployed one,
 and that is the failure worth recording here rather than quietly correcting.** Defects
@@ -24,11 +51,16 @@ fee, a per-wallet cap, a `token: address(0)` the factory never replaced - and ea
 meant a new factory, because these contracts are immutable by design. The document that
 tells the next person which address is live was not part of that loop.
 
-The superseded one, written out in full so an old note can be recognised:
+The superseded ones, written out in full so an old note can be recognised:
 
 ```
-superseded 0xD31966ef9d26C589996935359A567eeF9Ef1a59D     16,773 bytes of code
+superseded 0xD31966ef9d26C589996935359A567eeF9Ef1a59D     launch fee 0.2 INJ
+superseded 0x87f2991e84d9d98c8db5fd54019e6b302b765458     launch fee 0.2 INJ
+superseded 0x3D811414b3c578380B1D7D1a89D72907C22914c8     launch fee 0    (carried PAD)
 ```
+
+All three still hold code and still accept launches, and the first two still charge
+0.2 INJ. They carry V-01, V-03 and V-04 for good.
 
 It still holds code and still answers every call, which is what makes a stale address
 in a document dangerous rather than merely wrong: it is not a dead link, it is a
@@ -113,7 +145,7 @@ and why the trade card states which blocks it read.
 ## Verify it yourself
 
 ```bash
-cd evm && ./script/verify-deployment.sh 0x3D811414b3c578380B1D7D1a89D72907C22914c8
+cd evm && ./script/verify-deployment.sh 0xe24adc45439a787e38b10bFD4AD4f51B636a1B50
 ```
 
 ## What is still true

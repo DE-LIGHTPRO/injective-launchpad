@@ -53,17 +53,31 @@ test('the document names one current factory, and the superseded one is not it',
   assert.ok(current, 'the document no longer states a factory address');
 
   /*
-   * The stale address is kept in the document ON PURPOSE, labelled as superseded, so
-   * that somebody holding it from an old note can tell. This asserts it has not crept
-   * back into the `factory` line - which is the one a reader copies.
+   * The stale addresses are kept in the document ON PURPOSE, labelled as superseded,
+   * so that somebody holding one from an old note can tell. This asserts none has
+   * crept back into the `factory` line - which is the one a reader copies - and that
+   * each is still named somewhere.
+   *
+   * All three still hold code and still accept launches, and they carry V-01, V-03
+   * and V-04 permanently. A stale address here is not a dead link; it is a working
+   * launchpad running contracts with known defects.
    */
-  const stale = '0xD31966ef9d26C589996935359A567eeF9Ef1a59D';
-  assert.ok(DOC.includes(stale), 'the superseded factory is no longer named, so a stale note cannot be recognised');
-  assert.notEqual(
-    current[1].toLowerCase(),
-    stale.toLowerCase(),
-    'the document names the superseded factory as the live one',
-  );
+  const superseded = [
+    '0xD31966ef9d26C589996935359A567eeF9Ef1a59D',
+    '0x87f2991e84d9d98c8db5fd54019e6b302b765458',
+    '0x3D811414b3c578380B1D7D1a89D72907C22914c8',
+  ];
+  for (const stale of superseded) {
+    assert.ok(
+      DOC.toLowerCase().includes(stale.toLowerCase()),
+      `${stale} is no longer named, so a note holding it cannot be recognised as stale`,
+    );
+    assert.notEqual(
+      current[1].toLowerCase(),
+      stale.toLowerCase(),
+      'the document names a superseded factory as the live one',
+    );
+  }
 
   // And the verify command points at the current one, not at whatever it used to.
   const verify = /verify-deployment\.sh\s+(0x[0-9a-fA-F]{40})/.exec(DOC);
