@@ -108,6 +108,8 @@ export async function listEvmLaunches(limit = 100): Promise<Array<EvmLaunchRow &
 
 export interface EvmDetail {
   token: Address;
+  /** The ERC-20 ticker, so the detail can name the token the board names. */
+  symbol: string;
   creator: Address;
   lpReserve: bigint;
   rewardRoute: 'creator' | 'pool';
@@ -177,8 +179,15 @@ export async function getEvmDetail(curve: Address): Promise<EvmDetail> {
 
   const [virtualInj, virtualTokens, curveSupply, graduationTarget] = params;
 
+  // One extra call rather than a second round trip: the board already reads this and
+  // the detail must agree with it, or one page names a token and the other an address.
+  const symbol = await evmClient()
+    .readContract({ address: token, abi: ERC20_ABI, functionName: 'symbol' })
+    .catch(() => '');
+
   return {
     token,
+    symbol,
     creator,
     lpReserve,
     rewardRoute: Number(route) === 1 ? 'pool' : 'creator',

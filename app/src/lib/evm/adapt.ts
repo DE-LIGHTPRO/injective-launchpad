@@ -12,6 +12,7 @@ import type { Launch, LaunchDetail } from '../chain.ts';
 import { NO_RULES } from '../launchRules.ts';
 
 import { getEvmDetail, listEvmLaunches } from './read.ts';
+import { evmDenom } from './denom.ts';
 
 /**
  * A launch row.
@@ -28,7 +29,7 @@ export async function listLaunchesEvm(): Promise<Launch[]> {
   const rows = await listEvmLaunches();
   return rows.map((r) => ({
     id: r.id,
-    denom: r.symbol ? `evm/${r.token}/${r.symbol}` : r.token,
+    denom: evmDenom(r.token, r.symbol),
     creator: r.creator,
     curve: r.curve,
     /*
@@ -55,7 +56,12 @@ export async function getLaunchEvm(id: number): Promise<Launch | null> {
 export async function getLaunchDetailEvm(curveAddress: string): Promise<LaunchDetail> {
   const d = await getEvmDetail(curveAddress as Address);
   return {
-    denom: d.token,
+    /*
+     * THE SAME FORM THE BOARD USES. This returned the bare address, so the board
+     * said PAD and the launch page said 0x97bc…deEA about one token, and the page
+     * heading rendered the address uppercased as the token's name.
+     */
+    denom: evmDenom(d.token, d.symbol),
     quoteDenom: 'inj',
     creator: d.creator,
     lpReserve: d.lpReserve,

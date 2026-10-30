@@ -1191,6 +1191,16 @@ export async function listQuotes(): Promise<{ quotes: QuoteAsset[]; defaultDenom
  */
 export function denomLabel(denom: string): string {
   if (denom.startsWith('factory/')) return symbolOf(denom);
+  /*
+   * BEFORE the hex branch below, not after. An EVM denom is `evm/<address>/<SYMBOL>`
+   * and it contains an address, so the generic hex match claimed it first and every
+   * EVM token rendered as `0x97bc…deEA` - including as the launch page's heading,
+   * uppercased.
+   */
+  if (denom.startsWith('evm/')) {
+    const sym = denom.split('/')[2];
+    if (sym) return sym.toUpperCase();
+  }
   const hex = denom.match(/0x[0-9a-fA-F]{40}/)?.[0];
   if (hex) return `${hex.slice(0, 6)}…${hex.slice(-4)}`;
   if (denom.startsWith('ibc/')) return `IBC/${denom.slice(4, 10)}…`;
