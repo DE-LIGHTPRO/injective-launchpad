@@ -10,7 +10,7 @@ import {
   CURVE_SUPPLY_TOKENS,
   LP_RESERVE_TOKENS,
 } from '@/lib/launchLimits';
-import { FORM_MAX_EARLY_FEE_BPS, MAX_EARLY_FEE_BPS } from '@/lib/launchRules';
+import { MAX_EARLY_FEE_BPS } from '@/lib/launchRules';
 
 export const metadata: Metadata = {
   title: 'Risks',
@@ -107,9 +107,7 @@ export default function RisksPage() {
             buys, so leaving during the opening window costs more too. On a buy the
             amount above the base rate goes into the pool at graduation rather than to the
             creator or to us; on a sell the whole fee is split like any other. The launch
-            page quotes the fee in force at the moment you trade. Launches created here
-            are capped at {FORM_MAX_EARLY_FEE_BPS / 100}%, which is the most the deployed
-            curve can price.
+            page quotes the fee in force at the moment you trade.
           </li>
           <li>
             <strong>The launchpad never holds your funds.</strong> Trades settle

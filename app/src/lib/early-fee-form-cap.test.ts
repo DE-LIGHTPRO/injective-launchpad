@@ -1,21 +1,24 @@
 /**
- * The form will not create a launch the deployed curve cannot price.
+ * The form will not offer an opening fee the configured factory cannot price.
  *
- * V-01. `Curve._cfg(currentFeeBps())` folds the opening premium into `feeBps` and
- * hands it to `CurveMath.validate`, which refused anything over `MAX_FEE_BPS` of
- * 1,000. The factory accepts an opening fee up to 2,000, so a launch created with one
- * between 10.01% and 20% reverted every buy and every sell with `FeeTooHigh` until the
- * premium decayed under 10%: unusable for exactly the window the opening fee exists
- * for, accepted at creation without complaint, invisible until somebody traded.
- * Reproduced and pinned in `evm/test/EarlyFee.t.sol`.
+ * V-01, AND ITS MITIGATION BEING RETIRED. `Curve._cfg(currentFeeBps())` folds the
+ * opening premium into `feeBps` and hands it to `CurveMath.validate`, which on the
+ * old contracts refused anything over `MAX_FEE_BPS` of 1,000. The factory accepted an
+ * opening fee up to 2,000, so a launch created with one between 10.01% and 20%
+ * reverted every buy and every sell with `FeeTooHigh` until the premium decayed:
+ * unusable for exactly the window the opening fee exists for, accepted at creation
+ * without complaint, invisible until somebody traded.
  *
- * THE CONTRACT FIX IS IN SOURCE AND THE DEPLOYED FACTORY IS IMMUTABLE, which is the
- * whole reason this cap exists separately. `0x3D811414…` still carries the old
- * ceiling, so until a factory with the fix is deployed AND configured, this form must
- * refuse what that chain cannot price.
+ * While `0x3D811414…` was the configured factory this form capped at 10%, because it
+ * must not create what that chain could not trade. `0xe24adc45…` carries the fix -
+ * two ceilings for two questions - and `evm/test/DeployedFactory.t.sol` proves it
+ * against the DEPLOYED bytecode by creating a launch with a 15% opening fee and
+ * trading it. So the cap is back at the contract ceiling.
  *
- * Raise `FORM_MAX_EARLY_FEE_BPS` to `MAX_EARLY_FEE_BPS` when the new factory is live,
- * and not before.
+ * THE CONSTANT STAYS SEPARATE, equal rather than merged. "What the contracts permit"
+ * and "what this form offers" are different questions that happen to agree today, and
+ * the next time a deployed factory cannot do something the source can, this is where
+ * that gets said.
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -35,43 +38,40 @@ function problems(startBps: number) {
   );
 }
 
-test('the form cap is the rate the deployed curve can actually quote', () => {
+test('the form offers exactly what the contracts permit', () => {
+  assert.equal(FORM_MAX_EARLY_FEE_BPS, MAX_EARLY_FEE_BPS);
   /*
-   * Equal to the base-rate cap, because that is the ceiling the deployed
-   * `CurveMath.validate` applies to the EFFECTIVE rate. Stated as the relationship
-   * rather than as 1_000, so the reason survives the number.
+   * And that is ABOVE the standing-rate cap, which is the whole point of V-01's fix:
+   * an opening premium is allowed to exceed what a launch may charge as its ordinary
+   * rate, and the trade-time arithmetic has to accept it.
    */
-  assert.equal(FORM_MAX_EARLY_FEE_BPS, MAX_FEE_BPS);
   assert.ok(
-    FORM_MAX_EARLY_FEE_BPS < MAX_EARLY_FEE_BPS,
-    'the form cap has caught up with the contract ceiling; only do that once the fixed factory is live',
+    FORM_MAX_EARLY_FEE_BPS > MAX_FEE_BPS,
+    'the form cap has fallen back to the standing-rate cap, which was the V-01 mitigation',
   );
 });
 
-test('an opening fee the deployed curve would brick is refused by the form', () => {
-  // The boundary, both sides of it.
-  assert.deepEqual(problems(FORM_MAX_EARLY_FEE_BPS), [], 'the cap itself is refused');
-
-  const over = problems(FORM_MAX_EARLY_FEE_BPS + 1);
-  assert.equal(over.length, 1, 'one over the cap was accepted');
-  assert.equal(over[0].field, 'earlyFee');
-
+test('the range V-01 used to brick is now offered', () => {
   /*
-   * And the message says WHY, because "the most is 10%" reads as an arbitrary house
-   * rule. What a creator needs to know is that the launch would open untradeable.
+   * Every one of these was refused by the form while the old factory was configured,
+   * and every one of them bricked a launch on it. `DeployedFactory.t.sol` trades the
+   * middle of this range against the bytecode actually deployed.
    */
-  assert.match(over[0].message, /untradeable|cannot price/i);
-
-  // The whole range that used to be accepted and would have bricked the launch.
   for (const bps of [1_001, 1_500, MAX_EARLY_FEE_BPS]) {
-    assert.equal(problems(bps).length, 1, `an opening fee of ${bps} bps was accepted`);
+    assert.deepEqual(problems(bps), [], `an opening fee of ${bps} bps is still refused`);
   }
 });
 
-test('an opening fee at or below the cap is still allowed', () => {
-  for (const bps of [101, 500, 999, 1_000]) {
-    assert.deepEqual(problems(bps), [], `a legal opening fee of ${bps} bps was refused`);
-  }
-  // Still refused for the reason it always was: at or under the base rate it never applies.
+test('above the contract ceiling is still refused, and says why', () => {
+  const over = problems(MAX_EARLY_FEE_BPS + 1);
+  assert.equal(over.length, 1, 'an opening fee above what the contract accepts was allowed');
+  assert.equal(over[0].field, 'earlyFee');
+  assert.match(over[0].message, new RegExp(`${MAX_EARLY_FEE_BPS / 100}%`));
+});
+
+test('an opening fee at or under the base rate is still refused', () => {
+  // It would never apply, so storing it advertises a rule the launch does not have.
   assert.equal(problems(100).length, 1, 'an opening fee equal to the base rate was accepted');
+  assert.equal(problems(50).length, 1, 'an opening fee below the base rate was accepted');
+  assert.deepEqual(problems(101), [], 'one basis point above the base rate was refused');
 });

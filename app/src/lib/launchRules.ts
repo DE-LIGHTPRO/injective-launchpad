@@ -63,25 +63,25 @@ export const NO_RULES: LaunchRules = {
 export const MAX_EARLY_FEE_BPS = 2_000;
 
 /**
- * The most this FORM will let a creator set, which is lower than what the contract
- * permits, and deliberately.
+ * The most this FORM will let a creator set.
  *
- * V-01. The deployed EVM curve folds the opening premium into `feeBps` and hands it to
- * `CurveMath.validate`, which refused anything over 1,000 - so a launch created with
- * an opening fee between 10.01% and 20% reverted every buy and every sell until the
- * premium decayed under 10%. Unusable for exactly the window the opening fee exists
- * for, accepted by the factory without complaint, and invisible until somebody tried
- * to trade. Reproduced in `evm/test/EarlyFee.t.sol`.
+ * EQUAL TO THE CONTRACT CEILING AGAIN, because the factory the app points at can now
+ * price the whole range. It was lowered to 1,000 as a V-01 mitigation: the deployed
+ * curve folded the opening premium into `feeBps` and `CurveMath.validate` refused
+ * anything over 1,000, so a launch created with an opening fee between 10.01% and 20%
+ * reverted every buy and every sell until the premium decayed. The form could not
+ * create what that chain could not trade.
  *
- * The contract side is fixed - two ceilings for two questions - but the fix is in
- * source, and the factory at `0x3D811414…` is immutable. Until a factory carrying it
- * is deployed and configured, this form must not create a launch that chain cannot
- * price. 10% is the rate the deployed curve will actually quote.
+ * `0xe24adc45…` carries the fix - two ceilings for two questions - and is verified
+ * against its deployed bytecode in `evm/test/DeployedFactory.t.sol`, which creates a
+ * launch with a 15% opening fee and trades it. So the mitigation has done its job and
+ * is removed rather than left in place looking like a policy.
  *
- * RAISE THIS TO `MAX_EARLY_FEE_BPS` WHEN THE NEW FACTORY IS LIVE, not before, and
- * `app/src/lib/early-fee-form-cap.test.ts` is where the reason is written down.
+ * IT STAYS A SEPARATE CONSTANT, equal rather than merged. The two answer different
+ * questions - what the contracts permit, and what this form offers - and the next time
+ * a deployed factory cannot do something the source can, this is where that is said.
  */
-export const FORM_MAX_EARLY_FEE_BPS = 1_000;
+export const FORM_MAX_EARLY_FEE_BPS = MAX_EARLY_FEE_BPS;
 
 /**
  * The fee a buy pays right now, in bps.
