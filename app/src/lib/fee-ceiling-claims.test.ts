@@ -128,6 +128,26 @@ test('the risks page states the opening ceiling, not only the base cap', () => {
     'the page no longer says where the premium goes, so its 70/30 claim covers a ' +
       'portion that is not split',
   );
+
+  /*
+   * AND THAT IT APPLIES TO SELLS, which the page denied outright until
+   * `evm/test/EarlyFee.t.sol` proved otherwise. `currentSellFeeBps` runs the same
+   * schedule against the sell fee, so an early buyer who changes their mind pays the
+   * premium to leave - and there the whole fee is split creator/platform rather than
+   * held for the pool, so the sentence above it is wrong twice over for sells.
+   *
+   * A guard that checks only where the money goes will keep passing over copy that is
+   * wrong about who pays it.
+   */
+  assert.match(
+    text,
+    /applies to sells/,
+    'the risks page does not say the opening fee applies to sells, which it does',
+  );
+  assert.ok(
+    !/sells are not affected|sells are untouched/i.test(text),
+    'the risks page claims sells are unaffected by the opening fee, and they are not',
+  );
 });
 
 test('the premium still goes to the pool rather than the split', () => {

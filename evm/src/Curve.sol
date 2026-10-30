@@ -153,6 +153,8 @@ contract Curve is ReentrancyGuard {
     error TransferFailed();
     error ZeroAmount();
     error OverWalletCap(uint256 wanted, uint256 allowance);
+    /// V-04. Plain INJ sent to a curve would be unrecoverable, so it is refused.
+    error DirectTransfersRefused();
 
     struct Params {
         address token;
@@ -192,6 +194,24 @@ contract Curve is ReentrancyGuard {
         _FEE_SELL_BPS = p.feeSellBps;
         _EARLY_FEE_START_BPS = p.earlyFeeStartBps;
         _EARLY_FEE_SECS = p.earlyFeeSecs;
+
+        /*
+         * THE BASE RATES ARE CAPPED HERE, EXPLICITLY, and that is new.
+         *
+         * They used to be capped only as a side effect of `CurveMath.validate`, which
+         * checked `feeBps` against `MAX_FEE_BPS`. That same function is called at every
+         * trade with the EFFECTIVE rate - the base plus any opening premium - so the
+         * 10% ceiling meant for a standing rate was also refusing a legitimately
+         * elevated one, and bricked any launch whose opening fee the factory had
+         * accepted above 10% (V-01). Raising `validate` to the effective ceiling fixes
+         * that and would have let a 20% STANDING fee through, so the policy that
+         * `MAX_FEE_BPS` exists for is stated where it belongs: at creation, once, about
+         * the base rates.
+         */
+        if (p.feeBps > CurveMath.MAX_FEE_BPS) revert CurveMath.FeeTooHigh(p.feeBps, CurveMath.MAX_FEE_BPS);
+        if (p.feeSellBps > CurveMath.MAX_FEE_BPS) {
+            revert CurveMath.FeeTooHigh(p.feeSellBps, CurveMath.MAX_FEE_BPS);
+        }
 
         // Rejects an unreachable graduation target and a curve supply at or above the
         // virtual reserve, among others. Done here so a bad launch cannot exist.
@@ -504,23 +524,88 @@ contract Curve is ReentrancyGuard {
         uint256 toPlatform = platformOwed;
         if (toCreator == 0 && toPlatform == 0) revert NothingToClaim();
 
-        creatorOwed = 0;
-        platformOwed = 0;
-        creatorPaid += toCreator;
-        platformPaid += toPlatform;
+        /*
+         * V-03: ONE PARTY CANNOT HOLD THE OTHER'S MONEY HOSTAGE.
+         *
+         * This paid both in one transaction and `_pay` reverts on a failed send, so a
+         * recipient that cannot receive - a contract with no payable fallback, one
+         * whose fallback runs out of the 63/64 gas it is left, a creator address that
+         * later becomes a contract - took the whole claim down with it. Both
+         * destinations are fixed at creation and cannot be changed, so the other party
+         * had no recourse at all: their fees sat in the contract for good.
+         *
+         * Settled independently now. Each side is zeroed and sent on its own, and a
+         * failure on one leaves the other paid and its own balance intact to retry.
+         * Nothing is lost either way, because the accounting is reverted with the send.
+         */
+        bool paidCreator = _settle(CREATOR, toCreator, true);
+        bool paidPlatform = _settle(PLATFORM, toPlatform, false);
 
-        _pay(CREATOR, toCreator);
-        _pay(PLATFORM, toPlatform);
-        emit FeesClaimed(toCreator, toPlatform);
+        /*
+         * Both failing is a refusal, not a silent no-op. A transaction that moves
+         * nothing and reports success is the worst outcome available: the claim page
+         * would zero its rows on a confirmation that did nothing.
+         */
+        if (!paidCreator && !paidPlatform) revert TransferFailed();
+
+        emit FeesClaimed(paidCreator ? toCreator : 0, paidPlatform ? toPlatform : 0);
     }
 
     /**
-     * Accepts INJ sent directly, which is a donation and nothing else.
+     * Pay one side, and keep its accounting consistent whether or not it lands.
      *
-     * It is not credited to any reserve or to anyone's balance, because crediting it
-     * would let someone move the curve's price with a plain transfer. It simply
-     * raises the contract balance above what the accounting owes, which
-     * `scripts/verify-solvency` reports as a surplus rather than a defect.
+     * The owed figure is cleared BEFORE the send and restored if the send fails, so a
+     * recipient that re-enters finds nothing to claim - the same guarantee the single
+     * payout had, kept per side.
+     *
+     * Returns whether it paid, rather than reverting, which is the whole point: the
+     * caller needs the other side to go through regardless.
      */
-    receive() external payable {}
+    function _settle(address to, uint256 amount, bool isCreator) private returns (bool) {
+        if (amount == 0) return false;
+
+        if (isCreator) {
+            creatorOwed = 0;
+            creatorPaid += amount;
+        } else {
+            platformOwed = 0;
+            platformPaid += amount;
+        }
+
+        (bool ok,) = to.call{value: amount}("");
+        if (!ok) {
+            // Put it back exactly as it was. The money never left.
+            if (isCreator) {
+                creatorOwed = amount;
+                creatorPaid -= amount;
+            } else {
+                platformOwed = amount;
+                platformPaid -= amount;
+            }
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * V-04: PLAIN INJ IS REFUSED, because accepting it loses it.
+     *
+     * This used to accept a bare transfer and call it a donation. Nobody donates to a
+     * bonding curve. What actually happens is somebody pastes the curve's address into
+     * a wallet's send screen - the address the launch page shows them, next to a Copy
+     * button - and the INJ arrives, is credited to no reserve and no balance, and
+     * cannot be recovered by anyone, because there is no function that moves it.
+     *
+     * The old comment was right that crediting it would be worse: a plain transfer
+     * that moved the price would be a way to trade without the slippage guard. But
+     * those are not the only two options. Refusing costs the sender their gas and
+     * nothing else, and the wallet shows them a failed transaction instead of a
+     * successful one that took their money.
+     *
+     * `buy()` is `payable` and unaffected: this is the fallback for value arriving
+     * with no call behind it.
+     */
+    receive() external payable {
+        revert DirectTransfersRefused();
+    }
 }

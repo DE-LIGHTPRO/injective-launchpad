@@ -63,6 +63,27 @@ export const NO_RULES: LaunchRules = {
 export const MAX_EARLY_FEE_BPS = 2_000;
 
 /**
+ * The most this FORM will let a creator set, which is lower than what the contract
+ * permits, and deliberately.
+ *
+ * V-01. The deployed EVM curve folds the opening premium into `feeBps` and hands it to
+ * `CurveMath.validate`, which refused anything over 1,000 - so a launch created with
+ * an opening fee between 10.01% and 20% reverted every buy and every sell until the
+ * premium decayed under 10%. Unusable for exactly the window the opening fee exists
+ * for, accepted by the factory without complaint, and invisible until somebody tried
+ * to trade. Reproduced in `evm/test/EarlyFee.t.sol`.
+ *
+ * The contract side is fixed - two ceilings for two questions - but the fix is in
+ * source, and the factory at `0x3D811414…` is immutable. Until a factory carrying it
+ * is deployed and configured, this form must not create a launch that chain cannot
+ * price. 10% is the rate the deployed curve will actually quote.
+ *
+ * RAISE THIS TO `MAX_EARLY_FEE_BPS` WHEN THE NEW FACTORY IS LIVE, not before, and
+ * `app/src/lib/early-fee-form-cap.test.ts` is where the reason is written down.
+ */
+export const FORM_MAX_EARLY_FEE_BPS = 1_000;
+
+/**
  * The fee a buy pays right now, in bps.
  *
  * Mirrors `EarlyFee::bps_at`, including rounding DOWN, because a client figure that
@@ -211,10 +232,10 @@ export function validateRules(
         field: 'earlyFee',
         message: `An opening fee has to be above the trading fee of ${(baseFeeBps / 100).toFixed(2)}%, or it never applies.`,
       });
-    } else if (ef.startBps > MAX_EARLY_FEE_BPS) {
+    } else if (ef.startBps > FORM_MAX_EARLY_FEE_BPS) {
       out.push({
         field: 'earlyFee',
-        message: `The most an opening fee can be is ${MAX_EARLY_FEE_BPS / 100}%.`,
+        message: `The most an opening fee can be is ${FORM_MAX_EARLY_FEE_BPS / 100}%. Above that the curve cannot price a trade until the fee has decayed, so the launch would open untradeable.`,
       });
     } else if (!Number.isFinite(ef.seconds) || ef.seconds <= 0) {
       out.push({ field: 'earlyFee', message: 'Give the opening fee a window to fall over.' });
@@ -334,7 +355,14 @@ export function describeRules(
      * It is a stronger claim than a disclosure and it costs nothing to keep.
      */
     lines.push(
-      `Buys in the first ${window} pay up to ${(rules.earlyFee.startBps / 100).toFixed(2)}%, falling to the curve's own fee. No wallet is exempt, including the creator's. The extra goes into the pool at graduation, not to the creator. Sells are not affected.`,
+      /*
+       * "SELLS ARE NOT AFFECTED" WAS FALSE, and this was one of three places saying
+       * it. `currentSellFeeBps` builds the same schedule against the sell fee, so the
+       * premium is charged on the way out too - and unlike the buy side's premium, it
+       * is split creator/platform like any ordinary fee rather than held for the pool.
+       * Both halves proven in `evm/test/EarlyFee.t.sol`.
+       */
+      `Trades in the first ${window} pay up to ${(rules.earlyFee.startBps / 100).toFixed(2)}%, falling to the curve's own fee. No wallet is exempt, including the creator's. It applies to sells as well as buys, so leaving early costs more too. On a buy the amount above the curve's own rate goes into the pool at graduation, not to the creator; on a sell the whole fee is split like any other.`,
     );
   }
 

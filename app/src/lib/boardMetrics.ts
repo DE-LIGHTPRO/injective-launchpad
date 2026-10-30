@@ -86,9 +86,32 @@ export function ageLabel(openedAtSeconds: number | null, nowSeconds: number): st
  * adding a second number here would read as two.
  */
 export function feeLabel(feeBps: bigint): string {
+  return `${feePct(feeBps)} fee`;
+}
+
+/** A fee rate as a percentage, trailing zeros dropped: "1%" rather than "1.00%". */
+export function feePct(feeBps: bigint): string {
   const pct = Number(feeBps) / 100;
-  // Trailing zeros dropped: "1%" rather than "1.00%", because this is a badge.
-  return `${pct % 1 === 0 ? pct.toFixed(0) : pct.toFixed(2)}% fee`;
+  return `${pct % 1 === 0 ? pct.toFixed(0) : pct.toFixed(2)}%`;
+}
+
+/**
+ * The two fee rates a launch actually charges, as one label.
+ *
+ * ONE NUMBER WAS SHOWN WHERE THERE ARE TWO, and on the live launch they differ by
+ * five times. PAD is `feeBps` 100 and `feeSellBps` 500, read off the chain: the
+ * header said "Trading fee 1%" while every sell cost 5%. The trade panel was right
+ * and the headline was wrong, which is the worse way round - a reader checks the
+ * headline and does not go looking for a second figure they have no reason to think
+ * exists.
+ *
+ * Collapsed to one figure only when the two are equal, which is the common case and
+ * the only case where a single number is true.
+ */
+export function buySellFeeLabel(feeBps: bigint, feeSellBps: bigint): string {
+  return feeBps === feeSellBps
+    ? feePct(feeBps)
+    : `${feePct(feeBps)} buy / ${feePct(feeSellBps)} sell`;
 }
 
 export interface BoardTotals {

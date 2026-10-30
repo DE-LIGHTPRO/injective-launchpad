@@ -15,7 +15,7 @@ import { ArrowLeftIcon } from '@/components/Icons';
 import { TokenLogo } from '@/components/TokenLogo';
 import { visibleLinks } from '@/lib/tokenProfile';
 import { describeRules, hasAnyRule } from '@/lib/launchRules';
-import { marketCap, compact, feeLabel, ageLabel } from '@/lib/boardMetrics';
+import { marketCap, compact, buySellFeeLabel, ageLabel } from '@/lib/boardMetrics';
 import { addressName } from '@/lib/addressName';
 import { StatusChip } from '@/components/StatusChip';
 import { CreatorPosition } from '@/components/CreatorPosition';
@@ -496,8 +496,19 @@ export default async function LaunchPage({ params }: { params: Promise<{ slug: s
           </span>
         </div>
         <div>
-          <span className="k">Trading fee</span>
-          <span className="v mono">{feeLabel(detail.config.feeBps).replace(' fee', '')}</span>
+          {/*
+              BOTH RATES, because a launch has two and they are not the same. PAD
+              charges 1% to buy and 5% to sell; this said "Trading fee 1%". The trade
+              panel quotes the right one on each side, so the only thing that was
+              wrong was the headline - which is the figure a reader checks and the one
+              they have no reason to doubt.
+            */}
+          <span className="k">
+            {detail.config.feeBps === detail.config.feeSellBps ? 'Trading fee' : 'Trading fees'}
+          </span>
+          <span className="v mono">
+            {buySellFeeLabel(detail.config.feeBps, detail.config.feeSellBps)}
+          </span>
         </div>
         <div>
           <span className="k">Age</span>

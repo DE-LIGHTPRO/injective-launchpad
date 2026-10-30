@@ -4,6 +4,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   quoteBuy,
   quoteBuyWithPremium,
+  quoteBuyAtEffectiveFee,
+  quoteSellAtEffectiveFee,
   priceImpactBps,
   sellPriceImpactBps,
   IMPACT_WARN_BPS,
@@ -292,6 +294,11 @@ export function TradePanel({
    */
   const baseBps = Number(config.feeBps);
   /*
+   * The SELL base rate, which is a different number. PAD charges 1% to buy and 5% to
+   * sell, so a premium added to the buy rate is the wrong figure on the way out.
+   */
+  const baseSellBps = Number(config.feeSellBps);
+  /*
    * The exit rate is not read here any more. It reached the screen as a label beside
    * an amount it was meant to describe, and both sides of that row now come from the
    * amounts themselves: `config.feeSellBps` goes into the quote, and the rate shown
@@ -329,14 +336,25 @@ export function TradePanel({
       const raw = parseAmount(input, inputDecimals);
       if (raw <= 0n) return null;
       /*
-       * The premium comes off the top before the curve is quoted, exactly as the
-       * contract does it. Folding it into `config.feeBps` would be the other way to
-       * write this and it is the one the maths crate refuses, since its own fee cap
-       * is below what an opening fee is meant to reach.
+       * TWO BACKENDS CHARGE THE OPENING FEE TWO DIFFERENT WAYS, and this panel knew
+       * only one of them.
        *
-       * Sells are untouched: the rule is a charge for taking the opening, not an exit
-       * tax, and applying it to sells would punish an early buyer for changing their
-       * mind.
+       * On CosmWasm the premium comes off the top before the curve is quoted, which is
+       * what `quoteBuyWithPremium` implements and what the comment here used to
+       * describe as "exactly as the contract does it".
+       *
+       * On the EVM side `Curve._cfg(currentFeeBps())` folds the premium INTO `feeBps`
+       * and quotes once. The two are not the same arithmetic: off the top leaves
+       * `(1 - p)(1 - b)` of the input, folded in leaves `1 - p - b`, and the panel's is
+       * always the larger. `min_tokens_out` comes off the panel's figure, so the
+       * contract refuses the difference as slippage.
+       *
+       * AND SELLS WERE QUOTED WITH NO PREMIUM AT ALL. `currentSellFeeBps` builds the
+       * same schedule against the sell fee, so the contract charges it on the way out
+       * too - proven in `evm/test/EarlyFee.t.sol`. This panel quoted the base rate, so
+       * on any launch with an opening fee every sell quote was wrong and every
+       * `min_inj_out` derived from it too high. Three places in the interface also said
+       * sells were unaffected; they have been corrected.
        */
       if (inPool && pool) {
         return side === 'buy'
@@ -358,6 +376,29 @@ export function TradePanel({
           // not expire at graduation, and the contract charges it on both venues.
           : ({ ok: true, side: 'sell', ...poolQuoteSell(pool, config.feeSellBps, raw) } as const);
       }
+      /*
+       * The EVM path quotes the way that chain's contract does: one quote at the
+       * effective rate, both sides. `chargedBps` already carries base plus premium.
+       */
+      if (isEvm()) {
+        return side === 'buy'
+          ? ({
+              ok: true,
+              side: 'buy',
+              ...quoteBuyAtEffectiveFee(config, state, raw, BigInt(chargedBps)),
+            } as const)
+          : ({
+              ok: true,
+              side: 'sell',
+              ...quoteSellAtEffectiveFee(
+                config,
+                state,
+                raw,
+                BigInt(baseSellBps + premiumBps),
+              ),
+            } as const);
+      }
+
       return side === 'buy'
         ? ({
             ok: true,
@@ -378,7 +419,7 @@ export function TradePanel({
         error: e instanceof CurveError ? e.message : 'That amount could not be quoted.',
       } as const;
     }
-  }, [input, side, config, state, premiumBps, inputDecimals, inPool, pool]);
+  }, [input, side, config, state, premiumBps, chargedBps, baseSellBps, inputDecimals, inPool, pool]);
 
   /*
    * The fee row's two halves, derived from ONE place so they cannot disagree.
@@ -768,8 +809,10 @@ export function TradePanel({
               {decaySecondsLeft >= 60
                 ? `${Math.ceil(decaySecondsLeft / 60)} min`
                 : `${decaySecondsLeft}s`}
-              . It goes into the pool at graduation, not to the creator, and sells are
-              not affected.
+              . On a buy the part above the curve&rsquo;s own rate goes into the pool
+              at graduation rather than to the creator. It applies to sells too: the
+              same schedule runs against the exit fee, so leaving early costs more as
+              well.
             </p>
           )}
                     {(

@@ -221,6 +221,60 @@ export interface PremiumBuyQuote extends BuyQuote {
  * component's arithmetic was out of reach of every test, which is the same reason
  * `stateAtRaised` was lifted out of `CurveExplorer`.
  */
+/**
+ * A quote at the EFFECTIVE fee rate, which is how the EVM contract charges.
+ *
+ * TWO BACKENDS, TWO ARITHMETICS, and the panel knew only one. On CosmWasm the opening
+ * premium is taken off the input before the curve is quoted, which is
+ * `quoteBuyWithPremium` above. On the EVM side `Curve._cfg(currentFeeBps())` folds the
+ * premium into `feeBps` and quotes once. Off the top leaves `(1 - p)(1 - b)` of the
+ * input; folded in leaves `1 - p - b`. The first is always larger, `min_tokens_out`
+ * comes off the panel's figure, and the contract refuses the difference as slippage.
+ *
+ * AND THE SELL SIDE WAS QUOTED AT THE BASE RATE WITH NO PREMIUM AT ALL.
+ * `currentSellFeeBps` builds the same schedule against the sell fee, proven in
+ * `evm/test/EarlyFee.t.sol`, so on a launch with an opening fee every sell quote was
+ * wrong by the whole premium.
+ *
+ * HERE RATHER THAN IN THE COMPONENT, which is not a style choice: `early-fee-basis`
+ * fails the build if `TradePanel` does premium arithmetic of its own. That guard was
+ * written because the panel's own expression charged the premium on quote the curve
+ * hands straight back, and nothing could see it. It caught this change too.
+ *
+ * `earlyFeePremium` is reported for the fee breakdown, which names the premium apart
+ * from the curve's own rate. It is the share of the total fee attributable to the
+ * premium, not a separate charge: folded in, there is only one deduction.
+ */
+export function quoteBuyAtEffectiveFee(
+  cfg: CurveConfig,
+  st: CurveState,
+  injIn: bigint,
+  effectiveBps: bigint,
+): PremiumBuyQuote {
+  if (effectiveBps < cfg.feeBps) throw new CurveError('effective fee below the base rate');
+  const q = quoteBuy({ ...cfg, feeBps: effectiveBps }, st, injIn);
+  const premiumBps = effectiveBps - cfg.feeBps;
+  /*
+   * Apportioned from the fee the quote actually charged, not recomputed from the
+   * input: the fee is taken on what the curve absorbed, so a buy that overshoots and
+   * is partly refunded pays the premium on the spent part only. Recomputing from
+   * `injIn` is the defect `quoteBuyWithPremium` records being fixed.
+   */
+  const premium = effectiveBps === 0n ? 0n : (q.fee * premiumBps) / effectiveBps;
+  return { ...q, earlyFeePremium: premium };
+}
+
+/** The sell side of the same thing. See `quoteBuyAtEffectiveFee`. */
+export function quoteSellAtEffectiveFee(
+  cfg: CurveConfig,
+  st: CurveState,
+  tokensIn: bigint,
+  effectiveSellBps: bigint,
+) {
+  if (effectiveSellBps < cfg.feeSellBps) throw new CurveError('effective fee below the base rate');
+  return quoteSell({ ...cfg, feeSellBps: effectiveSellBps }, st, tokensIn);
+}
+
 export function quoteBuyWithPremium(
   cfg: CurveConfig,
   st: CurveState,

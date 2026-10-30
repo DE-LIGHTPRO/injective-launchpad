@@ -10,7 +10,7 @@ import {
   CURVE_SUPPLY_TOKENS,
   LP_RESERVE_TOKENS,
 } from '@/lib/launchLimits';
-import { MAX_EARLY_FEE_BPS } from '@/lib/launchRules';
+import { FORM_MAX_EARLY_FEE_BPS, MAX_EARLY_FEE_BPS } from '@/lib/launchRules';
 
 export const metadata: Metadata = {
   title: 'Risks',
@@ -103,10 +103,13 @@ export default function RisksPage() {
             A launch may start with a fee above its own rate, falling to that rate over a
             window it fixes at creation. That ceiling is deliberately double the{' '}
             {MAX_FEE_BPS / 100}% cap on the base rate, so being first is not free. Every
-            wallet pays it, including the creator&rsquo;s, sells are not affected, and the
+            wallet pays it, including the creator&rsquo;s. It applies to sells as well as
+            buys, so leaving during the opening window costs more too. On a buy the
             amount above the base rate goes into the pool at graduation rather than to the
-            creator or to us. The launch page quotes the fee in force at the moment you
-            buy.
+            creator or to us; on a sell the whole fee is split like any other. The launch
+            page quotes the fee in force at the moment you trade. Launches created here
+            are capped at {FORM_MAX_EARLY_FEE_BPS / 100}%, which is the most the deployed
+            curve can price.
           </li>
           <li>
             <strong>The launchpad never holds your funds.</strong> Trades settle

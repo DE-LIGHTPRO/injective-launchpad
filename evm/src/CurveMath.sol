@@ -34,8 +34,35 @@ library CurveMath {
     /// Basis points denominator. 100 bps = 1%.
     uint256 internal constant BPS_DENOM = 10_000;
 
-    /// A launchpad taking more than 10% is a rug with extra steps.
+    /**
+     * The most a launch's BASE rate may be. A launchpad taking more than 10% is a rug
+     * with extra steps.
+     *
+     * A CREATION-TIME POLICY, enforced by the factory. It is deliberately not what
+     * `validate` checks any more - see `MAX_EFFECTIVE_FEE_BPS`.
+     */
     uint256 internal constant MAX_FEE_BPS = 1_000;
+
+    /**
+     * The most the fee IN FORCE may be at the moment of a trade, premium included.
+     *
+     * V-01. `validate` used to check the effective rate against `MAX_FEE_BPS`, and
+     * `Curve._cfg(currentFeeBps())` folds an opening premium INTO `feeBps` before
+     * calling it. The factory accepts an opening fee up to `EarlyFee.MAX_EARLY_FEE_BPS`
+     * of 2,000, so a launch created with one between 1,001 and 2,000 reverted every
+     * buy and every sell with `FeeTooHigh` until the premium decayed under 1,000 -
+     * unusable for exactly the window the opening fee exists for, and nothing at
+     * creation said a word. `test/EarlyFee.t.sol` reproduces it and pins the boundary.
+     *
+     * Two caps for two different questions. What a launch may CHARGE as its standing
+     * rate is a policy about rugs and stays at 10%. What the arithmetic may PRICE is a
+     * question about overflow and sanity, and refusing a rate the factory itself
+     * permitted is the bug rather than the protection.
+     *
+     * Tied to the creation ceiling rather than restated, so raising one cannot leave
+     * the other behind - which is the whole shape of this defect.
+     */
+    uint256 internal constant MAX_EFFECTIVE_FEE_BPS = 2_000;
 
     /// Mirrors Rust's `to_u128` boundary: amounts are u128 in the spec.
     uint256 internal constant MAX_AMOUNT = type(uint128).max;
@@ -147,7 +174,11 @@ library CurveMath {
 
     function validate(Config memory cfg) internal pure {
         if (cfg.virtualInj == 0 || cfg.virtualTokens == 0) revert ZeroVirtualReserve();
-        if (cfg.feeBps > MAX_FEE_BPS) revert FeeTooHigh(cfg.feeBps, MAX_FEE_BPS);
+        /*
+         * The EFFECTIVE rate, which may carry an opening premium. The base rate is
+         * capped at `MAX_FEE_BPS` by the factory at creation; see the note there.
+         */
+        if (cfg.feeBps > MAX_EFFECTIVE_FEE_BPS) revert FeeTooHigh(cfg.feeBps, MAX_EFFECTIVE_FEE_BPS);
         // Strictly less: at curveSupply == virtualTokens the reserve hits zero and
         // the curve divides by zero at the asymptote.
         if (cfg.curveSupply >= cfg.virtualTokens) {

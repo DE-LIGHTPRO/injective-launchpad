@@ -321,6 +321,8 @@ export const CURVE_ABI = [
    * renamed there fails rather than silently going generic in `errors.ts`.
    */
   { type: 'error', name: 'NotReady', inputs: [] },
+  /* V-04. Plain INJ sent to a curve would be unrecoverable, so the curve refuses it. */
+  { type: 'error', name: 'DirectTransfersRefused', inputs: [] },
   { type: 'error', name: 'AlreadyGraduated', inputs: [] },
   { type: 'error', name: 'NotStarted', inputs: [] },
   {

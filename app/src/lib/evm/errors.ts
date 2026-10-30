@@ -210,6 +210,17 @@ export function describeEvmFailure(e: unknown): EvmFailure {
   if (named('InsufficientCurveSupply')) {
     return out('There is not enough left on the curve to fill that. Try a smaller amount.');
   }
+  if (named('DirectTransfersRefused')) {
+    /*
+     * V-04. The curve refuses a bare transfer because accepting one loses it: it is
+     * credited to no reserve and no balance, and no function can move it out again.
+     * Someone reaching this has pasted the curve's address into a send screen, so the
+     * sentence names what to do instead rather than only what went wrong.
+     */
+    return out(
+      'A launch contract cannot be sent INJ directly. Nothing was taken. Use the Buy panel on the launch page, which is the only way to put INJ into a curve.',
+    );
+  }
   if (named('TransferFailed')) {
     return out('The token transfer was refused. Nothing was spent beyond the fee.');
   }

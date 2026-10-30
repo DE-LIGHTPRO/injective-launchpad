@@ -272,7 +272,37 @@ test('the opening fee says where the money goes', () => {
   const text = lines.join(' ').toLowerCase();
   assert.match(text, /pool/, 'the copy does not say where the premium goes');
   assert.match(text, /not to the creator/, 'the copy does not rule out the creator');
-  assert.match(text, /sells are not affected/, 'the copy does not say this is buys only');
+
+  /*
+   * AND THE SELL SIDE, which this guard did not ask about and the copy therefore got
+   * wrong for a long time. `currentSellFeeBps` runs the same schedule against the sell
+   * fee, so the premium is charged on the way out too - and there it is split
+   * creator/platform like any ordinary fee rather than held for the pool. The copy
+   * said flatly "Sells are not affected", in three places, and this test was happy.
+   *
+   * A guard that encodes a claim is worth exactly what the claim is worth. Both facts
+   * are proven in `evm/test/EarlyFee.t.sol`.
+   */
+  assert.match(
+    text,
+    /applies to sells/,
+    'the copy does not say the opening fee applies to sells, which it does',
+  );
+  assert.ok(
+    !/sells are not affected|sells are untouched/.test(text),
+    'the copy claims sells are unaffected by the opening fee, and they are not',
+  );
+  /*
+   * THE ASSERTION THAT USED TO BE HERE REQUIRED THE FALSE CLAIM:
+   *
+   *     assert.match(text, /sells are not affected/, 'the copy does not say this is buys only');
+   *
+   * It is deleted rather than relaxed. The copy said sells were unaffected because
+   * this line insisted on it, and the contract has charged the opening fee on sells
+   * the whole time. A guard pointed at the wrong fact does not merely fail to catch a
+   * defect - it holds the defect in place and makes removing it look like a
+   * regression. The two assertions above replace it with what is actually true.
+   */
 });
 
 test('the opening fee says no wallet is exempt, which is a claim Pons cannot make', () => {

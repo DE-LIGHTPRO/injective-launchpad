@@ -791,9 +791,24 @@ export function CreateLaunch() {
               <span className="mono">{FIXED_TOTAL_SUPPLY_TOKENS.toLocaleString('en-US')}</span>
               <span className="chip chip-sm muted">fixed</span>
             </div>
+            {/*
+                "THE SAME CURVE" IS A CLAIM ABOUT THE FACTORY AND IT IS NOT TRUE OF IT.
+                The supply really is fixed: `CURVE_SUPPLY` and `LP_RESERVE` are factory
+                constants and no caller can change them. The CURVE is not. `createLaunch`
+                takes `virtualInj` and `graduationTarget` as parameters, and the live PAD
+                launch uses 30 and 85 INJ against this form's 676 and 1,915 - so the one
+                launch on the board is the counterexample to the sentence under the form
+                that made it.
+                
+                What this form offers is a DEFAULT, and the honest version says so. The
+                alternative was enforcing it in the factory, which would make the sentence
+                true and also take away a parameter launches are already using.
+              */}
             <p className="note">
-              Every launch here has the same supply and the same curve, so prices and
-              market caps on the board are directly comparable.
+              The supply is the same for every launch here and cannot be changed. This
+              form also fills in one curve shape for everyone, which is what makes prices
+              and market caps comparable across launches that use it - but the contract
+              accepts other shapes, so a launch created another way may not line up.
             </p>
           </div>
           <div className="field">
@@ -856,8 +871,8 @@ export function CreateLaunch() {
                 {Math.round(openingMarketCap(openingReserve)).toLocaleString('en-US')}{' '}
                 {quoteLabel}
               </span>
-              . Every launch opens at the same price, so being early on one is worth what
-              it is worth on any other.
+              . Every launch created from this form opens at the same price, so being
+              early on one is worth what it is worth on any other.
             </p>
           </div>
         </div>

@@ -106,8 +106,17 @@ library EarlyFee {
         uint256 secs;
     }
 
-    /// Mirrors `MAX_EARLY_FEE_BPS` in the Rust.
-    uint256 internal constant MAX_EARLY_FEE_BPS = 2_000;
+    /**
+     * The most an opening fee may start at. Mirrors `MAX_EARLY_FEE_BPS` in the Rust.
+     *
+     * IT IS THE TRADE-TIME CEILING, not a second number that happens to match. The
+     * factory checks a new launch's opening fee against this; `CurveMath.validate`
+     * checks the rate in force at every trade against that. They were two literals of
+     * 2,000 and 1,000 in two files, and the gap between them was V-01: a launch the
+     * factory created and the curve would not price. Written as one reference so the
+     * gap cannot reopen by someone raising a number in one file.
+     */
+    uint256 internal constant MAX_EARLY_FEE_BPS = CurveMath.MAX_EFFECTIVE_FEE_BPS;
 
     function bpsAt(Schedule memory s, uint256 baseBps, uint256 elapsedSecs)
         internal
