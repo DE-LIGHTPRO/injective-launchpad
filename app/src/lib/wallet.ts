@@ -484,10 +484,21 @@ export async function connect(name: WalletName): Promise<WalletAccount> {
       if (/No EVM wallet found/i.test(msg)) {
         throw new WalletError('absent', 'No EVM wallet found in this browser.');
       }
-      if (/4902|unrecognized chain|unrecognised chain|chain.*not.*added/i.test(msg)) {
+      /*
+       * THE COPY SAID "COULD NOT ADD" ABOUT AN ADD THAT NEVER RAN. `ensureEvmChain`
+       * rethrew the SWITCH's 4902 because it tested one property for the code, so the
+       * add below it was never reached - and this sentence told the user their wallet
+       * had refused it, with the switch's error attached as the evidence. Both halves
+       * wrong from one missed property.
+       *
+       * Now the add is genuinely attempted, so reaching here means the wallet would
+       * neither switch nor add. The sentence says that, and gives the values rather
+       * than leaving "manually" as an instruction with no data behind it.
+       */
+      if (/could not switch to chain|4902|unrecogni[sz]ed chain|chain.*not.*added/i.test(msg)) {
         throw new WalletError(
           'wrong-chain',
-          `This wallet could not add Injective EVM (chain ${NETWORK.chainId}). Add it manually, then try again.`,
+          `This wallet would not switch to Injective EVM and would not add it. Add it by hand - chain ID ${NETWORK.chainId}, RPC ${NETWORK.lcd}, currency INJ with 18 decimals - then connect again.`,
           msg,
         );
       }

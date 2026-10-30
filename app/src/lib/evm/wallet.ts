@@ -16,7 +16,14 @@
 import { createWalletClient, custom, getAddress, type Address, type WalletClient } from 'viem';
 
 import { NETWORK } from '../config.ts';
-import { evmProvider, identifyEvmProvider, type Eip1193 } from './provider.ts';
+import {
+  evmProvider,
+  identifyEvmProvider,
+  isUnrecognisedChain,
+  isUserRejection,
+  providerErrorText,
+  type Eip1193,
+} from './provider.ts';
 import { evmChain } from './read.ts';
 
 export { evmWalletAvailable, onEvmAccountChange } from './provider.ts';
@@ -45,18 +52,42 @@ export async function ensureEvmChain(p: Eip1193): Promise<void> {
     await p.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: target }] });
     return;
   } catch (e) {
-    if ((e as { code?: number }).code !== 4902) throw e;
+    /*
+     * `isUnrecognisedChain`, NOT `e.code === 4902`, and that one property cost a user
+     * the whole connect flow. MetaMask on the live site answered the switch with
+     *
+     *     Unrecognized chain ID "0x6f0". Try adding the chain using
+     *     wallet_switchEthereumChain first.
+     *
+     * and the code was not findable at `e.code`, so this rethrew and
+     * `wallet_addEthereumChain` below was never called. The user was then shown "This
+     * wallet could not add Injective EVM" about an add that never happened, with the
+     * SWITCH's error underneath it as the evidence.
+     */
+    if (!isUnrecognisedChain(e)) throw e;
   }
 
+  /*
+   * THE REGISTRY'S OWN VALUES, not ours. chainid.network lists 1776 as `Injective`
+   * with `https://blockscout.injective.network`; we call it "Injective EVM" in the
+   * interface and link transactions to injscan, which are our choices to make about
+   * our own UI and not about an entry in the user's wallet. MetaMask ships 1776 in
+   * its network list, and an add whose name or explorer conflicts with its canonical
+   * entry is a refusal we would have caused ourselves.
+   *
+   * `NETWORK.explorer` stays injscan for the links on this site. The two differ on
+   * purpose, which is why the canonical values are written here rather than read from
+   * the network config.
+   */
   await p.request({
     method: 'wallet_addEthereumChain',
     params: [
       {
         chainId: target,
-        chainName: evmChain().name,
+        chainName: 'Injective',
         nativeCurrency: evmChain().nativeCurrency,
         rpcUrls: [NETWORK.lcd],
-        blockExplorerUrls: [NETWORK.explorer],
+        blockExplorerUrls: ['https://blockscout.injective.network'],
       },
     ],
   });
@@ -116,8 +147,22 @@ export async function connectEvm(): Promise<Address> {
    * The chain is ensured AFTER the account, and the order matters: a locked wallet
    * answers neither, and asking for the chain first produces an error about networks
    * for what is really a locked extension.
+   *
+   * CLASSIFIED HERE, because it was not classified anywhere. This call sat outside the
+   * try above, so everything it threw reached `wallet.ts` as a raw provider error - and
+   * that file only recognises a rejection by the exact marker string this function
+   * throws, never by a code. So a user who pressed Cancel on MetaMask's add-network
+   * prompt was told their wallet could not add the network, which blames the wallet
+   * for their decision.
    */
-  await ensureEvmChain(p);
+  try {
+    await ensureEvmChain(p);
+  } catch (e) {
+    if (isUserRejection(e)) throw new Error('rejected');
+    throw new Error(
+      `could not switch to chain ${NETWORK.chainId}: ${providerErrorText(e) || String(e)}`,
+    );
+  }
   return first;
 }
 
