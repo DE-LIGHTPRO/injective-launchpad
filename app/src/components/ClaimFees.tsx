@@ -57,6 +57,21 @@ export function ClaimFees() {
   const [rows, setRows] = useState<Claimable[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  /*
+   * Bumped after every claim ATTEMPT, so the owed figures come back from the chain
+   * rather than from what this page believed.
+   *
+   * ON THE EVM BACKEND A BATCH IS NOT ATOMIC. The CosmWasm path sends one
+   * transaction, so zeroing every row on a confirmation is exactly right and a
+   * refusal means nothing moved. Here each claim is its own transaction, so a failure
+   * on the third leaves the first two claimed - and the optimistic zero below is
+   * skipped on a failure, which would then leave two rows showing money that has
+   * already been paid out. Re-reading is the only honest answer: the chain knows.
+   *
+   * On a confirmation too, because the optimistic zero is a placeholder for the real
+   * read, not a substitute for it.
+   */
+  const [settled, setSettled] = useState(0);
   const tx = useTxFlow();
 
   useEffect(() => {
@@ -123,7 +138,7 @@ export function ClaimFees() {
     return () => {
       live = false;
     };
-  }, [account]);
+  }, [account, settled]);
 
   /*
    * The selection lives in `lib/claimable.ts`, where tests can reach it. It decides
@@ -166,6 +181,8 @@ export function ClaimFees() {
       }
     } finally {
       setBusy(false);
+      // Whatever happened, re-read. See `settled`.
+      setSettled((n) => n + 1);
     }
   }
 

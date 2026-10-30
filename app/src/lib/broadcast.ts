@@ -7,7 +7,7 @@ import {
   createTransaction,
   ChainRestAuthApi,
 } from '@injectivelabs/sdk-ts';
-import { NETWORK, getLcdUrl, GAS_PRICE_INJ } from './config.ts';
+import { NETWORK, getLcdUrl, GAS_PRICE_INJ, isEvm} from './config.ts';
 import {
   MSG_CREATE_DENOM,
   MSG_MINT,
@@ -17,6 +17,7 @@ import {
   TOKEN_DECIMALS,
   type LaunchPlan,
 } from './createLaunch.ts';
+import type { EvmStage } from './evm/write.ts';
 
 /**
  * Signing and broadcasting a launch.
@@ -751,6 +752,68 @@ export async function broadcastLaunch(opts: {
 }
 
 /**
+ * Maps an EVM stage onto the rail the dialog draws.
+ *
+ * `approving` HAS NO RAIL STEP, DELIBERATELY. `TxDialog`'s list is documented as one
+ * entry per real step and its index IS the progress, so a sixth step that only ever
+ * fires on an EVM sell with an insufficient allowance would draw a stage that cannot
+ * happen on a buy and never happens on CosmWasm at all. The approval prompt is
+ * reported as `signing`, which is exactly what the user is doing - the dialog says
+ * "Approve the transaction in your wallet to continue" and that is true of both
+ * prompts. WHY there are two is said in the trade panel, before they click, which is
+ * where it is useful.
+ */
+export function railStage(onStage: ((s: TxStage) => void) | undefined) {
+  if (!onStage) return undefined;
+  /*
+   * `EvmStage` is imported as a TYPE, so the union has exactly one definition and this
+   * function cannot fall behind it. It costs nothing at runtime: a type import is
+   * erased, so `evm/write.ts` and the viem it pulls in stay off a CosmWasm bundle.
+   * Written out as a literal list here first, and `tsc` caught it the moment
+   * `simulating` was added - a second copy of a union is the same defect as a second
+   * copy of a constant.
+   */
+  return (s: EvmStage) => onStage(s === 'approving' ? 'signing' : s);
+}
+
+/**
+ * Runs an EVM write and turns anything it throws into a translated `BroadcastError`.
+ *
+ * WRAPPED HERE AND NOWHERE ELSE, because this is the one boundary the dialog reads
+ * across. `TxDialog` shows `err.message` verbatim and keeps `err.detail` for a dev
+ * build, so an untranslated throw from viem reaches a trading screen intact: a buy
+ * refused on this build showed the user calldata, an ABI signature, a docs link and
+ * `Version: viem@2.21.54`. The CosmWasm path has had `describeBroadcastFailure` since
+ * a node error reached somebody once; this is the same guarantee on the other backend.
+ *
+ * `EvmPartialBatchError` PASSES THROUGH UNTRANSLATED, and that is the point of it
+ * being its own type: its message is already written for the reader and says which
+ * claims landed. Rewriting it as a generic refusal would lose exactly the fact that
+ * makes it honest.
+ */
+async function runEvm(
+  fn: () => Promise<{ hash: string; height: number }>,
+): Promise<BroadcastOutcome> {
+  try {
+    const r = await fn();
+    /*
+     * `settled: true` is a measurement, not an optimism: the EVM path awaits the
+     * receipt and throws on a reverted one, so reaching here means the chain accepted
+     * it in the block named by `height`.
+     */
+    return { txHash: r.hash, height: r.height, settled: true };
+  } catch (e) {
+    const { EvmPartialBatchError } = await import('./evm/write.ts');
+    if (e instanceof EvmPartialBatchError) {
+      throw new BroadcastError('broadcast', e.message);
+    }
+    const { describeEvmFailure } = await import('./evm/errors.ts');
+    const f = describeEvmFailure(e);
+    throw new BroadcastError(f.rejected ? 'rejected' : 'broadcast', f.message, f.detail);
+  }
+}
+
+/**
  * Signs and broadcasts one contract call.
  *
  * WHY THIS EXISTS. The signing path above was reachable only through a `LaunchPlan`, so
@@ -768,6 +831,25 @@ export async function broadcastExecute(opts: {
   gas?: number;
   onStage?: (stage: TxStage) => void;
 }): Promise<BroadcastOutcome> {
+  /*
+   * THE MESSAGE SHAPE IS THE INTERFACE, which is what lets one branch here serve the
+   * trade panel, the claim page and the create form without any of them changing.
+   * `{ buy: { min_tokens_out } }` describes the intent; whether that becomes a
+   * CosmWasm execute or an ERC-20 call is this function's problem and nobody else's.
+   */
+  if (isEvm()) {
+    return runEvm(async () => {
+      const { executeEvm } = await import('./evm/write.ts');
+      return executeEvm({
+        contract: opts.contract,
+        msg: opts.msg,
+        funds: opts.funds,
+        sender: opts.sender,
+        onStage: railStage(opts.onStage),
+      });
+    });
+  }
+
   return signAndBroadcast({
     msgs: composeMessages(
       {
@@ -816,6 +898,22 @@ export async function broadcastExecuteMany(opts: {
   onStage?: (stage: TxStage) => void;
 }): Promise<BroadcastOutcome> {
   if (opts.calls.length === 0) throw new BroadcastError('simulate', 'Nothing to send.');
+
+  /*
+   * ONE TRANSACTION PER CALL ON THE EVM BACKEND, which is a difference in kind and
+   * not just in transport. The CosmWasm path below puts every message into one
+   * transaction, so a multi-launch claim lands whole or not at all. There is no
+   * equivalent here, so `executeManyEvm` sends them in order and reports a partial
+   * landing as one, rather than letting a failure on the third read as nothing having
+   * happened when the first two moved real money.
+   */
+  if (isEvm()) {
+    return runEvm(async () => {
+      const { executeManyEvm } = await import('./evm/write.ts');
+      return executeManyEvm(opts.calls, opts.sender, railStage(opts.onStage));
+    });
+  }
+
   const perCall = opts.gasPerCall ?? GAS.claim;
   return signAndBroadcast({
     msgs: composeMessages(

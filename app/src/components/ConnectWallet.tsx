@@ -10,7 +10,7 @@ import {
   rememberWallet,
   quoteBalance,
   shortAddress,
-  SUPPORTED,
+  walletOptions,
   WalletError,
   type WalletAccount,
   type WalletName,
@@ -304,11 +304,18 @@ export function ConnectWallet({
 
           {installed !== null && installed.length === 0 && (
             <>
+              {/*
+                  The list comes from `walletOptions()`, which is backend-aware: five
+                  Cosmos extensions on a CosmWasm build, one EIP-1193 row on an EVM
+                  one. Offering Keplr on an EVM deployment would name a wallet that
+                  cannot sign anything this factory accepts.
+                */}
               <p className="note">
-                No Injective wallet found in this browser. Install one of these, then reload.
+                No wallet found in this browser that can sign on {NETWORK.name}. Install one
+                of these, then reload.
               </p>
               <ul className="wallet-list">
-                {SUPPORTED.map((w) => (
+                {walletOptions().map((w) => (
                   <li key={w.name}>
                     <a href={w.install} target="_blank" rel="noopener noreferrer">
                       {w.label}
@@ -321,13 +328,15 @@ export function ConnectWallet({
 
           {installed !== null && installed.length > 0 && (
             <ul className="wallet-list">
-              {SUPPORTED.filter((w) => installed.includes(w.name)).map((w) => (
-                <li key={w.name}>
-                  <button type="button" disabled={busy !== null} onClick={() => void pick(w.name)}>
-                    {busy === w.name ? `Opening ${w.label}…` : w.label}
-                  </button>
-                </li>
-              ))}
+              {walletOptions()
+                .filter((w) => installed.includes(w.name))
+                .map((w) => (
+                  <li key={w.name}>
+                    <button type="button" disabled={busy !== null} onClick={() => void pick(w.name)}>
+                      {busy === w.name ? `Opening ${w.label}…` : w.label}
+                    </button>
+                  </li>
+                ))}
             </ul>
           )}
 

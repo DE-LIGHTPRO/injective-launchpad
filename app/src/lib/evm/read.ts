@@ -25,17 +25,35 @@ const MULTICALL3 = '0xcA11bde05977b3631167028862bE2a173976CA11' as const;
 
 let cached: PublicClient | null = null;
 
+/**
+ * The chain definition, in one place.
+ *
+ * Both the read client here and the wallet client in `evm/wallet.ts` need one, and
+ * they have to agree: a wallet client built on a chain whose id differs from the
+ * one the reads came from would sign for a different network than the page is
+ * showing. Two literals that must match is the shape of defect this project keeps
+ * recording, so there is one literal.
+ */
+export function evmChain() {
+  return {
+    id: Number(NETWORK.chainId),
+    name: 'Injective EVM',
+    nativeCurrency: {
+      name: 'Injective',
+      symbol: NETWORK.gasSymbol,
+      decimals: NETWORK.gasDecimals,
+    },
+    rpcUrls: { default: { http: [NETWORK.lcd] } },
+    blockExplorers: { default: { name: 'InjScan', url: NETWORK.explorer } },
+    contracts: { multicall3: { address: MULTICALL3 } },
+  } as const;
+}
+
 export function evmClient(): PublicClient {
   if (cached) return cached;
   cached = createPublicClient({
     transport: http(NETWORK.lcd, { batch: true }),
-    chain: {
-      id: Number(NETWORK.chainId),
-      name: 'Injective EVM',
-      nativeCurrency: { name: 'Injective', symbol: NETWORK.gasSymbol, decimals: NETWORK.gasDecimals },
-      rpcUrls: { default: { http: [NETWORK.lcd] } },
-      contracts: { multicall3: { address: MULTICALL3 } },
-    },
+    chain: evmChain(),
   }) as PublicClient;
   return cached;
 }

@@ -278,6 +278,13 @@ export async function purchasedFromCurve(
   address: string,
 ): Promise<bigint | null> {
   if (isDemoMode()) return null;
+  /*
+   * The EVM curve keeps this in a public mapping, so there is no raw storage key to
+   * construct and none of the base64 handling below applies.
+   */
+  if (isEvm()) {
+    return (await import('./evm/balances.ts')).purchasedFromCurveEvm(curve, address);
+  }
   const key = base64Bytes(mapEntryKey('purchased', address));
   const url = `${getLcdUrl()}/cosmwasm/wasm/v1/contract/${curve}/raw/${encodeURIComponent(key)}`;
   try {
@@ -1112,6 +1119,18 @@ export async function factoryLaunchFee(): Promise<FactoryFee> {
   const none = { amount: 0n, denom: NETWORK.quoteDenom };
   const factory = getFactoryAddress();
   if (!factory || isDemoMode()) return none;
+  if (isEvm()) {
+    const fee = await (await import('./evm/balances.ts')).launchFeeEvm();
+    /*
+     * An unread fee falls back to zero, which is what this function already does on
+     * the CosmWasm side and is the safe direction here: the factory refuses a
+     * transaction that attaches too little, so under-reporting costs a refusal with
+     * nothing spent, while over-reporting would tell a creator to hold INJ they do
+     * not need. The pre-flight affordability check treats a null balance the same way
+     * and for the same reason.
+     */
+    return fee ?? none;
+  }
   try {
     const raw = await smartQuery<{ launch_fee?: unknown; launch_fee_denom?: unknown }>(
       factory,

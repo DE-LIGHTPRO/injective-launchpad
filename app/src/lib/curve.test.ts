@@ -529,3 +529,34 @@ test('the opening market cap is the figure the curve was scaled for', () => {
   // And it tracks the quote's own scale rather than a constant.
   assert.ok(Math.abs(openingMarketCap(5_354) - 4_989.75) < 1, `${openingMarketCap(5_354)}`);
 });
+
+test('a non-zero amount never renders as "0"', () => {
+  /*
+   * WHAT THIS LOOKED LIKE LIVE. The launch page showed "Curve reserve 0 INJ" while
+   * the chain held 0.00396. fmt truncated to two places, found "00", stripped the
+   * trailing zeros to nothing and fell back to the whole part. A reader cannot tell
+   * that from an empty curve, and the figure it replaced backs every sell.
+   */
+  assert.equal(fmt(3960000000000000n, 18, 2), '0.0039');
+  assert.notEqual(fmt(3960000000000000n, 18, 2), '0');
+
+  // The precision gives way, not the number: enough digits to reach the first
+  // significant one, plus two.
+  assert.equal(fmt(1n, 18, 2), '0.000000000000000001');
+  assert.equal(fmt(5n * 10n ** 12n, 18, 2), '0.000005');
+
+  // Zero still prints as zero, because that is true.
+  assert.equal(fmt(0n, 18, 2), '0');
+  assert.equal(fmt(0n, 18, 0), '0');
+});
+
+test('amounts that already fit are untouched', () => {
+  // The extension must only fire where the requested precision cannot show the
+  // value, or every figure on the site grows digits nobody asked for.
+  assert.equal(fmt(10n ** 18n, 18, 2), '1');
+  assert.equal(fmt(1500000000000000000n, 18, 2), '1.5');
+  assert.equal(fmt(27970000000000000000n, 18, 2), '27.97');
+  assert.equal(fmt(1234567890000000000n, 18, 4), '1.2345');
+  // places: 0 is an explicit request for whole units and keeps its meaning.
+  assert.equal(fmt(3960000000000000n, 18, 0), '0');
+});

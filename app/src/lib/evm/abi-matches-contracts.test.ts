@@ -123,3 +123,93 @@ test('the fees the app reads are the two the contract keeps apart', () => {
     'quoteSell no longer uses the sell fee, which is the original defect',
   );
 });
+
+/**
+ * Errors the Solidity declares, with their argument types.
+ *
+ * `error Name(uint256 got, uint256 max)` yields `Name` -> `['uint256','uint256']`. The
+ * parameter NAMES are dropped on purpose: a selector is keccak of the signature with
+ * types only, so a renamed parameter changes nothing a caller can see, while a changed
+ * type changes the selector and breaks decoding.
+ */
+function declaredErrors(src: string): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  for (const m of src.matchAll(/^\s*error\s+(\w+)\s*\(([^)]*)\)/gm)) {
+    const [, name, params] = m;
+    const types = params
+      .split(',')
+      .map((p) => p.trim().split(/\s+/)[0])
+      .filter((t) => t.length > 0);
+    out.set(name, types);
+  }
+  return out;
+}
+
+/**
+ * EVERY error the contracts can revert with is declared on the ABI, with the right
+ * argument types.
+ *
+ * THE DEFECT THIS EXISTS FOR, and it had no symptom anywhere. The ABIs carried
+ * functions and events and not one `error` entry. A Solidity custom error reaches the
+ * client as four bytes of selector plus its arguments, and viem can only name it if
+ * the ABI declares it - so every revert arrived as a bare "execution reverted" with
+ * raw hex, and all seven branches in `errors.ts` that name a rule the curve enforces
+ * were dead the day they were written. A trader refused for slippage, for the wallet
+ * cap, or for trading not being open yet read a generic sentence while the contract
+ * had explained itself precisely. Exactly the CosmWasm slippage branch that was dead
+ * from the day it was written, one backend over.
+ *
+ * It was found by asking the chain, not by reading the code: `eth_call` of a buy with
+ * an impossible floor returned `0x71c4efed…` and nothing in the app could say what
+ * that was.
+ *
+ * THE LIBRARIES COUNT. `CurveMath` and `PoolMath` revert through the curve, so their
+ * selectors land on a call to `buy` or `sell` and must be declared on the ABI that
+ * call was made with. Checked against the union of the sources below for that reason.
+ */
+function checkErrors(
+  abi: readonly { type: string; name?: string; inputs?: readonly { type: string }[] }[],
+  files: string[],
+  label: string,
+) {
+  const errs = declaredErrors(files.map(source).join('\n'));
+  assert.ok(errs.size > 5, `only ${errs.size} errors found in ${label}, so this measures nothing`);
+
+  const onAbi = new Map(
+    abi.filter((e) => e.type === 'error').map((e) => [e.name!, (e.inputs ?? []).map((i) => i.type)]),
+  );
+
+  for (const [name, types] of errs) {
+    const declared = onAbi.get(name);
+    assert.ok(
+      declared !== undefined,
+      `${label}: the contracts can revert with \`${name}\` and the ABI does not declare it, so viem cannot name it`,
+    );
+    assert.deepEqual(
+      declared,
+      types,
+      `${label}: \`${name}\` takes (${types.join(', ')}) in the contract and (${declared.join(', ')}) on the ABI, which is a different selector`,
+    );
+  }
+
+  // And nothing on the ABI that the contracts do not declare: a stale entry is a name
+  // `errors.ts` could branch on and never reach.
+  for (const name of onAbi.keys()) {
+    assert.ok(
+      errs.has(name),
+      `${label}: the ABI declares \`${name}\`, which the contracts do not`,
+    );
+  }
+}
+
+test('the curve ABI declares every error the curve and its libraries can revert with', () => {
+  checkErrors(CURVE_ABI as never, ['Curve.sol', 'CurveMath.sol', 'PoolMath.sol'], 'curve');
+});
+
+test('the factory ABI declares every error a creation can revert with', () => {
+  checkErrors(
+    FACTORY_ABI as never,
+    ['Factory.sol', 'CurveMath.sol', 'LaunchToken.sol'],
+    'factory',
+  );
+});

@@ -1,4 +1,5 @@
-import { NETWORK, getLcdUrl, GAS_PRICE_INJ } from './config.ts';
+import { NETWORK, getLcdUrl, GAS_PRICE_INJ, isEvm } from './config.ts';
+import { evmWalletAvailable, onEvmAccountChange } from './evm/provider.ts';
 
 /**
  * Wallet connection, over the extensions' own injected API.
@@ -21,11 +22,36 @@ import { NETWORK, getLcdUrl, GAS_PRICE_INJ } from './config.ts';
  * states plainly that it has never run against a chain.
  */
 
-export type WalletName = 'keplr' | 'leap' | 'cosmostation' | 'ninji' | 'owallet';
+export type WalletName = 'keplr' | 'leap' | 'cosmostation' | 'ninji' | 'owallet' | 'evm';
+
+/**
+ * THIS FILE IS THE FACADE FOR BOTH BACKENDS, and that is a deliberate choice about
+ * where the branch lives rather than an absence of one.
+ *
+ * Six components import from here. On the EVM backend an account is a `0x` address
+ * from an EIP-1193 provider; on the CosmWasm backend it is an `inj1…` address from a
+ * Keplr-compatible extension. None of those six cares which - they read `address`,
+ * pass it to a balance read and show it in a header - so the branch belongs at this
+ * boundary, once, not six times above it.
+ *
+ * The implementations do NOT mix: everything EVM lives under `evm/`, and the
+ * functions below dispatch to it on `isEvm()`. What is shared is the shape of the
+ * answer, which is the same reason `evm/read.ts` returns `Launch` and `LaunchDetail`
+ * rather than its own types.
+ *
+ * `'evm'` IS ONE ENTRY, NOT A LIST. On the Cosmos side five extensions each inject
+ * under their own name, so the picker can offer them individually and `available()`
+ * can prove presence by reading the global. EIP-1193 gives one connection point for
+ * all of them: whatever answers at `window.ethereum` is the wallet, and which brand
+ * it is cannot be known before it answers. Listing MetaMask, Rabby and Brave as
+ * three buttons that all do the same thing would be a claim about which one will
+ * respond - the impostor problem `identify()` records below, except invented by us.
+ * `identifyEvmProvider` names it afterwards, in an error, where it is true.
+ */
 
 export interface WalletAccount {
   name: WalletName;
-  /** bech32, `inj1…`. */
+  /** `inj1…` on the CosmWasm backend, `0x…` on the EVM one. */
   address: string;
   /*
    * THE EXTENSION'S ACCOUNT NAME IS DELIBERATELY NOT CARRIED. `getKey` returns it and
@@ -50,8 +76,14 @@ export interface WalletAccount {
    * several of these installed and re-reading `window.keplr` would sign with whichever
    * one is there instead of the one the user chose. With five wallets offered that is
    * not hypothetical.
+   *
+   * ABSENT ON THE EVM BACKEND, which is not an omission. EIP-1193 has one connection
+   * point, so `evmProvider()` re-reading `window.ethereum` can only find the object
+   * that answered in the first place; there is no second candidate to confuse it
+   * with. Optional rather than `unknown`-and-unset so that reaching for it has to be
+   * guarded, instead of silently yielding undefined where a provider was expected.
    */
-  provider: unknown;
+  provider?: unknown;
 }
 
 export class WalletError extends Error {
@@ -191,6 +223,33 @@ export const SUPPORTED: Array<{
   },
 ];
 
+/**
+ * The one EVM row, offered on the EVM backend in place of the five above.
+ *
+ * `install` points at MetaMask because something has to, and it is the wallet most
+ * people without one will install; the connection itself is brand-agnostic, which is
+ * what the label says.
+ */
+export const EVM_WALLET: { name: WalletName; label: string; install: string } = {
+  name: 'evm',
+  label: 'EVM wallet',
+  install: 'https://metamask.io/download',
+};
+
+/**
+ * What the picker should offer on this deployment.
+ *
+ * `SUPPORTED` is still exported, because the Cosmos list is what the tests read and
+ * what `injected()` resolves against. This is what a component renders: asking for
+ * `SUPPORTED` directly on an EVM build would offer five Cosmos extensions that
+ * cannot sign anything this backend accepts.
+ */
+export function walletOptions(): Array<{ name: WalletName; label: string; install: string }> {
+  return isEvm()
+    ? [EVM_WALLET]
+    : SUPPORTED.map((w) => ({ name: w.name, label: w.label, install: w.install }));
+}
+
 function injected(name: WalletName): InjectedWallet | null {
   const meta = SUPPORTED.find((w) => w.name === name);
   if (!meta) return null;
@@ -234,6 +293,10 @@ function injected(name: WalletName): InjectedWallet | null {
  * "no wallet" to the user.
  */
 export function available(): WalletName[] {
+  // Synchronous on both backends, which is why the EVM detection lives in
+  // `evm/provider.ts` rather than behind a dynamic import: this runs on every render
+  // of the connect button.
+  if (isEvm()) return evmWalletAvailable() ? ['evm'] : [];
   return SUPPORTED.filter((w) => injected(w.name) !== null).map((w) => w.name);
 }
 
@@ -264,7 +327,10 @@ export function rememberWallet(name: WalletName | null): void {
 export function lastWallet(): WalletName | null {
   try {
     const v = window.localStorage.getItem(LAST_WALLET_KEY);
-    return SUPPORTED.some((w) => w.name === v) ? (v as WalletName) : null;
+    // Checked against what this deployment can actually connect, not against every
+    // name the union carries. A remembered `keplr` on an EVM build would have
+    // `reconnect` call into a path that cannot serve it.
+    return walletOptions().some((w) => w.name === v) ? (v as WalletName) : null;
   } catch {
     return null;
   }
@@ -282,7 +348,16 @@ export function lastWallet(): WalletName | null {
  */
 export async function reconnect(): Promise<WalletAccount | null> {
   const name = lastWallet();
-  if (!name || !injected(name)) return null;
+  if (!name) return null;
+
+  if (isEvm()) {
+    const { reconnectEvm } = await import('./evm/wallet.ts');
+    const address = await reconnectEvm();
+    // Null is the normal first visit: the provider is there but has granted nothing.
+    return address === null ? null : { name: 'evm', address };
+  }
+
+  if (!injected(name)) return null;
   try {
     return await connect(name);
   } catch {
@@ -320,6 +395,16 @@ export async function reconnect(): Promise<WalletAccount | null> {
  *    the wrong-prefix hazard `finishConnect` already refuses at connect time.
  */
 export async function currentAccount(account: WalletAccount): Promise<WalletAccount | null> {
+  if (isEvm()) {
+    const { currentEvmAccount } = await import('./evm/wallet.ts');
+    const next = await currentEvmAccount();
+    // Same three-way contract as below, and for the same reason: the SAME object when
+    // nothing changed, so the effects keyed on `account` do not re-fire on every
+    // `chainChanged` the wallet emits.
+    if (next === null) return null;
+    return next === account.address ? account : { ...account, address: next };
+  }
+
   const ext = account.provider as InjectedWallet | undefined;
   /*
    * A provider that cannot be asked is reported as unchanged rather than as a
@@ -369,14 +454,53 @@ export function onAccountChange(cb: () => void): () => void {
   for (const name of KEYSTORE_EVENTS) window.addEventListener(name, cb);
   window.addEventListener('focus', cb);
   document.addEventListener('visibilitychange', onVisible);
+  /*
+   * The EVM provider's own events, where there is one. `focus` and
+   * `visibilitychange` above are the mechanism on both backends - switching account
+   * happens in a popup, so coming back to the page is the one thing that always
+   * follows - and these are the fast path, exactly as the keystore events are.
+   */
+  const unbindEvm = isEvm() ? onEvmAccountChange(cb) : () => {};
   return () => {
     for (const name of KEYSTORE_EVENTS) window.removeEventListener(name, cb);
     window.removeEventListener('focus', cb);
     document.removeEventListener('visibilitychange', onVisible);
+    unbindEvm();
   };
 }
 
 export async function connect(name: WalletName): Promise<WalletAccount> {
+  if (isEvm()) {
+    const { connectEvm } = await import('./evm/wallet.ts');
+    try {
+      return { name: 'evm', address: await connectEvm() };
+    } catch (e) {
+      const msg = errorText(e);
+      // `connectEvm` throws this exact marker for EIP-1193 4001, which is the user
+      // closing the prompt. A choice rather than a fault, so it gets its own kind.
+      if (msg === 'rejected') {
+        throw new WalletError('rejected', 'You closed the wallet prompt, so nothing was connected.');
+      }
+      if (/No EVM wallet found/i.test(msg)) {
+        throw new WalletError('absent', 'No EVM wallet found in this browser.');
+      }
+      if (/4902|unrecognized chain|unrecognised chain|chain.*not.*added/i.test(msg)) {
+        throw new WalletError(
+          'wrong-chain',
+          `This wallet could not add Injective EVM (chain ${NETWORK.chainId}). Add it manually, then try again.`,
+          msg,
+        );
+      }
+      /*
+       * The fallback carries the detail, for the reason the Cosmos fallback below
+       * gives: without it this sentence is the only thing anyone sees, including me,
+       * and a real failure becomes undiagnosable. `connectEvm` has already appended
+       * which provider answered.
+       */
+      throw new WalletError('failed', 'The wallet did not open. Unlock it and try again.', msg);
+    }
+  }
+
   const ext = injected(name);
   if (!ext) {
     const meta = SUPPORTED.find((w) => w.name === name);
@@ -560,6 +684,11 @@ export async function quoteBalance(address: string): Promise<bigint | null> {
   return denomBalance(address, NETWORK.quoteDenom);
 }
 
+/** The EVM reads, loaded only on an EVM build. */
+async function evmBalances() {
+  return import('./evm/balances.ts');
+}
+
 /**
  * Any denom's balance, in base units, or null when it could not be read.
  *
@@ -570,6 +699,7 @@ export async function quoteBalance(address: string): Promise<bigint | null> {
  * than an error, so a real zero is still a real zero.
  */
 export async function denomBalance(address: string, denom: string): Promise<bigint | null> {
+  if (isEvm()) return (await evmBalances()).denomBalanceEvm(address, denom);
   const url = `${getLcdUrl()}/cosmos/bank/v1beta1/balances/${address}/by_denom?denom=${encodeURIComponent(denom)}`;
   let res: Response;
   try {
@@ -626,6 +756,7 @@ const BALANCE_PAGE_CAP = 10;
  * what we had would be the original defect with extra steps.
  */
 export async function allBalances(address: string): Promise<Record<string, bigint> | null> {
+  if (isEvm()) return (await evmBalances()).allBalancesEvm(address);
   const out: Record<string, bigint> = {};
   let key: string | null = null;
 

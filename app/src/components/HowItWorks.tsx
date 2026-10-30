@@ -1,4 +1,4 @@
-import { NETWORK } from '@/lib/config';
+import { isEvm, NETWORK } from '@/lib/config';
 import { MAX_EARLY_FEE_BPS } from '@/lib/launchRules';
 import { StepCreate, StepTrade, StepGraduate } from './StepArt';
 import Image from 'next/image';
@@ -42,9 +42,22 @@ export function HowItWorks() {
             <span className="step-n">Step one</span>
             <div>
               <strong>Create</strong>
+              {/*
+                  TWO BACKENDS, TWO TRUE SENTENCES, and the first one is false on the
+                  other chain. On Injective's native side a token is a tokenfactory
+                  denom whose ADMIN can mint without limit, so the launch has to move
+                  that key somewhere no code can use it - which is what "hands the mint
+                  key to the launch contract" describes, and it is a careful guarantee.
+                  On the EVM side `LaunchToken` has no mint function at all: the supply
+                  is minted once in the constructor and there is no key to hand over.
+                  Saying there is would describe a safeguard that does not exist, for a
+                  property that is in fact stronger. See the comment at the top of
+                  `evm/src/LaunchToken.sol`.
+                */}
               <p className="note">
-                The creator mints a fixed 1B supply and hands all of it, and the mint key,
-                to the launch contract.
+                {isEvm()
+                  ? 'The creator deploys a token whose entire 1B supply is minted once, to the launch contract. There is no mint function anywhere in it, so the supply cannot change.'
+                  : 'The creator mints a fixed 1B supply and hands all of it, and the mint key, to the launch contract.'}
               </p>
             </div>
           </li>
@@ -107,7 +120,12 @@ export function HowItWorks() {
             <strong>
               <CheckIcon size={15} />
               Fixed supply</strong>
-            <p className="note">The mint key ends with the launch contract, which cannot mint.</p>
+            {/* The same distinction as step one, and for the same reason. */}
+            <p className="note">
+              {isEvm()
+                ? 'The token has no mint function, so no supply can ever be added.'
+                : 'The mint key ends with the launch contract, which cannot mint.'}
+            </p>
           </div>
           <div>
             <strong>

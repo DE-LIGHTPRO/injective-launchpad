@@ -816,8 +816,30 @@ export function fmt(raw: bigint, decimals = 18, places = 4): string {
   const whole = raw / base;
   const frac = raw % base;
   if (places === 0) return whole.toLocaleString();
-  const fracStr = frac.toString().padStart(decimals, '0').slice(0, places).replace(/0+$/, '');
-  return fracStr ? `${whole.toLocaleString()}.${fracStr}` : whole.toLocaleString();
+  const padded = frac.toString().padStart(decimals, '0');
+  const fracStr = padded.slice(0, places).replace(/0+$/, '');
+  if (fracStr) return `${whole.toLocaleString()}.${fracStr}`;
+
+  /*
+   * A NON-ZERO AMOUNT MUST NEVER RENDER AS "0".
+   *
+   * Truncating to `places` and stripping trailing zeros turned a real curve reserve
+   * of 0.00396 INJ into "0" on the live launch page, under the heading "Curve
+   * reserve". A reader cannot tell that from an empty curve, and the figure it was
+   * replacing is the one that backs every sell.
+   *
+   * So when the value is positive and the requested precision cannot show it, the
+   * precision gives way rather than the number: enough digits to reach the first
+   * significant one, plus two. Zero still prints as "0", because that is true.
+   */
+  if (whole === 0n && raw > 0n) {
+    const firstSignificant = padded.search(/[1-9]/);
+    if (firstSignificant >= 0) {
+      const extended = padded.slice(0, firstSignificant + 2).replace(/0+$/, '');
+      if (extended) return `0.${extended}`;
+    }
+  }
+  return whole.toLocaleString();
 }
 
 /** Parse a human amount like "1.5" into a raw 18-decimal bigint. */

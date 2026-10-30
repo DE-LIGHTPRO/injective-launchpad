@@ -21,7 +21,7 @@ import {
   type CurveState,
   type PoolReserves,
 } from '@/lib/curve';
-import { NETWORK } from '@/lib/config';
+import { isEvm, NETWORK } from '@/lib/config';
 import { isDemoMode } from '@/lib/demo';
 import {
   buyingOpenAt,
@@ -433,9 +433,18 @@ export function TradePanel({
                 ? { buy: { min_tokens_out: minOut.toString() } }
                 : { sell: { min_inj_out: minOut.toString() } },
             /*
-             * A buy attaches quote, a sell attaches the token itself: this curve takes
-             * payment by attachment on both sides, so neither needs an allowance and
-             * neither can be spent without the trade happening in the same transaction.
+             * A buy attaches quote, a sell attaches the token itself.
+             *
+             * ON COSMWASM that is literal: the curve takes payment by attachment on
+             * both sides, so neither needs an allowance and neither can be spent
+             * without the trade happening in the same transaction.
+             *
+             * ON THE EVM BACKEND there is no attachment for a token. `funds` still
+             * describes the intent - this much of this asset - and `executeEvm`
+             * translates it: a buy carries it as `value`, and a sell approves exactly
+             * that amount and then calls `sell`. Two prompts, which the note below the
+             * button says before the user clicks rather than after their wallet opens
+             * twice.
              */
             funds: [
               {
@@ -927,6 +936,29 @@ export function TradePanel({
       )}
 
       <TxDialog flow={tx} />
+
+      {/*
+          SAID BEFORE THE CLICK, NOT DURING IT. An ERC-20 cannot be attached to a
+          call, so the curve has to be allowed to take the tokens first: a sell here
+          is an approval transaction and then the sale. The dialog reports both as
+          "Your wallet", which is accurate, and does not explain why there are two -
+          a rail step for it would draw a stage that never happens on a buy. This is
+          the place where knowing it is useful.
+
+          Only on a sell, only on the EVM backend, and only with an account: a buy is
+          one transaction and the CosmWasm curve takes both sides by attachment.
+
+          The approval is for EXACTLY this sale's amount. That is worth stating on
+          the screen rather than only in `write.ts`, because every other dapp the
+          reader has used asked for an unlimited one.
+        */}
+      {!isDemoMode() && isEvm() && side === 'sell' && account && (
+        <p className="note">
+          Selling takes two wallet prompts: the first allows the curve to take exactly
+          the {symbol} you are selling and nothing more, the second makes the sale. If
+          you have already allowed enough from an earlier sell, only one appears.
+        </p>
+      )}
 
       <p className="note">
         {isDemoMode()
